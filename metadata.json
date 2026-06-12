@@ -1,0 +1,6 @@
+{
+  "name": "Order Registration and Tracking",
+  "description": "A high-fidelity multi-role application for order registration by sales agents, manager approval, and factory shipping/vehicle assignment.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
