@@ -656,6 +656,22 @@ export function getRedisClient(): any {
 }
 
 /**
+ * Ensures a column exists in a specific table for MariaDB/MySQL.
+ */
+async function ensureColumnExists(db: mysql.Pool, tableName: string, columnName: string, columnDefinition: string) {
+  try {
+    const [columns] = await db.query(`SHOW COLUMNS FROM ${tableName} LIKE ?`, [columnName]);
+    if ((columns as any[]).length === 0) {
+      console.log(`🔧 [Migration] Column '${columnName}' is missing in table '${tableName}'. Adding it...`);
+      await db.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+      console.log(`✅ [Migration] Column '${columnName}' successfully added to table '${tableName}'.`);
+    }
+  } catch (err: any) {
+    console.error(`⚠️ [Migration Error] Could not ensure column '${columnName}' in '${tableName}':`, err.message);
+  }
+}
+
+/**
  * Utility to test database readiness and create tables if they do not exist.
  * This is perfect for initial bootstrapping on Ubuntu.
  */
@@ -750,6 +766,31 @@ export async function bootstrapDatabase() {
         FOREIGN KEY (orderId) REFERENCES orders(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+
+    // --- Automated Schema Migration / Repair Block ---
+    console.log("🔄 [Bootstrap] Verifying table schemas and performing automatic migrations...");
+    await ensureColumnExists(db, "products", "description", "TEXT");
+    await ensureColumnExists(db, "products", "weight", "VARCHAR(50)");
+    await ensureColumnExists(db, "products", "dimensions", "VARCHAR(50)");
+    await ensureColumnExists(db, "products", "coverageInfo", "VARCHAR(150)");
+    await ensureColumnExists(db, "products", "isEnabled", "TINYINT(1) DEFAULT 1");
+
+    await ensureColumnExists(db, "agents", "address", "TEXT");
+    await ensureColumnExists(db, "agents", "area", "VARCHAR(100)");
+    await ensureColumnExists(db, "agents", "isEnabled", "TINYINT(1) DEFAULT 1");
+
+    await ensureColumnExists(db, "shipping_companies", "managerName", "VARCHAR(150)");
+    await ensureColumnExists(db, "shipping_companies", "isEnabled", "TINYINT(1) DEFAULT 1");
+
+    await ensureColumnExists(db, "orders", "sentToFactoryAt", "VARCHAR(50) NULL");
+    await ensureColumnExists(db, "orders", "priorityIndex", "INT DEFAULT 0");
+    await ensureColumnExists(db, "orders", "rejectionReason", "TEXT");
+    await ensureColumnExists(db, "orders", "vehicleType", "VARCHAR(100) NULL");
+    await ensureColumnExists(db, "orders", "driverName", "VARCHAR(100) NULL");
+    await ensureColumnExists(db, "orders", "driverPhone", "VARCHAR(20) NULL");
+    await ensureColumnExists(db, "orders", "licensePlate", "VARCHAR(50) NULL");
+    await ensureColumnExists(db, "orders", "shippingAgency", "VARCHAR(150) NULL");
+    await ensureColumnExists(db, "orders", "estimatedArrival", "VARCHAR(100) NULL");
 
     console.log("✅ [Bootstrap] MariaDB tables checked and synchronized successfully!");
 

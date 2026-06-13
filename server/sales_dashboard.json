@@ -59,6 +59,18 @@
       "dimensions": "۲۵ × ۲۰ × ۴۰ سانتی‌متر",
       "coverageInfo": "۱۰ قالب در هر مترمربع سقف",
       "isEnabled": 1
+    },
+    {
+      "id": "prod-test-1781362022114",
+      "name": "محصول آزمایشی سقف طبرستان",
+      "category": "roofing",
+      "pricePerUnit": 145000,
+      "unit": "عدد",
+      "description": "محصول شبیه‌سازی شده آزمایشی",
+      "weight": "۳ کیلوگرم",
+      "dimensions": "۳۰ × ۴۰ سانتی‌متر",
+      "coverageInfo": "۱۴ عدد",
+      "isEnabled": 1
     }
   ],
   "agents": [
@@ -110,6 +122,16 @@
       "phoneNumber": "09120000000",
       "address": "آدرس تستی",
       "area": "منطقه تستی",
+      "isEnabled": 1
+    },
+    {
+      "id": "ag-test-1781362022061",
+      "fullName": "نماینده تستی مستقیم",
+      "alias": "برند تستی مستقیم",
+      "agentCode": "TEST-455",
+      "phoneNumber": "09121111111",
+      "address": "آدرس فرضی تستی",
+      "area": "منطقه فرضی",
       "isEnabled": 1
     }
   ],
