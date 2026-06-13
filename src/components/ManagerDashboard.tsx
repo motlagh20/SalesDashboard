@@ -102,9 +102,11 @@ export default function ManagerDashboard({
   const [newAgentPhone, setNewAgentPhone] = useState('');
   const [newAgentAddress, setNewAgentAddress] = useState('');
   const [newAgentArea, setNewAgentArea] = useState('');
+  const [autoGenAgentCode, setAutoGenAgentCode] = useState(true);
 
   // Auto-generate agent code on mount or when the agents list updates
   useEffect(() => {
+    if (!autoGenAgentCode) return;
     let maxNum = 1000;
     if (agents && agents.length > 0) {
       agents.forEach(a => {
@@ -118,7 +120,7 @@ export default function ManagerDashboard({
       });
     }
     setNewAgentCode(`TBN-${maxNum + 1}`);
-  }, [agents]);
+  }, [agents, autoGenAgentCode]);
 
   // Form: Create Product state
   const [newProdName, setNewProdName] = useState('');
@@ -868,18 +870,40 @@ export default function ManagerDashboard({
                     <label className="block text-slate-600 text-[10px] font-bold">
                       کد یکتای نمایندگی: <span className="text-rose-500">*</span>
                     </label>
-                    <span className="text-[9px] font-sans font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50">
-                      ایجاد خودکار سیستم
-                    </span>
+                    <label className="flex items-center gap-1 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={autoGenAgentCode}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setAutoGenAgentCode(checked);
+                          if (!checked) {
+                            setNewAgentCode('');
+                          }
+                        }}
+                        className="w-3.5 h-3.5 text-emerald-600 accent-emerald-600 cursor-pointer"
+                      />
+                      <span className="text-[10px] text-slate-500 font-sans font-medium">ایجاد خودکار</span>
+                    </label>
                   </div>
-                  <input
-                    type="text"
-                    readOnly
-                    placeholder="TBN-1001"
-                    value={newAgentCode}
-                    className="w-full bg-slate-100/80 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-500 font-mono text-left focus:outline-none cursor-not-allowed border-dashed"
-                    title="کد یکتا به شکل خودکار توسط الگوریتم توالی سیستم تعیین می‌شود"
-                  />
+                  {autoGenAgentCode ? (
+                    <input
+                      type="text"
+                      readOnly
+                      placeholder="TBN-1001"
+                      value={newAgentCode}
+                      className="w-full bg-slate-100/80 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-500 font-mono text-left focus:outline-none cursor-not-allowed border-dashed"
+                      title="کد یکتا به شکل خودکار توسط الگوریتم توالی سیستم تعیین می‌شود"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="مثال: AG-2500"
+                      value={newAgentCode}
+                      onChange={(e) => setNewAgentCode(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
