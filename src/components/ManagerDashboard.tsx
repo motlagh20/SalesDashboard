@@ -162,24 +162,47 @@ export default function ManagerDashboard({
   // Agent submit form
   const handleAgentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAgentName.trim() || !newAgentAlias.trim() || !newAgentCode.trim()) {
-      showToast('لطفاً کلیه مشخصات اساسی نمایندگی را تکمیل نمایید.', 'error');
+    const name = newAgentName.trim();
+    const alias = newAgentAlias.trim();
+    const code = newAgentCode.trim();
+    const phone = newAgentPhone.trim();
+    const address = newAgentAddress.trim();
+    const area = newAgentArea.trim();
+
+    if (!name) {
+      showToast('لطفاً نام نماینده را وارد نمایید.', 'error');
+      return;
+    }
+    if (!alias) {
+      showToast('لطفاً نام برند یا نام مستعار نمایندگی را وارد نمایید.', 'error');
+      return;
+    }
+    if (!code) {
+      showToast('لطفاً کد یکتای نمایندگی را وارد نمایید.', 'error');
+      return;
+    }
+    if (!phone) {
+      showToast('لطفاً شماره تماس ارتباطی نمایندگی را وارد نمایید.', 'error');
+      return;
+    }
+    if (!address) {
+      showToast('لطفاً آدرس دقیق انبار نمایندگی را وارد نمایید.', 'error');
       return;
     }
 
-    if (agents.some(a => a.agentCode === newAgentCode.trim())) {
+    if (agents.some(a => a.agentCode.toUpperCase() === code.toUpperCase())) {
       showToast('این کد نمایندگی قبلاً تعریف شده است.', 'error');
       return;
     }
 
     const newAgentObject: Agent = {
       id: `ag-${Date.now()}`,
-      fullName: newAgentName.trim(),
-      alias: newAgentAlias.trim(),
-      agentCode: newAgentCode.trim(),
-      phoneNumber: newAgentPhone.trim(),
-      address: newAgentAddress.trim(),
-      area: newAgentArea.trim() || 'نامشخص',
+      fullName: name,
+      alias: alias,
+      agentCode: code,
+      phoneNumber: phone,
+      address: address,
+      area: area || 'نامشخص',
       isEnabled: true,
     };
 
@@ -198,8 +221,23 @@ export default function ManagerDashboard({
   // Product submit form
   const handleProductSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProdName.trim() || !newProdPrice || !newProdUnit) {
-      showToast('لطفاً نام محصول، قیمت و واحد فروش را مشخص نمایید.', 'error');
+    const name = newProdName.trim();
+    const price = newProdPrice;
+    const unit = newProdUnit.trim();
+    const desc = newProdDesc.trim();
+    const weight = newProdWeight.trim();
+    const dims = newProdDimensions.trim();
+
+    if (!name) {
+      showToast('لطفاً نام کالا را وارد نمایید.', 'error');
+      return;
+    }
+    if (!price || price <= 0) {
+      showToast('لطفاً قیمت معتبری برای کالا تعیین نمایید.', 'error');
+      return;
+    }
+    if (!unit) {
+      showToast('لطفاً واحد شمارش کالا را انتخاب نمایید.', 'error');
       return;
     }
 
@@ -209,13 +247,13 @@ export default function ManagerDashboard({
 
     const newProductObject: Product = {
       id: `prod-${Date.now()}`,
-      name: newProdName.trim(),
+      name: name,
       category: newProdCategory,
-      pricePerUnit: Number(newProdPrice),
-      unit: newProdUnit,
-      description: newProdDesc.trim() || 'محصول سفالی درجه یک مناسب کاربری صنعتی و مسکونی.',
-      weight: newProdWeight.trim() || undefined,
-      dimensions: newProdDimensions.trim() || undefined,
+      pricePerUnit: Number(price),
+      unit: unit,
+      description: desc || 'محصول سفالی درجه یک مناسب کاربری صنعتی و مسکونی.',
+      weight: weight || undefined,
+      dimensions: dims || undefined,
       coverageInfo: coverageInfoStr,
       isEnabled: true,
     };
@@ -236,22 +274,35 @@ export default function ManagerDashboard({
   // Shipping Company submit form
   const handleShippingCompanySubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSCName.trim() || !newSCCode.trim() || !newSCPhone.trim()) {
-      showToast('لطفاً نام شرکت حمل‌ و نقل، کد و شماره تماس را وارد نمایید.', 'error');
+    const name = newSCName.trim();
+    const code = newSCCode.trim();
+    const phone = newSCPhone.trim();
+    const manager = newSCManagerName.trim();
+
+    if (!name) {
+      showToast('لطفاً نام آژانس حمل و نقل را وارد نمایید.', 'error');
+      return;
+    }
+    if (!code) {
+      showToast('لطفاً کد ترابری آژانس را وارد نمایید.', 'error');
+      return;
+    }
+    if (!phone) {
+      showToast('لطفاً شماره تماس پشتیبانی را وارد نمایید.', 'error');
       return;
     }
 
-    if (shippingCompanies.some(sc => sc.code.toUpperCase() === newSCCode.trim().toUpperCase())) {
+    if (shippingCompanies.some(sc => sc.code.toUpperCase() === code.toUpperCase())) {
       showToast('این کد شرکت حمل و نقل قبلاً ثبت شده است.', 'error');
       return;
     }
 
     const newCompany: ShippingCompany = {
       id: `sc-${Date.now()}`,
-      name: newSCName.trim(),
-      code: newSCCode.trim().toUpperCase(),
-      phoneNumber: newSCPhone.trim(),
-      managerName: newSCManagerName.trim() || 'نامشخص',
+      name: name,
+      code: code.toUpperCase(),
+      phoneNumber: phone,
+      managerName: manager || 'نامشخص',
       isEnabled: true
     };
 
@@ -756,17 +807,25 @@ export default function ManagerDashboard({
 
             {/* Right Box: Register agent Form (Take 5 columns) */}
             <div className="lg:col-span-5 bg-slate-50 p-4 md:p-5 rounded-xl border border-slate-200 shadow-inner">
-              <h4 className="font-bold text-slate-800 text-xs flex items-center justify-end gap-1 mb-4">
+              <h4 
+                onClick={() => {
+                  const form = document.getElementById('agent-registration-form') as HTMLFormElement;
+                  if (form) form.requestSubmit();
+                }}
+                className="font-bold text-slate-800 hover:text-emerald-700 text-xs flex items-center justify-end gap-1 mb-4 cursor-pointer select-none transition-colors border-b border-slate-200/60 pb-2"
+                title="برای ارسال فرم کلیک کنید"
+              >
                 <span>افزودن و ثبت پروتکل نمایندگی جدید</span>
                 <PlusCircle className="w-4 h-4 text-emerald-600" />
               </h4>
 
-              <form onSubmit={handleAgentSubmit} className="space-y-3.5">
+              <form id="agent-registration-form" onSubmit={handleAgentSubmit} className="space-y-3.5">
                 <div>
-                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">نام و نام خانوادگی نماینده مسئول:</label>
+                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">
+                    نام و نام خانوادگی نماینده مسئول: <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="text"
-                    required
                     placeholder="مثال: آقای محمدی"
                     value={newAgentName}
                     onChange={(e) => setNewAgentName(e.target.value)}
@@ -775,10 +834,11 @@ export default function ManagerDashboard({
                 </div>
 
                 <div>
-                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">نام مستعار یا برند نمایندگی (جهت نمایش):</label>
+                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">
+                    نام مستعار یا برند نمایندگی (جهت نمایش): <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="text"
-                    required
                     placeholder="مثال: نمایندگی مازندران (احمد‌نژاد)"
                     value={newAgentAlias}
                     onChange={(e) => setNewAgentAlias(e.target.value)}
@@ -787,10 +847,11 @@ export default function ManagerDashboard({
                 </div>
 
                 <div>
-                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">کد یکتای نمایندگی:</label>
+                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">
+                    کد یکتای نمایندگی: <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="text"
-                    required
                     placeholder="مثال: AG-2342"
                     value={newAgentCode}
                     onChange={(e) => setNewAgentCode(e.target.value)}
@@ -800,10 +861,11 @@ export default function ManagerDashboard({
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">شماره ارتباطی نمایندگی:</label>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">
+                      شماره ارتباطی نمایندگی: <span className="text-rose-500">*</span>
+                    </label>
                     <input
                       type="text"
-                      required
                       placeholder="0911..."
                       value={newAgentPhone}
                       onChange={(e) => setNewAgentPhone(e.target.value)}
@@ -823,10 +885,11 @@ export default function ManagerDashboard({
                 </div>
 
                 <div>
-                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">آدرس دقیق انبار نمایندگی:</label>
+                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">
+                    آدرس دقیق انبار نمایندگی: <span className="text-rose-500">*</span>
+                  </label>
                   <textarea
                     rows={2}
-                    required
                     placeholder="نشانی کامل دفتر یا انبار بارگیری مجدد نمایندگی..."
                     value={newAgentAddress}
                     onChange={(e) => setNewAgentAddress(e.target.value)}
@@ -836,10 +899,11 @@ export default function ManagerDashboard({
 
                 <button
                   type="submit"
-                  className="w-full bg-slate-850 hover:bg-slate-900 text-white font-bold py-2 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  id="agent-submit-btn"
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>ثبت و صدور مجوز نمایندگی</span>
+                  <span>افزودن و ثبت پروتکل نمایندگی جدید</span>
                 </button>
               </form>
             </div>
@@ -927,17 +991,25 @@ export default function ManagerDashboard({
 
             {/* Right Box: Register new Product form (Take 5 columns) */}
             <div className="lg:col-span-5 bg-slate-50 p-4 md:p-5 rounded-xl border border-slate-200 shadow-inner">
-              <h4 className="font-bold text-slate-800 text-xs flex items-center justify-end gap-1 mb-4">
+              <h4 
+                onClick={() => {
+                  const form = document.getElementById('product-registration-form') as HTMLFormElement;
+                  if (form) form.requestSubmit();
+                }}
+                className="font-bold text-slate-800 hover:text-emerald-700 text-xs flex items-center justify-end gap-1 mb-4 cursor-pointer select-none transition-colors border-b border-slate-200/60 pb-2"
+                title="برای ارسال فرم کلیک کنید"
+              >
                 <span>تعریف کالای جدید کارخانه با مشخصات</span>
                 <FolderPlus className="w-4 h-4 text-emerald-600" />
               </h4>
 
-              <form onSubmit={handleProductSubmit} className="space-y-3.5">
+              <form id="product-registration-form" onSubmit={handleProductSubmit} className="space-y-3.5">
                 <div>
-                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">نام و عنوان محصول سفالی جدید:</label>
+                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">
+                    نام و عنوان محصول سفالی جدید: <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="text"
-                    required
                     placeholder="مثال: سفال سقف لعاب‌دار آبی فیروزه‌ای"
                     value={newProdName}
                     onChange={(e) => setNewProdName(e.target.value)}
@@ -959,7 +1031,7 @@ export default function ManagerDashboard({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">واحد شمارش فروش:</label>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">واحد شمارش فروش: <span className="text-rose-500">*</span></label>
                     <select
                       value={newProdUnit}
                       onChange={(e) => setNewProdUnit(e.target.value)}
@@ -975,10 +1047,9 @@ export default function ManagerDashboard({
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">قیمت هر واحد (تومان):</label>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">قیمت هر واحد (تومان): <span className="text-rose-500">*</span></label>
                     <input
                       type="number"
-                      required
                       min="1"
                       placeholder="مثال: ۱۵۰۰۰"
                       value={newProdPrice}
@@ -1046,10 +1117,11 @@ export default function ManagerDashboard({
 
                 <button
                   type="submit"
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  id="product-submit-btn"
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>ثبت و انژکت محصول به کل چرخه</span>
+                  <span>تعریف و ثبت کالای جدید کارخانه</span>
                 </button>
               </form>
             </div>
@@ -1139,17 +1211,23 @@ export default function ManagerDashboard({
             {/* Left block: Create Company Form (1/3 width) */}
             <div className="space-y-4">
               <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-xs font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-4 flex items-center justify-end gap-1.5">
+                <h3 
+                  onClick={() => {
+                    const form = document.getElementById('shipping-registration-form') as HTMLFormElement;
+                    if (form) form.requestSubmit();
+                  }}
+                  className="text-xs font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-4 flex items-center justify-end gap-1.5 cursor-pointer select-none hover:text-emerald-700 transition-colors"
+                  title="برای ارسال فرم کلیک کنید"
+                >
                   <span>تعریف آژانس حمل و نقل همکار جدید</span>
                   <PlusCircle className="w-4 h-4 text-emerald-600" />
                 </h3>
 
-                <form onSubmit={handleShippingCompanySubmit} className="space-y-4 text-right">
+                <form id="shipping-registration-form" onSubmit={handleShippingCompanySubmit} className="space-y-4 text-right">
                   <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">نام شرکت حمل و نقل:</label>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">نام شرکت حمل و نقل: <span className="text-rose-500">*</span></label>
                     <input
                       type="text"
-                      required
                       placeholder="مثال: ترابری جهان گستر شمال"
                       value={newSCName}
                       onChange={(e) => setNewSCName(e.target.value)}
@@ -1158,14 +1236,13 @@ export default function ManagerDashboard({
                   </div>
 
                   <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">کد یکتا ترابری (به انگلیسی):</label>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">کد یکتا ترابری (به انگلیسی): <span className="text-rose-500">*</span></label>
                     <input
                       type="text"
-                      required
                       placeholder="مثال: TRANS-NORTH"
                       value={newSCCode}
                       onChange={(e) => setNewSCCode(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-850 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-855 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
                     />
                   </div>
 
@@ -1181,10 +1258,9 @@ export default function ManagerDashboard({
                   </div>
 
                   <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">تلفن پشتیبانی و هماهنگی:</label>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">تلفن پشتیبانی و هماهنگی: <span className="text-rose-500">*</span></label>
                     <input
                       type="text"
-                      required
                       placeholder="مثال: 01133224422"
                       value={newSCPhone}
                       onChange={(e) => setNewSCPhone(e.target.value)}
@@ -1194,10 +1270,11 @@ export default function ManagerDashboard({
 
                   <button
                     type="submit"
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    id="shipping-submit-btn"
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow"
                   >
                     <Plus className="w-4 h-4" />
-                    <span>افزودن و فعال‌سازی شرکت حمل</span>
+                    <span>تعریف و افزودن آژانس حمل و نقل جدید</span>
                   </button>
                 </form>
               </div>
