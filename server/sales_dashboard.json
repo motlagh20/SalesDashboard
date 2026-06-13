@@ -1,0 +1,314 @@
+{
+  "products": [
+    {
+      "id": "prod-1",
+      "name": "سفال سقف طبرستان (طرح کلاسیک)",
+      "category": "roofing",
+      "pricePerUnit": 145000,
+      "unit": "عدد",
+      "description": "مقاومت بسیار بالا در برابر تغییرات جوی و یخبندان، عایق حرارتی و رطوبتی فوق‌العاده با لعاب طبیعی.",
+      "weight": "۳.۱ کیلوگرم",
+      "dimensions": "۳۰ × ۴۲ سانتی‌متر",
+      "coverageInfo": "۱۴ عدد در هر مترمربع",
+      "isEnabled": 1
+    },
+    {
+      "id": "prod-2",
+      "name": "آجر سفال ۱۰ سانتی طبرستان (تیغه)",
+      "category": "bricks",
+      "pricePerUnit": 3400,
+      "unit": "قالب",
+      "description": "جهت دیوارهای داخلی و فضاهای کم‌عرض، پخت با کوره تمام اتوماتیک هافمن و ابعاد کاملاً گونیا.",
+      "weight": "۲.۲ کیلوگرم",
+      "dimensions": "۱۰ × ۲۰ × ۲۰ سانتی‌متر",
+      "coverageInfo": "۲۵ قالب در هر مترمربع تیغه",
+      "isEnabled": 1
+    },
+    {
+      "id": "prod-3",
+      "name": "آجر سفال ۱۵ سانتی درجه یک طبرستان",
+      "category": "bricks",
+      "pricePerUnit": 4800,
+      "unit": "قالب",
+      "description": "بهترین گزینه برای دیوارهای خارجی باغ، ویلا و آپارتمان جهت عایق‌بندی صوتی و حرارتی پیشرفته.",
+      "weight": "۳.۳ کیلوگرم",
+      "dimensions": "۱۵ × ۲۰ × ۲۰ سانتی‌متر",
+      "coverageInfo": "۲۵ قالب در هر مترمربع دیوار",
+      "isEnabled": 1
+    },
+    {
+      "id": "prod-4",
+      "name": "آجر نما نسوز سموتی طبرستان",
+      "category": "facade",
+      "pricePerUnit": 12500,
+      "unit": "قالب",
+      "description": "مقاومت حرارتی بیش از ۱۲۰۰ درجه سانتی‌گراد، رنگ ثابت و مقاوم در برابر باران‌های اسیدی و شوره‌زدگی.",
+      "weight": "۰.۸ کیلوگرم",
+      "dimensions": "۵.۵ × ۲.۵ × ۲۶ سانتی‌متر",
+      "coverageInfo": "۴۰ قالب در هر مترمربع با بندکشی",
+      "isEnabled": 1
+    },
+    {
+      "id": "prod-5",
+      "name": "تیغه سفال سقفی ۲۵ طبرستان (بلوک سقفی)",
+      "category": "bricks",
+      "pricePerUnit": 9500,
+      "unit": "قالب",
+      "description": "تولید شده با رس مرغوب شسته شده، مقاومت فشاری بالا و ایده آل برای سقف‌های تیرچه بلوک صنعتی.",
+      "weight": "۷.۵ کیلوگرم",
+      "dimensions": "۲۵ × ۲۰ × ۴۰ سانتی‌متر",
+      "coverageInfo": "۱۰ قالب در هر مترمربع سقف",
+      "isEnabled": 1
+    }
+  ],
+  "agents": [
+    {
+      "id": "ag-1",
+      "fullName": "آقای حمیدرضا احمدی",
+      "alias": "نمایندگی تهران (احمدی)",
+      "agentCode": "AG-9081",
+      "phoneNumber": "09121111111",
+      "address": "تهران، ابتدای جاده قدیم کرج، مجتمع تجاری پایتخت، پلاک ۱۲",
+      "area": "استان تهران و حومه البرز",
+      "isEnabled": 1
+    },
+    {
+      "id": "ag-2",
+      "fullName": "آقای علیرضا رجایی",
+      "alias": "نمایندگی اصفهان (رجایی)",
+      "agentCode": "AG-6055",
+      "phoneNumber": "09132222222",
+      "address": "اصفهان، بلوار فرودگاه، نرسیده به شهرک صنعتی جی، پلاک ۴۶",
+      "area": "استان اصفهان و یزد",
+      "isEnabled": 1
+    },
+    {
+      "id": "ag-3",
+      "fullName": "آقای سهراب پوربخش",
+      "alias": "نمایندگی رشت (پوربخش)",
+      "agentCode": "AG-2019",
+      "phoneNumber": "09113333333",
+      "address": "گیلان، رشت، کیلومتر ۵ جاده انزلی، جنب انبار فومن‌شیمی",
+      "area": "استان گیلان و غربی مازندران",
+      "isEnabled": 1
+    },
+    {
+      "id": "ag-4",
+      "fullName": "آقای کریم نمازی",
+      "alias": "نمایندگی شیراز (نمازی)",
+      "agentCode": "AG-7023",
+      "phoneNumber": "09174444444",
+      "address": "فارس، شیراز، بلوار امیرکبیر، روبروی باغ جنت، مجتمع سفال",
+      "area": "استان فارس و استان بوشهر",
+      "isEnabled": 1
+    },
+    {
+      "id": "ag-test-1781361377606",
+      "fullName": "نماینده تستی",
+      "alias": "برند تستی",
+      "agentCode": "TBN-2682",
+      "phoneNumber": "09120000000",
+      "address": "آدرس تستی",
+      "area": "منطقه تستی",
+      "isEnabled": 1
+    }
+  ],
+  "shipping_companies": [
+    {
+      "id": "sc-1",
+      "name": "باربری ترانزیت طبرستان",
+      "code": "SC-101",
+      "phoneNumber": "01133334444",
+      "managerName": "آقای صالحی",
+      "isEnabled": 1
+    },
+    {
+      "id": "sc-2",
+      "name": "باربری زاینده‌رود طبرستان",
+      "code": "SC-102",
+      "phoneNumber": "01133335555",
+      "managerName": "آقای صادقی",
+      "isEnabled": 1
+    },
+    {
+      "id": "sc-3",
+      "name": "اتوبار کاسپین طبرستان",
+      "code": "SC-103",
+      "phoneNumber": "01133336666",
+      "managerName": "آقای احمدی",
+      "isEnabled": 1
+    }
+  ],
+  "orders": [
+    {
+      "id": "ord-101",
+      "orderNumber": "TCL-1402-01",
+      "customerName": "نمایندگی تهران (احمدی)",
+      "agentCode": "AG-9081",
+      "productId": "prod-1",
+      "productName": "سفال سقف طبرستان (طرح کلاسیک)",
+      "quantity": 12000,
+      "unit": "عدد",
+      "destinationCity": "تهران - شهریار",
+      "exactAddress": "سایت پروژه تفریحی دیپلمات، میدان نماز، انتهای بلوار کلهر، پلاک ۶۴",
+      "phoneNumber": "09121111111",
+      "notes": "تحویل اضطراری تا پایان هفته. هماهنگی قبل از ارسال الزامی است.",
+      "createdAt": "2026-06-10T14:27:37.147Z",
+      "status": "LOADED_AND_DISPATCHED",
+      "vehicleType": "تریلی ۱۸ چرخ لبه‌دار",
+      "driverName": "کریم قنبری",
+      "driverPhone": "09117772222",
+      "licensePlate": "۵۴ ع ۸۹۲ ایران ۷۲",
+      "shippingAgency": "باربری ترانزیت شمال",
+      "estimatedArrival": "۲۴ ساعت آینده",
+      "priorityIndex": 0,
+      "sentToFactoryAt": "2026-06-11T14:27:37.147Z",
+      "rejectionReason": null
+    },
+    {
+      "id": "ord-102",
+      "orderNumber": "TCL-1402-02",
+      "customerName": "نمایندگی اصفهان (رجایی)",
+      "agentCode": "AG-6055",
+      "productId": "prod-3",
+      "productName": "آجر سفال ۱۵ سانتی درجه یک طبرستان",
+      "quantity": 18000,
+      "unit": "قالب",
+      "destinationCity": "اصفهان - شهرک صنعتی جی",
+      "exactAddress": "انبار مرکزی نمایندگی رجایی، خیابان دهم، پلاک ۲",
+      "phoneNumber": "09132222222",
+      "notes": "لطفاً بارگیری از کوره تمام اتوماتیک شماره ۲ باشد.",
+      "createdAt": "2026-06-12T02:27:37.147Z",
+      "status": "VEHICLE_ASSIGNED",
+      "vehicleType": "کامیون جفت ۱۰ تن",
+      "driverName": "غلامرضا صادقی",
+      "driverPhone": "09139998888",
+      "licensePlate": "۷۲ ب ۵۵۱ ایران ۵۳",
+      "shippingAgency": "باربری زاینده‌رود",
+      "estimatedArrival": "فردا صبح ساعت ۸",
+      "priorityIndex": 0,
+      "rejectionReason": null,
+      "sentToFactoryAt": "2026-06-12T14:27:37.147Z"
+    },
+    {
+      "id": "ord-103",
+      "orderNumber": "TCL-1402-03",
+      "customerName": "نمایندگی رشت (پوربخش)",
+      "agentCode": "AG-2019",
+      "productId": "prod-2",
+      "productName": "آجر سفال ۱۰ سانتی طبرستان (تیغه)",
+      "quantity": 25000,
+      "unit": "قالب",
+      "destinationCity": "گیلان - رشت",
+      "exactAddress": "پروژه تعاونی فرهنگیان، جاده انزلی، نرسیده به پلیس راه",
+      "phoneNumber": "09113333333",
+      "createdAt": "2026-06-13T10:27:37.147Z",
+      "status": "APPROVED_BY_SALES",
+      "priorityIndex": 0,
+      "rejectionReason": null,
+      "sentToFactoryAt": null,
+      "vehicleType": null,
+      "driverName": null,
+      "driverPhone": null,
+      "licensePlate": null,
+      "shippingAgency": null,
+      "estimatedArrival": null
+    },
+    {
+      "id": "ord-104",
+      "orderNumber": "TCL-1402-04",
+      "customerName": "نمایندگی شیراز (نمازی)",
+      "agentCode": "AG-7023",
+      "productId": "prod-4",
+      "productName": "آجر نما نسوز سموتی طبرستان",
+      "quantity": 8000,
+      "unit": "قالب",
+      "destinationCity": "فارس - شیراز",
+      "exactAddress": "بلوار معالی آباد، کوچه ۱۲، پلاک آخر سمت چپ",
+      "phoneNumber": "09174444444",
+      "createdAt": "2026-06-13T13:27:37.147Z",
+      "status": "PENDING_APPROVAL",
+      "priorityIndex": 0,
+      "rejectionReason": null,
+      "sentToFactoryAt": null,
+      "vehicleType": null,
+      "driverName": null,
+      "driverPhone": null,
+      "licensePlate": null,
+      "shippingAgency": null,
+      "estimatedArrival": null
+    }
+  ],
+  "order_history": [
+    {
+      "id": 1,
+      "orderId": "ord-101",
+      "status": "PENDING_APPROVAL",
+      "updatedAt": "2026-06-10T14:27:37.147Z",
+      "comment": "ثبت سفارش توسط نمایندگی احمدی"
+    },
+    {
+      "id": 2,
+      "orderId": "ord-101",
+      "status": "APPROVED_BY_SALES",
+      "updatedAt": "2026-06-11T02:27:37.147Z",
+      "comment": "تایید حجم سفارش توسط واحد مالی و فروش تهران"
+    },
+    {
+      "id": 3,
+      "orderId": "ord-101",
+      "status": "VEHICLE_ASSIGNED",
+      "updatedAt": "2026-06-11T14:27:37.147Z",
+      "comment": "اختصاص تریلی ۱۸ چرخ البرز به رانندگی قنبری"
+    },
+    {
+      "id": 4,
+      "orderId": "ord-101",
+      "status": "LOADED_AND_DISPATCHED",
+      "updatedAt": "2026-06-12T14:27:37.147Z",
+      "comment": "بارگیری انجام شد و کامیون به مقصد حرکت کرد."
+    },
+    {
+      "id": 5,
+      "orderId": "ord-102",
+      "status": "PENDING_APPROVAL",
+      "updatedAt": "2026-06-12T02:27:37.147Z",
+      "comment": "سفارش جدید نمایندگی اصفهان"
+    },
+    {
+      "id": 6,
+      "orderId": "ord-102",
+      "status": "APPROVED_BY_SALES",
+      "updatedAt": "2026-06-12T14:27:37.147Z",
+      "comment": "تایید سقف اعتباری و حواله مالی"
+    },
+    {
+      "id": 7,
+      "orderId": "ord-102",
+      "status": "VEHICLE_ASSIGNED",
+      "updatedAt": "2026-06-13T09:39:37.147Z",
+      "comment": "معرفی کامیون جفت جهت بارگیری فردا صبح"
+    },
+    {
+      "id": 8,
+      "orderId": "ord-103",
+      "status": "PENDING_APPROVAL",
+      "updatedAt": "2026-06-13T10:27:27.147Z",
+      "comment": "ثبت سیستم شد"
+    },
+    {
+      "id": 9,
+      "orderId": "ord-103",
+      "status": "APPROVED_BY_SALES",
+      "updatedAt": "2026-06-13T10:27:37.147Z",
+      "comment": "مدیریت فروش سفارش را به کارخانه ارجاع داد."
+    },
+    {
+      "id": 10,
+      "orderId": "ord-104",
+      "status": "PENDING_APPROVAL",
+      "updatedAt": "2026-06-13T13:27:37.147Z",
+      "comment": "در انتظار بررسی بخش مدیریت مالی و فروش"
+    }
+  ]
+}

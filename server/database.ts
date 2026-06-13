@@ -315,7 +315,7 @@ function executeQuery(sql: string, values: any[] = []): any {
   // 12. INSERT INTO agents
   if (/INSERT\s+INTO\s+agents/i.test(cleanSql)) {
     const [id, fullName, alias, agentCode, phoneNumber, address, area] = values;
-    if (jsonData.agents.some((a: any) => a.agentCode.toUpperCase() === agentCode.toUpperCase())) {
+    if (agentCode && jsonData.agents.some((a: any) => a.agentCode && a.agentCode.toUpperCase() === agentCode.toUpperCase())) {
       const err: any = new Error("Agent duplicate error");
       err.code = "ER_DUP_ENTRY";
       err.errno = 1062;
@@ -357,7 +357,7 @@ function executeQuery(sql: string, values: any[] = []): any {
   // 15. INSERT INTO shipping_companies
   if (/INSERT\s+INTO\s+shipping_companies/i.test(cleanSql)) {
     const [id, name, code, phoneNumber, managerName] = values;
-    if (jsonData.shipping_companies.some((sc: any) => sc.code.toUpperCase() === code.toUpperCase())) {
+    if (code && jsonData.shipping_companies.some((sc: any) => sc.code && sc.code.toUpperCase() === code.toUpperCase())) {
       const err: any = new Error("Company duplicate error");
       err.code = "ER_DUP_ENTRY";
       err.errno = 1062;
@@ -557,10 +557,56 @@ export function getDbPool(): mysql.Pool {
 }
 
 /**
- * Returns the Redis client instance.
+ * Safe Redis Client wrapper that catches and silences connection/timeout errors.
+ */
+class SafeRedisWrapper {
+  private instance: Redis;
+
+  constructor(instance: Redis) {
+    this.instance = instance;
+  }
+
+  async get(key: string): Promise<string | null> {
+    try {
+      return await this.instance.get(key);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in GET ${key}:`, err.message);
+      return null;
+    }
+  }
+
+  async set(key: string, value: string, mode?: string, duration?: number): Promise<string | null> {
+    try {
+      if (mode && duration !== undefined) {
+        return await this.instance.set(key, value, mode as any, duration);
+      }
+      return await this.instance.set(key, value);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in SET ${key}:`, err.message);
+      return null;
+    }
+  }
+
+  async del(key: string): Promise<number> {
+    try {
+      return await this.instance.del(key);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in DEL ${key}:`, err.message);
+      return 0;
+    }
+  }
+}
+
+let safeRedisWrapperInstance: SafeRedisWrapper | null = null;
+
+/**
+ * Returns the Redis client instance wrapped in SafeRedisWrapper.
  * Initializes the connection lazily.
  */
-export function getRedisClient(): Redis | null {
+export function getRedisClient(): any {
+  if (safeRedisWrapperInstance) {
+    return safeRedisWrapperInstance;
+  }
   if (!redis) {
     const host = process.env.REDIS_HOST;
     const port = Number(process.env.REDIS_PORT) || 6379;
@@ -577,7 +623,7 @@ export function getRedisClient(): Redis | null {
         host,
         port,
         password,
-        lazyConnect: true, // Avoids blocking server startup if Redis is temporarily unreachable
+        lazyConnect: true,
         maxRetriesPerRequest: 3,
       });
 
@@ -593,7 +639,11 @@ export function getRedisClient(): Redis | null {
       return null;
     }
   }
-  return redis;
+  if (redis) {
+    safeRedisWrapperInstance = new SafeRedisWrapper(redis);
+    return safeRedisWrapperInstance;
+  }
+  return null;
 }
 
 /**
