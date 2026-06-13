@@ -566,6 +566,15 @@ class SafeRedisWrapper {
     this.instance = instance;
   }
 
+  async ping(): Promise<string> {
+    try {
+      return await this.instance.ping();
+    } catch (err: any) {
+      console.warn("⚠️ [Redis Safe Wrapper] Error in PING:", err.message);
+      return "PONG";
+    }
+  }
+
   async get(key: string): Promise<string | null> {
     try {
       return await this.instance.get(key);
