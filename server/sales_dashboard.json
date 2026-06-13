@@ -71,6 +71,18 @@
       "dimensions": "۳۰ × ۴۰ سانتی‌متر",
       "coverageInfo": "۱۴ عدد",
       "isEnabled": 1
+    },
+    {
+      "id": "prod-test-1781367985499",
+      "name": "سفال سقف تبریز",
+      "category": "roofing",
+      "pricePerUnit": 12000,
+      "unit": "عدد",
+      "description": "توضیحات تستی برای محصول سفال نو",
+      "weight": "۲.۵ کیلوگرم",
+      "dimensions": "۲۵ × ۴۰",
+      "coverageInfo": "۱۴ عدد",
+      "isEnabled": 1
     }
   ],
   "agents": [
@@ -132,6 +144,16 @@
       "phoneNumber": "09121111111",
       "address": "آدرس فرضی تستی",
       "area": "منطقه فرضی",
+      "isEnabled": 1
+    },
+    {
+      "id": "ag-test-1781367985496",
+      "fullName": "علی رضایی",
+      "alias": "نمایندگی تبریز",
+      "agentCode": "TBN-TEST-505",
+      "phoneNumber": "09121111111",
+      "address": "تبریز، بلوار بسیج",
+      "area": "آذربایجان شرقی",
       "isEnabled": 1
     }
   ],

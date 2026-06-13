@@ -42,13 +42,13 @@ interface ManagerDashboardProps {
   onRejectOrder: (orderId: string, reason: string) => void;
   onDispatchToFactory: (orderId: string, comment?: string) => void;
   onUpdateAllOrders: (updatedOrders: Order[]) => void;
-  onAddProduct: (newProduct: Product) => void;
+  onAddProduct: (newProduct: Product) => Promise<boolean>;
   onToggleProduct: (productId: string) => void;
   onDeleteProduct: (productId: string) => void;
-  onAddAgent: (newAgent: Agent) => void;
+  onAddAgent: (newAgent: Agent) => Promise<boolean>;
   onToggleAgent: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
-  onAddShippingCompany: (newCompany: ShippingCompany) => void;
+  onAddShippingCompany: (newCompany: ShippingCompany) => Promise<boolean>;
   onToggleShippingCompany: (companyId: string) => void;
   onDeleteShippingCompany: (companyId: string) => void;
   onApproveAllOrders?: () => void;
@@ -177,7 +177,7 @@ export default function ManagerDashboard({
   };
 
   // Agent submit form
-  const handleAgentSubmit = (e: React.FormEvent) => {
+  const handleAgentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = newAgentName.trim();
     const alias = newAgentAlias.trim();
@@ -223,20 +223,20 @@ export default function ManagerDashboard({
       isEnabled: true,
     };
 
-    onAddAgent(newAgentObject);
-    
-    // Reset forms
-    setNewAgentName('');
-    setNewAgentAlias('');
-    setNewAgentCode('');
-    setNewAgentPhone('');
-    setNewAgentAddress('');
-    setNewAgentArea('');
-    showToast('نمایندگی جدید با موفقیت در سیستم ثبت گردید.', 'success');
+    const success = await onAddAgent(newAgentObject);
+    if (success) {
+      // Reset forms
+      setNewAgentName('');
+      setNewAgentAlias('');
+      setNewAgentCode('');
+      setNewAgentPhone('');
+      setNewAgentAddress('');
+      setNewAgentArea('');
+    }
   };
 
   // Product submit form
-  const handleProductSubmit = (e: React.FormEvent) => {
+  const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = newProdName.trim();
     const price = newProdPrice;
@@ -275,21 +275,21 @@ export default function ManagerDashboard({
       isEnabled: true,
     };
 
-    onAddProduct(newProductObject);
-
-    // Reset forms
-    setNewProdName('');
-    setNewProdPrice(10000);
-    setNewProdUnit('عدد');
-    setNewProdDesc('');
-    setNewProdWeight('');
-    setNewProdDimensions('');
-    setCoverageVal('');
-    showToast('محصول جدید با موفقیت به بانک کالا صنعت اضافه گردید.', 'success');
+    const success = await onAddProduct(newProductObject);
+    if (success) {
+      // Reset forms
+      setNewProdName('');
+      setNewProdPrice(10000);
+      setNewProdUnit('عدد');
+      setNewProdDesc('');
+      setNewProdWeight('');
+      setNewProdDimensions('');
+      setCoverageVal('');
+    }
   };
 
   // Shipping Company submit form
-  const handleShippingCompanySubmit = (e: React.FormEvent) => {
+  const handleShippingCompanySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = newSCName.trim();
     const code = newSCCode.trim();
@@ -323,14 +323,14 @@ export default function ManagerDashboard({
       isEnabled: true
     };
 
-    onAddShippingCompany(newCompany);
-
-    // Reset forms
-    setNewSCName('');
-    setNewSCCode('');
-    setNewSCPhone('');
-    setNewSCManagerName('');
-    showToast('شرکت حمل و نقل جدید با موفقیت ثبت گردید.', 'success');
+    const success = await onAddShippingCompany(newCompany);
+    if (success) {
+      // Reset forms
+      setNewSCName('');
+      setNewSCCode('');
+      setNewSCPhone('');
+      setNewSCManagerName('');
+    }
   };
 
   // Filter orders by active panel tab criteria

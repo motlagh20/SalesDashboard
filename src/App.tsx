@@ -201,7 +201,7 @@ export default function App() {
   };
 
   // 3c. Product Management (Called by Sales Manager)
-  const handleCreateProduct = async (newProduct: Product) => {
+  const handleCreateProduct = async (newProduct: Product): Promise<boolean> => {
     try {
       const response = await fetch('/api/products', {
         method: 'POST',
@@ -212,6 +212,7 @@ export default function App() {
       if (response.ok) {
         showToast(`محصول جدید با موفقیت به سبد تولیدی کارخانه اضافه شد.`, 'success');
         refreshAllData();
+        return true;
       } else {
         try {
           const errData = await response.json();
@@ -219,9 +220,11 @@ export default function App() {
         } catch {
           showToast('خطا در ثبت محصول در سرور', 'error');
         }
+        return false;
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
+      return false;
     }
   };
 
@@ -259,7 +262,7 @@ export default function App() {
   };
 
   // 3d. Agent Management (Called by Sales Manager)
-  const handleCreateAgent = async (newAgent: Agent) => {
+  const handleCreateAgent = async (newAgent: Agent): Promise<boolean> => {
     try {
       const response = await fetch('/api/agents', {
         method: 'POST',
@@ -270,6 +273,7 @@ export default function App() {
       if (response.ok) {
         showToast(`نمایندگی رسمی جدید (${newAgent.alias}) با موفقیت عضو شبکه شد.`, 'success');
         refreshAllData();
+        return true;
       } else {
         try {
           const errData = await response.json();
@@ -277,9 +281,11 @@ export default function App() {
         } catch {
           showToast('خطا در ثبت نمایندگی در سرور', 'error');
         }
+        return false;
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
+      return false;
     }
   };
 
@@ -317,7 +323,7 @@ export default function App() {
   };
 
   // 3f. Shipping Companies Management (Called by Sales Manager)
-  const handleCreateShippingCompany = async (newCompany: ShippingCompany) => {
+  const handleCreateShippingCompany = async (newCompany: ShippingCompany): Promise<boolean> => {
     try {
       const response = await fetch('/api/shipping-companies', {
         method: 'POST',
@@ -328,6 +334,7 @@ export default function App() {
       if (response.ok) {
         showToast(`باربری جدید (${newCompany.name}) با موفقیت به پرتال افزوده شد.`, 'success');
         refreshAllData();
+        return true;
       } else {
         try {
           const errData = await response.json();
@@ -335,9 +342,11 @@ export default function App() {
         } catch {
           showToast('خطا در ثبت باربری در سرور', 'error');
         }
+        return false;
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
+      return false;
     }
   };
 
