@@ -177,6 +177,16 @@
       "address": "آدرس فرضی خط فرمان",
       "area": "منطقه فرضی خط فرمان",
       "isEnabled": 1
+    },
+    {
+      "id": "ag-test-12345",
+      "fullName": "نماینده تستی",
+      "alias": "نمایندگی تست",
+      "agentCode": "TEST-AG-99",
+      "phoneNumber": "09121111111",
+      "address": "آدرس تستی",
+      "area": "منطقه تستی",
+      "isEnabled": 1
     }
   ],
   "shipping_companies": [
