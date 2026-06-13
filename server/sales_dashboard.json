@@ -83,6 +83,18 @@
       "dimensions": "۲۵ × ۴۰",
       "coverageInfo": "۱۴ عدد",
       "isEnabled": 1
+    },
+    {
+      "id": "prod-cli-1781369394657",
+      "name": "سفال آزمایش تستی دستان",
+      "category": "roofing",
+      "pricePerUnit": 14000,
+      "unit": "عدد",
+      "description": "توضیحات محصول تست ترافیک رانینگ",
+      "weight": "۲ کیلوگرم",
+      "dimensions": "۳۰ × ۳۰",
+      "coverageInfo": "۱۶ عدد",
+      "isEnabled": 1
     }
   ],
   "agents": [
@@ -154,6 +166,16 @@
       "phoneNumber": "09121111111",
       "address": "تبریز، بلوار بسیج",
       "area": "آذربایجان شرقی",
+      "isEnabled": 1
+    },
+    {
+      "id": "ag-cli-1781369394527",
+      "fullName": "نماینده تستی خط فرمان",
+      "alias": "برند تستی خط فرمان",
+      "agentCode": "CLI-AG-281",
+      "phoneNumber": "09129999999",
+      "address": "آدرس فرضی خط فرمان",
+      "area": "منطقه فرضی خط فرمان",
       "isEnabled": 1
     }
   ],
@@ -281,6 +303,31 @@
       "licensePlate": null,
       "shippingAgency": null,
       "estimatedArrival": null
+    },
+    {
+      "id": "ord-1781369477988",
+      "orderNumber": "TCL-1402-05",
+      "customerName": "نمایندگی تهران (احمدی)",
+      "agentCode": "AG-9081",
+      "productId": "prod-1",
+      "productName": "سفال سقف طبرستان (طرح کلاسیک)",
+      "quantity": 8000,
+      "unit": "عدد",
+      "destinationCity": "کرج",
+      "exactAddress": "آدرس دقیق تستی سفارش در کرج",
+      "phoneNumber": "09121111111",
+      "notes": "نکته تست از طریق فرآیند خودکار",
+      "createdAt": "2026-06-13T16:51:17.988Z",
+      "status": "PENDING_APPROVAL",
+      "priorityIndex": 0,
+      "sentToFactoryAt": null,
+      "rejectionReason": null,
+      "vehicleType": null,
+      "driverName": null,
+      "driverPhone": null,
+      "licensePlate": null,
+      "shippingAgency": null,
+      "estimatedArrival": null
     }
   ],
   "order_history": [
@@ -353,6 +400,13 @@
       "status": "PENDING_APPROVAL",
       "updatedAt": "2026-06-13T13:27:37.147Z",
       "comment": "در انتظار بررسی بخش مدیریت مالی و فروش"
+    },
+    {
+      "id": 11,
+      "orderId": "ord-1781369477988",
+      "status": "PENDING_APPROVAL",
+      "updatedAt": "2026-06-13T16:51:17.988Z",
+      "comment": "ثبت سفارش از طریق اپلیکیشن نمایندگی"
     }
   ]
 }

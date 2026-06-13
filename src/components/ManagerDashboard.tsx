@@ -207,7 +207,7 @@ export default function ManagerDashboard({
       return;
     }
 
-    if (agents.some(a => a.agentCode.toUpperCase() === code.toUpperCase())) {
+    if (agents.some(a => a.agentCode?.toUpperCase() === code.toUpperCase())) {
       showToast('این کد نمایندگی قبلاً تعریف شده است.', 'error');
       return;
     }
@@ -309,7 +309,7 @@ export default function ManagerDashboard({
       return;
     }
 
-    if (shippingCompanies.some(sc => sc.code.toUpperCase() === code.toUpperCase())) {
+    if (shippingCompanies.some(sc => sc.code?.toUpperCase() === code.toUpperCase())) {
       showToast('این کد شرکت حمل و نقل قبلاً ثبت شده است.', 'error');
       return;
     }
