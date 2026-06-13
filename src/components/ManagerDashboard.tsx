@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Order, OrderStatus, Product, Agent, ShippingCompany } from '../types';
 import { 
   CheckCircle, 
@@ -102,6 +102,23 @@ export default function ManagerDashboard({
   const [newAgentPhone, setNewAgentPhone] = useState('');
   const [newAgentAddress, setNewAgentAddress] = useState('');
   const [newAgentArea, setNewAgentArea] = useState('');
+
+  // Auto-generate agent code on mount or when the agents list updates
+  useEffect(() => {
+    let maxNum = 1000;
+    if (agents && agents.length > 0) {
+      agents.forEach(a => {
+        const match = a.agentCode?.toUpperCase().match(/^TBN-(\d+)$/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxNum) {
+            maxNum = num;
+          }
+        }
+      });
+    }
+    setNewAgentCode(`TBN-${maxNum + 1}`);
+  }, [agents]);
 
   // Form: Create Product state
   const [newProdName, setNewProdName] = useState('');
@@ -847,15 +864,21 @@ export default function ManagerDashboard({
                 </div>
 
                 <div>
-                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">
-                    کد یکتای نمایندگی: <span className="text-rose-500">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-slate-600 text-[10px] font-bold">
+                      کد یکتای نمایندگی: <span className="text-rose-500">*</span>
+                    </label>
+                    <span className="text-[9px] font-sans font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50">
+                      ایجاد خودکار سیستم
+                    </span>
+                  </div>
                   <input
                     type="text"
-                    placeholder="مثال: AG-2342"
+                    readOnly
+                    placeholder="TBN-1001"
                     value={newAgentCode}
-                    onChange={(e) => setNewAgentCode(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-left"
+                    className="w-full bg-slate-100/80 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-500 font-mono text-left focus:outline-none cursor-not-allowed border-dashed"
+                    title="کد یکتا به شکل خودکار توسط الگوریتم توالی سیستم تعیین می‌شود"
                   />
                 </div>
 

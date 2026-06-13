@@ -75,7 +75,13 @@ async function startServer() {
       res.status(201).json({ success: true, id });
     } catch (err: any) {
       console.error("Error in POST /api/products:", err);
-      res.status(500).json({ error: err.message });
+      let errMsg = "خطای غیرمنتظره در سرور رخ داده است.";
+      if (err.code === "ER_DUP_ENTRY" || err.errno === 1062) {
+        errMsg = "محصولی با این شناسه یا نام قبلاً در پایگاه داده ثبت شده است.";
+      } else {
+        errMsg = err.message || "خطا در برقراری ارتباط با پایگاه داده.";
+      }
+      res.status(500).json({ error: errMsg });
     }
   });
 
@@ -158,7 +164,14 @@ async function startServer() {
       res.status(201).json({ success: true, id });
     } catch (err: any) {
       console.error("Error in POST /api/agents:", err);
-      res.status(500).json({ error: err.message });
+      let errMsg = "خطای غیرمنتظره در سرور رخ داده است.";
+      if (err.code === "ER_DUP_ENTRY" || err.errno === 1062) {
+        const agCode = req.body?.agentCode || "";
+        errMsg = `کد نمایندگی "${agCode}" قبلاً در سیستم ثبت شده است. لطفاً از یک کد نمایندگی متمایز و یکتا استفاده نمایید.`;
+      } else {
+        errMsg = err.message || "خطا در عملیات ثبت در پایگاه داده.";
+      }
+      res.status(500).json({ error: errMsg });
     }
   });
 
@@ -239,7 +252,14 @@ async function startServer() {
       res.status(201).json({ success: true, id });
     } catch (err: any) {
       console.error("Error in POST /api/shipping-companies:", err);
-      res.status(500).json({ error: err.message });
+      let errMsg = "خطای غیرمنتظره در سرور رخ داده است.";
+      if (err.code === "ER_DUP_ENTRY" || err.errno === 1062) {
+        const trCode = req.body?.code || "";
+        errMsg = `کد ترابری یا نام آژانس حمل و نقل "${trCode}" قبلاً ثبت گردیده است.`;
+      } else {
+        errMsg = err.message || "خطا در برقراری ارتباط با پایگاه داده.";
+      }
+      res.status(500).json({ error: errMsg });
     }
   });
 

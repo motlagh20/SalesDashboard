@@ -213,7 +213,12 @@ export default function App() {
         showToast(`محصول جدید با موفقیت به سبد تولیدی کارخانه اضافه شد.`, 'success');
         refreshAllData();
       } else {
-        showToast('خطا در ثبت محصول در سرور', 'error');
+        try {
+          const errData = await response.json();
+          showToast(`خطا در ثبت محصول: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
+        } catch {
+          showToast('خطا در ثبت محصول در سرور', 'error');
+        }
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -266,7 +271,12 @@ export default function App() {
         showToast(`نمایندگی رسمی جدید (${newAgent.alias}) با موفقیت عضو شبکه شد.`, 'success');
         refreshAllData();
       } else {
-        showToast('خطا در ثبت نمایندگی در سرور', 'error');
+        try {
+          const errData = await response.json();
+          showToast(`خطا در ثبت نمایندگی: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
+        } catch {
+          showToast('خطا در ثبت نمایندگی در سرور', 'error');
+        }
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -319,7 +329,12 @@ export default function App() {
         showToast(`باربری جدید (${newCompany.name}) با موفقیت به پرتال افزوده شد.`, 'success');
         refreshAllData();
       } else {
-        showToast('خطا در ثبت باربری در سرور', 'error');
+        try {
+          const errData = await response.json();
+          showToast(`خطا در ثبت باربری: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
+        } catch {
+          showToast('خطا در ثبت باربری در سرور', 'error');
+        }
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
