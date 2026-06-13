@@ -60,365 +60,399 @@ export default function App() {
     setConfirmConfig({ title, message, onConfirm });
   };
 
-  // Initialize from LocalStorage or Fallback to Preset mock data if empty
+  // Load data from production Express API instead of localstorage mock
+  const refreshAllData = async () => {
+    try {
+      const [resProd, resAgent, resShip, resOrder] = await Promise.all([
+        fetch('/api/products'),
+        fetch('/api/agents'),
+        fetch('/api/shipping-companies'),
+        fetch('/api/orders')
+      ]);
+
+      if (resProd.ok) setProducts(await resProd.json());
+      if (resAgent.ok) setAgents(await resAgent.json());
+      if (resShip.ok) setShippingCompanies(await resShip.json());
+      if (resOrder.ok) setOrders(await resOrder.json());
+    } catch (err) {
+      console.error('Error refreshing dashboard data:', err);
+    }
+  };
+
   useEffect(() => {
-    const savedOrders = localStorage.getItem('tabarestan_clay_orders_v2');
-    if (savedOrders) {
-      try {
-        setOrders(JSON.parse(savedOrders));
-      } catch (err) {
-        setOrders(PRESET_ORDERS);
-      }
-    } else {
-      setOrders(PRESET_ORDERS);
-      localStorage.setItem('tabarestan_clay_orders_v2', JSON.stringify(PRESET_ORDERS));
-    }
-
-    const savedProducts = localStorage.getItem('tabarestan_clay_products_v2');
-    if (savedProducts) {
-      try {
-        setProducts(JSON.parse(savedProducts));
-      } catch (err) {
-        setProducts(PRESET_PRODUCTS);
-      }
-    } else {
-      setProducts(PRESET_PRODUCTS);
-      localStorage.setItem('tabarestan_clay_products_v2', JSON.stringify(PRESET_PRODUCTS));
-    }
-
-    const savedAgents = localStorage.getItem('tabarestan_clay_agents_v2');
-    if (savedAgents) {
-      try {
-        setAgents(JSON.parse(savedAgents));
-      } catch (err) {
-        setAgents(PRESET_AGENTS);
-      }
-    } else {
-      setAgents(PRESET_AGENTS);
-      localStorage.setItem('tabarestan_clay_agents_v2', JSON.stringify(PRESET_AGENTS));
-    }
-
-    const savedShipping = localStorage.getItem('tabarestan_clay_shipping_v2');
-    if (savedShipping) {
-      try {
-        setShippingCompanies(JSON.parse(savedShipping));
-      } catch (err) {
-        setShippingCompanies(PRESET_SHIPPING_COMPANIES);
-      }
-    } else {
-      setShippingCompanies(PRESET_SHIPPING_COMPANIES);
-      localStorage.setItem('tabarestan_clay_shipping_v2', JSON.stringify(PRESET_SHIPPING_COMPANIES));
-    }
+    refreshAllData();
+    // Periodic synchronization every 10 seconds to keep multi-role users in sync
+    const interval = setInterval(refreshAllData, 10000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Sync state changes to LocalStorage
-  const saveOrders = (updatedOrders: Order[]) => {
-    setOrders(updatedOrders);
-    localStorage.setItem('tabarestan_clay_orders_v2', JSON.stringify(updatedOrders));
-  };
-
-  const saveProducts = (updatedProducts: Product[]) => {
-    setProducts(updatedProducts);
-    localStorage.setItem('tabarestan_clay_products_v2', JSON.stringify(updatedProducts));
-  };
-
-  const saveAgents = (updatedAgents: Agent[]) => {
-    setAgents(updatedAgents);
-    localStorage.setItem('tabarestan_clay_agents_v2', JSON.stringify(updatedAgents));
-  };
-
-  const saveShippingCompanies = (updatedCompanies: ShippingCompany[]) => {
-    setShippingCompanies(updatedCompanies);
-    localStorage.setItem('tabarestan_clay_shipping_v2', JSON.stringify(updatedCompanies));
-  };
-
   // 1. Create Order (Called by Representative)
-  const handleCreateOrder = (orderData: Partial<Order>) => {
-    const newOrderNumber = `TCL-1402-0${orders.length + 1}`;
-    const newOrder: Order = {
-      id: `ord-${Date.now()}`,
-      orderNumber: newOrderNumber,
-      customerName: orderData.customerName || selectedAgent,
-      agentCode: orderData.agentCode || 'AG-0000',
-      productId: orderData.productId || 'prod-1',
-      productName: orderData.productName || '',
-      quantity: orderData.quantity || 1000,
-      unit: orderData.unit || 'عدد',
-      destinationCity: orderData.destinationCity || 'نامشخص',
-      exactAddress: orderData.exactAddress || '',
-      phoneNumber: orderData.phoneNumber || '',
-      notes: orderData.notes || '',
-      createdAt: new Date().toISOString(),
-      status: 'PENDING_APPROVAL',
-      statusHistory: [
-        {
-          status: 'PENDING_APPROVAL',
-          updatedAt: new Date().toISOString(),
-          comment: 'ثبت سفارش از طریق اپلیکیشن نمایندگی',
-        },
-      ],
-    };
+  const handleCreateOrder = async (orderData: Partial<Order>) => {
+    try {
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerName: orderData.customerName || selectedAgent,
+          agentCode: orderData.agentCode || 'AG-0000',
+          productId: orderData.productId || 'prod-1',
+          productName: orderData.productName || '',
+          quantity: orderData.quantity || 1000,
+          unit: orderData.unit || 'عدد',
+          destinationCity: orderData.destinationCity || 'نامشخص',
+          exactAddress: orderData.exactAddress || '',
+          phoneNumber: orderData.phoneNumber || '',
+          notes: orderData.notes || ''
+        })
+      });
 
-    const updated = [newOrder, ...orders];
-    saveOrders(updated);
+      if (response.ok) {
+        showToast('سفارش جدید با موفقیت ثبت سیستم شد.', 'success');
+        refreshAllData();
+      } else {
+        showToast('خطا در ثبت سفارش در سرور', 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
   // 2. Approve Order (Called by Sales Manager)
-  const handleApproveOrder = (orderId: string) => {
-    const updated = orders.map((order) => {
-      if (order.id === orderId) {
-        return {
-          ...order,
-          status: 'APPROVED_BY_SALES' as OrderStatus,
-          statusHistory: [
-            ...order.statusHistory,
-            {
-              status: 'APPROVED_BY_SALES' as OrderStatus,
-              updatedAt: new Date().toISOString(),
-              comment: 'تایید نهایی سفارش توسط دفتر مدیریت فروش فروشگاه طبرستان و ارجاع به کارخانه',
-            },
-          ],
-        };
+  const handleApproveOrder = async (orderId: string) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/approve`, {
+        method: 'PATCH'
+      });
+
+      if (response.ok) {
+        showToast('سفارش مورد تایید قرار گرفت و به صف ارسال باربری کارخانه اضافه شد.', 'success');
+        refreshAllData();
+      } else {
+        showToast('خطا در تایید سفارش در سرور', 'error');
       }
-      return order;
-    });
-    saveOrders(updated);
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
   // 3. Reject Order (Called by Sales Manager)
-  const handleRejectOrder = (orderId: string, reason: string) => {
-    const updated = orders.map((order) => {
-      if (order.id === orderId) {
-        return {
-          ...order,
-          status: 'REJECTED' as OrderStatus,
-          rejectionReason: reason,
-          statusHistory: [
-            ...order.statusHistory,
-            {
-              status: 'REJECTED' as OrderStatus,
-              updatedAt: new Date().toISOString(),
-              comment: `درخواست لغو شد به دلیل: ${reason}`,
-            },
-          ],
-        };
+  const handleRejectOrder = async (orderId: string, reason: string) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/reject`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+
+      if (response.ok) {
+        showToast('سفارش لغو شد و تاریخچه با علت لغو به‌روزرسانی گردید.', 'info');
+        refreshAllData();
+      } else {
+        showToast('خطا در رد سفارش در سرور', 'error');
       }
-      return order;
-    });
-    saveOrders(updated);
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
   // 3a. Dispatch to Factory (Called by Sales Manager)
-  const handleDispatchToFactory = (orderId: string, comment?: string) => {
-    const updated = orders.map((order) => {
-      if (order.id === orderId) {
-        return {
-          ...order,
-          status: 'SENT_TO_FACTORY' as OrderStatus,
-          sentToFactoryAt: new Date().toISOString(),
-          statusHistory: [
-            ...order.statusHistory,
-            {
-              status: 'SENT_TO_FACTORY' as OrderStatus,
-              updatedAt: new Date().toISOString(),
-              comment: comment || 'سفارش تأیید شد، اولویت‌بندی نهایی گردید و جهت تأمین وسیله نقلیه به کارخانه ارسال شد.',
-            },
-          ],
-        };
+  const handleDispatchToFactory = async (orderId: string, comment?: string) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/dispatch-factory`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment })
+      });
+
+      if (response.ok) {
+        showToast('سفارش جهت تأمین وسیله نقلیه به کارخانه ارجاع شد.', 'success');
+        refreshAllData();
+      } else {
+        showToast('خطا در ثبت ارسال به کارخانه', 'error');
       }
-      return order;
-    });
-    saveOrders(updated);
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
   // 3b. Re-arrange priorities of approved orders (Called by Sales Manager)
-  const handleUpdateAllOrders = (updatedOrders: Order[]) => {
-    saveOrders(updatedOrders);
+  const handleUpdateAllOrders = async (updatedOrders: Order[]) => {
+    try {
+      const sorted = updatedOrders.map((o, idx) => ({
+        id: o.id,
+        priorityIndex: idx
+      }));
+
+      const response = await fetch('/api/orders/reorder-priorities', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sortedOrders: sorted })
+      });
+
+      if (response.ok) {
+        setOrders(updatedOrders);
+        showToast('اولویت‌بندی سفارشات با موفقیت به‌روزرسانی شد.', 'success');
+      } else {
+        showToast('خطا در ذخیره‌سازی اولویت‌بندی در سرور', 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
   // 3c. Product Management (Called by Sales Manager)
-  const handleCreateProduct = (newProduct: Product) => {
-    const updated = [...products, { ...newProduct, isEnabled: true }];
-    saveProducts(updated);
+  const handleCreateProduct = async (newProduct: Product) => {
+    try {
+      const response = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newProduct)
+      });
+
+      if (response.ok) {
+        showToast(`محصول جدید با موفقیت به سبد تولیدی کارخانه اضافه شد.`, 'success');
+        refreshAllData();
+      } else {
+        showToast('خطا در ثبت محصول در سرور', 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
-  const handleToggleProductStatus = (productId: string) => {
-    const updated = products.map(prod => 
-      prod.id === productId ? { ...prod, isEnabled: prod.isEnabled === undefined ? false : !prod.isEnabled } : prod
-    );
-    saveProducts(updated);
+  const handleToggleProductStatus = async (productId: string) => {
+    try {
+      const response = await fetch(`/api/products/${productId}/toggle`, {
+        method: 'PATCH'
+      });
+
+      if (response.ok) {
+        refreshAllData();
+      } else {
+        showToast('خطا در تغییر وضعیت محصول در سرور', 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
-  const handleDeleteProduct = (productId: string) => {
-    const updated = products.filter(prod => prod.id !== productId);
-    saveProducts(updated);
+  const handleDeleteProduct = async (productId: string) => {
+    try {
+      const response = await fetch(`/api/products/${productId}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        showToast('محصول از لیست کارخانه حذف گردید.', 'info');
+        refreshAllData();
+      } else {
+        showToast('خطا در حذف محصول در سرور', 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
   // 3d. Agent Management (Called by Sales Manager)
-  const handleCreateAgent = (newAgent: Agent) => {
-    const updated = [...agents, newAgent];
-    saveAgents(updated);
+  const handleCreateAgent = async (newAgent: Agent) => {
+    try {
+      const response = await fetch('/api/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newAgent)
+      });
+
+      if (response.ok) {
+        showToast(`نمایندگی رسمی جدید (${newAgent.alias}) با موفقیت عضو شبکه شد.`, 'success');
+        refreshAllData();
+      } else {
+        showToast('خطا در ثبت نمایندگی در سرور', 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
-  const handleToggleAgentStatus = (agentId: string) => {
-    const updated = agents.map(agent => 
-      agent.id === agentId ? { ...agent, isEnabled: !agent.isEnabled } : agent
-    );
-    saveAgents(updated);
+  const handleToggleAgentStatus = async (agentId: string) => {
+    try {
+      const response = await fetch(`/api/agents/${agentId}/toggle`, {
+        method: 'PATCH'
+      });
+
+      if (response.ok) {
+        refreshAllData();
+      } else {
+        showToast('خطا در تغییر وضعیت نمایندگی در سرور', 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
-  const handleDeleteAgent = (agentId: string) => {
-    const updated = agents.filter(agent => agent.id !== agentId);
-    saveAgents(updated);
+  const handleDeleteAgent = async (agentId: string) => {
+    try {
+      const response = await fetch(`/api/agents/${agentId}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        showToast('نمایندگی از سیستم با موفقیت حذف گردید.', 'info');
+        refreshAllData();
+      } else {
+        showToast('خطا در حذف نمایندگی در سرور', 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
   // 3f. Shipping Companies Management (Called by Sales Manager)
-  const handleCreateShippingCompany = (newCompany: ShippingCompany) => {
-    const updated = [...shippingCompanies, newCompany];
-    saveShippingCompanies(updated);
+  const handleCreateShippingCompany = async (newCompany: ShippingCompany) => {
+    try {
+      const response = await fetch('/api/shipping-companies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCompany)
+      });
+
+      if (response.ok) {
+        showToast(`باربری جدید (${newCompany.name}) با موفقیت به پرتال افزوده شد.`, 'success');
+        refreshAllData();
+      } else {
+        showToast('خطا در ثبت باربری در سرور', 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
-  const handleToggleShippingCompanyStatus = (companyId: string) => {
-    const updated = shippingCompanies.map(company => 
-      company.id === companyId ? { ...company, isEnabled: !company.isEnabled } : company
-    );
-    saveShippingCompanies(updated);
+  const handleToggleShippingCompanyStatus = async (companyId: string) => {
+    try {
+      const response = await fetch(`/api/shipping-companies/${companyId}/toggle`, {
+        method: 'PATCH'
+      });
+
+      if (response.ok) {
+        refreshAllData();
+      } else {
+        showToast('خطا در تغییر وضعیت باربری در سرور', 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
-  const handleDeleteShippingCompany = (companyId: string) => {
-    const updated = shippingCompanies.filter(company => company.id !== companyId);
-    saveShippingCompanies(updated);
+  const handleDeleteShippingCompany = async (companyId: string) => {
+    try {
+      const response = await fetch(`/api/shipping-companies/${companyId}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        showToast('باربری ترابری از سیستم حذف گردید.', 'info');
+        refreshAllData();
+      } else {
+        showToast('خطا در حذف باربری در سرور', 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
   // 3e. Bulk / Batch action handlers (Called by Sales Manager)
-  const handleApproveAllOrders = () => {
-    const pendingOrders = orders.filter(o => o.status === 'PENDING_APPROVAL');
-    if (pendingOrders.length === 0) {
-      showToast('هیچ سفارشی در انتظار تایید وجود ندارد.', 'error');
-      return;
-    }
+  const handleApproveAllOrders = async () => {
+    try {
+      const response = await fetch('/api/orders/bulk-approve', {
+        method: 'POST'
+      });
 
-    const pendingIds = new Set(pendingOrders.map(o => o.id));
-
-    const updated = orders.map((order) => {
-      if (pendingIds.has(order.id)) {
-        return {
-          ...order,
-          status: 'APPROVED_BY_SALES' as OrderStatus,
-          statusHistory: [
-            ...order.statusHistory,
-            {
-              status: 'APPROVED_BY_SALES' as OrderStatus,
-              updatedAt: new Date().toISOString(),
-              comment: 'تایید دسته‌جمعی کل کارتابل سفارشات توسط مدیر فروش و بازرگانی طبرستان',
-            },
-          ],
-        };
+      if (response.ok) {
+        showToast('تمامی سفارشات معلق با موفقیت تایید سیستم شدند.', 'success');
+        refreshAllData();
+      } else {
+        const errData = await response.json();
+        showToast(errData.error || 'خطا در تایید دسته‌جمعی سفارشات', 'error');
       }
-      return order;
-    });
-
-    saveOrders(updated);
-    showToast('تمامی سفارشات معلق با موفقیت تایید و به صف کارخانه افزوده شدند.', 'success');
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
-  const handleDispatchAllToFactory = () => {
-    // Get all currently approved orders
-    const approvedOrders = orders.filter(o => o.status === 'APPROVED_BY_SALES');
-    if (approvedOrders.length === 0) {
-      showToast('هیچ سفارش تایید شده‌ای جهت ارسال به کارخانه یافت نشد.', 'error');
-      return;
-    }
+  const handleDispatchAllToFactory = async () => {
+    try {
+      const response = await fetch('/api/orders/bulk-dispatch', {
+        method: 'POST'
+      });
 
-    // Assign sequential timestamps to guarantee the exact screen order is preserved in transport queue
-    const now = Date.now();
-    const approvedIdsWithTimes = approvedOrders.map((order, idx) => ({
-      id: order.id,
-      sentToFactoryAt: new Date(now + idx * 1000).toISOString()
-    }));
-
-    // Create a map for quick lookup
-    const timeMap = new Map(approvedIdsWithTimes.map(item => [item.id, item.sentToFactoryAt]));
-
-    const updated = orders.map((order) => {
-      const sentTime = timeMap.get(order.id);
-      if (sentTime) {
-        return {
-          ...order,
-          status: 'SENT_TO_FACTORY' as OrderStatus,
-          sentToFactoryAt: sentTime,
-          statusHistory: [
-            ...order.statusHistory,
-            {
-              status: 'SENT_TO_FACTORY' as OrderStatus,
-              updatedAt: new Date().toISOString(),
-              comment: 'ارسال دسته‌جمعی به خط کارخانه / اولویت‌بندی پیش‌فرض تأمین وسیله نقلیه در ترابری طبرستان',
-            },
-          ],
-        };
+      if (response.ok) {
+        showToast('تمامی سفارشات تایید شده به واحد ترابری کارخانه ارسال شدند.', 'success');
+        refreshAllData();
+      } else {
+        const errData = await response.json();
+        showToast(errData.error || 'خطا در ارجاع دسته‌جمعی به کارخانه', 'error');
       }
-      return order;
-    });
-
-    saveOrders(updated);
-    showToast('تمامی سفارشات تایید شده به واحد ترابری کارخانه ارسال شدند.', 'success');
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
   // 4. Assign Logistics Truck (Called by Factory Transport)
-  const handleAssignVehicle = (orderId: string, vehicle: VehicleDetails) => {
-    const updated = orders.map((order) => {
-      if (order.id === orderId) {
-        return {
-          ...order,
-          status: 'VEHICLE_ASSIGNED' as OrderStatus,
-          vehicleDetails: vehicle,
-          statusHistory: [
-            ...order.statusHistory,
-            {
-              status: 'VEHICLE_ASSIGNED' as OrderStatus,
-              updatedAt: new Date().toISOString(),
-              comment: `تخصیص وسیله نقلیه ${vehicle.vehicleType} متعلق به باربری ${vehicle.shippingAgency} به رانندگی ${vehicle.driverName}`,
-            },
-          ],
-        };
+  const handleAssignVehicle = async (orderId: string, vehicle: VehicleDetails) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/assign-vehicle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(vehicle)
+      });
+
+      if (response.ok) {
+        showToast(`وسیله نقلیه به رانندگی ${vehicle.driverName} به فاکتور سفارش تخصیص یافت.`, 'success');
+        refreshAllData();
+      } else {
+        showToast('خطا در تخصیص خودرو در سرور', 'error');
       }
-      return order;
-    });
-    saveOrders(updated);
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
   // 5. Complete Loading and Dispatch Truck (Called by Factory Transport)
-  const handleDispatchOrder = (orderId: string) => {
-    const updated = orders.map((order) => {
-      if (order.id === orderId) {
-        return {
-          ...order,
-          status: 'LOADED_AND_DISPATCHED' as OrderStatus,
-          statusHistory: [
-            ...order.statusHistory,
-            {
-              status: 'LOADED_AND_DISPATCHED' as OrderStatus,
-              updatedAt: new Date().toISOString(),
-              comment: 'محصول با موفقیت بارگیری شد و خودرو از درب حراست کارخانه ترخیص و به سمت مقصد حرکت کرد.',
-            },
-          ],
-        };
+  const handleDispatchOrder = async (orderId: string) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/dispatch`, {
+        method: 'PATCH'
+      });
+
+      if (response.ok) {
+        showToast('کامیون فاکتور با موفقیت بارگیری شده و از درب حراست کارخانه ترخیص شد.', 'success');
+        refreshAllData();
+      } else {
+        showToast('خطا در ترخیص تریلی در سرور', 'error');
       }
-      return order;
-    });
-    saveOrders(updated);
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
   };
 
   // Reset demo application to original factory state
   const handleResetApp = () => {
     askConfirm(
-      'بازنشانی اطلاعات شبیه‌ساز',
-      'آیا مطمئن هستید که می‌خواهید تمام تغییرات خود را لغو کرده و دیتابیس را به حالت پیش‌فرض کارخانه بازنشانی کنید؟',
-      () => {
-        localStorage.removeItem('tabarestan_clay_orders_v2');
-        localStorage.removeItem('tabarestan_clay_products_v2');
-        localStorage.removeItem('tabarestan_clay_agents_v2');
-        window.location.reload();
+      'بازنشانی اطلاعات پایگاه داده واقعی',
+      'آیا مطمئن هستید که می‌خواهید تمام تراکنش‌های جاری را پاک کرده و جداول MariaDB و کش‌های Redis را به حالت پایدار اولیه کارخانه بازنشانی کنید؟',
+      async () => {
+        try {
+          const response = await fetch('/api/system/reset-demo', {
+            method: 'POST'
+          });
+          if (response.ok) {
+            showToast('کل دیتابیس مجدداً بذرپاشی و بازنشانی دمو کامل شد!', 'success');
+            refreshAllData();
+          } else {
+            showToast('خطا در ریست کارخانه اطلاعات در سرور', 'error');
+          }
+        } catch (err) {
+          showToast('خطای اتصال با سرور هنگام ریست اطلاعات', 'error');
+        }
       }
     );
   };
