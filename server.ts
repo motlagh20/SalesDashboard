@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { bootstrapDatabase, getDbPool, getRedisClient } from "./server/database";
@@ -17,6 +18,23 @@ async function startServer() {
   // Middleware for parsing JSON & URL-encoded request bodies
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  // Debug logging middleware
+  app.use((req, res, next) => {
+    const logMsg = `[${new Date().toISOString()}] ${req.method} ${req.url} - body: ${JSON.stringify(req.body)}\n`;
+    try {
+      fs.appendFileSync("./server_debug.log", logMsg);
+    } catch (e) {}
+    
+    const originalJson = res.json;
+    res.json = function(body) {
+      try {
+        fs.appendFileSync("./server_debug.log", `[${new Date().toISOString()}] RESPONSE for ${req.method} ${req.url} (status: ${res.statusCode}) - body: ${JSON.stringify(body)}\n`);
+      } catch (e) {}
+      return originalJson.call(this, body);
+    };
+    next();
+  });
 
   // --- API Routes ---
 
