@@ -60,6 +60,45 @@ export default function App() {
     setConfirmConfig({ title, message, onConfirm });
   };
 
+  // Robust helper to safely parse JSON from a response, handling non-JSON content gracefully
+  const safeParseResponse = async (res: Response, fallbackValue: any = []) => {
+    try {
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        console.warn(`[API] Expected JSON for ${res.url} but received Content-Type: ${contentType}`);
+        try {
+          const bodyText = await res.text();
+          console.warn("[API] Response preview:", bodyText.substring(0, 150));
+        } catch {}
+        return fallbackValue;
+      }
+      return await res.json();
+    } catch (err: any) {
+      console.error(`[API] Error custom-parsing JSON for ${res.url}:`, err);
+      return fallbackValue;
+    }
+  };
+
+  // Helper to extract error message from response, handling HTML/text error pages elegantly
+  const getErrorMessage = async (res: Response, defaultMessage: string = "خطای ناشناخته در سرور"): Promise<string> => {
+    try {
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const data = await res.json();
+        return data.error || data.message || defaultMessage;
+      } else {
+        const text = await res.text();
+        // Remove HTML tags to extract raw description if any (e.g. Express 500 Stack trace/Status Error)
+        const cleanText = text.replace(/<[^>]*>/g, '').trim();
+        // Extract the first non-empty lines with a length cap
+        const trimmedMessage = cleanText.split('\n').map(l => l.trim()).filter(l => l.length > 0).join(' | ').substring(0, 160);
+        return trimmedMessage || `پاسخ وب‌سرور (${res.status} ${res.statusText})`;
+      }
+    } catch (err: any) {
+      return `${defaultMessage} (${err.message || "خطای پردازش"})`;
+    }
+  };
+
   // Load data from production Express API instead of localstorage mock
   const refreshAllData = async () => {
     try {
@@ -70,10 +109,10 @@ export default function App() {
         fetch('/api/orders')
       ]);
 
-      if (resProd.ok) setProducts(await resProd.json());
-      if (resAgent.ok) setAgents(await resAgent.json());
-      if (resShip.ok) setShippingCompanies(await resShip.json());
-      if (resOrder.ok) setOrders(await resOrder.json());
+      if (resProd.ok) setProducts(await safeParseResponse(resProd, []));
+      if (resAgent.ok) setAgents(await safeParseResponse(resAgent, []));
+      if (resShip.ok) setShippingCompanies(await safeParseResponse(resShip, []));
+      if (resOrder.ok) setOrders(await safeParseResponse(resOrder, []));
     } catch (err) {
       console.error('Error refreshing dashboard data:', err);
     }
@@ -110,12 +149,8 @@ export default function App() {
         showToast('سفارش جدید با موفقیت ثبت سیستم شد.', 'success');
         refreshAllData();
       } else {
-        try {
-          const errData = await response.json();
-          showToast(`خطا در ثبت سفارش: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
-        } catch {
-          showToast('خطا در ثبت سفارش در سرور', 'error');
-        }
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت سفارش در سرور');
+        showToast(`خطا در ثبت سفارش: ${errorMsg}`, 'error');
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -133,12 +168,8 @@ export default function App() {
         showToast('سفارش مورد تایید قرار گرفت و به صف ارسال باربری کارخانه اضافه شد.', 'success');
         refreshAllData();
       } else {
-        try {
-          const errData = await response.json();
-          showToast(`خطا در تایید سفارش: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
-        } catch {
-          showToast('خطا در تایید سفارش در سرور', 'error');
-        }
+        const errorMsg = await getErrorMessage(response, 'خطا در تایید سفارش در سرور');
+        showToast(`خطا در تایید سفارش: ${errorMsg}`, 'error');
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -158,12 +189,8 @@ export default function App() {
         showToast('سفارش لغو شد و تاریخچه با علت لغو به‌روزرسانی گردید.', 'info');
         refreshAllData();
       } else {
-        try {
-          const errData = await response.json();
-          showToast(`خطا در لغو سفارش: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
-        } catch {
-          showToast('خطا در رد سفارش در سرور', 'error');
-        }
+        const errorMsg = await getErrorMessage(response, 'خطا در رد سفارش در سرور');
+        showToast(`خطا در لغو سفارش: ${errorMsg}`, 'error');
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -183,12 +210,8 @@ export default function App() {
         showToast('سفارش جهت تأمین وسیله نقلیه به کارخانه ارجاع شد.', 'success');
         refreshAllData();
       } else {
-        try {
-          const errData = await response.json();
-          showToast(`خطا در ارجاع به کارخانه: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
-        } catch {
-          showToast('خطا در ثبت ارسال به کارخانه', 'error');
-        }
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت ارسال به کارخانه');
+        showToast(`خطا در ارجاع به کارخانه: ${errorMsg}`, 'error');
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -234,12 +257,8 @@ export default function App() {
         refreshAllData();
         return true;
       } else {
-        try {
-          const errData = await response.json();
-          showToast(`خطا در ثبت محصول: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
-        } catch {
-          showToast('خطا در ثبت محصول در سرور', 'error');
-        }
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت محصول در سرور');
+        showToast(`خطا در ثبت محصول: ${errorMsg}`, 'error');
         return false;
       }
     } catch (err) {
@@ -295,12 +314,8 @@ export default function App() {
         refreshAllData();
         return true;
       } else {
-        try {
-          const errData = await response.json();
-          showToast(`خطا در ثبت نمایندگی: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
-        } catch {
-          showToast('خطا در ثبت نمایندگی در سرور', 'error');
-        }
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت نمایندگی در سرور');
+        showToast(`خطا در ثبت نمایندگی: ${errorMsg}`, 'error');
         return false;
       }
     } catch (err) {
@@ -356,12 +371,8 @@ export default function App() {
         refreshAllData();
         return true;
       } else {
-        try {
-          const errData = await response.json();
-          showToast(`خطا در ثبت باربری: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
-        } catch {
-          showToast('خطا در ثبت باربری در سرور', 'error');
-        }
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت باربری در سرور');
+        showToast(`خطا در ثبت باربری: ${errorMsg}`, 'error');
         return false;
       }
     } catch (err) {
@@ -414,8 +425,8 @@ export default function App() {
         showToast('تمامی سفارشات معلق با موفقیت تایید سیستم شدند.', 'success');
         refreshAllData();
       } else {
-        const errData = await response.json();
-        showToast(errData.error || 'خطا در تایید دسته‌جمعی سفارشات', 'error');
+        const errorMsg = await getErrorMessage(response, 'خطا در تایید دسته‌جمعی سفارشات');
+        showToast(errorMsg, 'error');
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -432,8 +443,8 @@ export default function App() {
         showToast('تمامی سفارشات تایید شده به واحد ترابری کارخانه ارسال شدند.', 'success');
         refreshAllData();
       } else {
-        const errData = await response.json();
-        showToast(errData.error || 'خطا در ارجاع دسته‌جمعی به کارخانه', 'error');
+        const errorMsg = await getErrorMessage(response, 'خطا در ارجاع دسته‌جمعی به کارخانه');
+        showToast(errorMsg, 'error');
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -453,12 +464,8 @@ export default function App() {
         showToast(`وسیله نقلیه به رانندگی ${vehicle.driverName} به فاکتور سفارش تخصیص یافت.`, 'success');
         refreshAllData();
       } else {
-        try {
-          const errData = await response.json();
-          showToast(`خطا در تخصیص خودرو: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
-        } catch {
-          showToast('خطا در تخصیص خودرو در سرور', 'error');
-        }
+        const errorMsg = await getErrorMessage(response, 'خطا در تخصیص خودرو در سرور');
+        showToast(`خطا در تخصیص خودرو: ${errorMsg}`, 'error');
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -476,12 +483,8 @@ export default function App() {
         showToast('کامیون فاکتور با موفقیت بارگیری شده و از درب حراست کارخانه ترخیص شد.', 'success');
         refreshAllData();
       } else {
-        try {
-          const errData = await response.json();
-          showToast(`خطا در ترخیص تریلی: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
-        } catch {
-          showToast('خطا در ترخیص تریلی در سرور', 'error');
-        }
+        const errorMsg = await getErrorMessage(response, 'خطا در ترخیص تریلی در سرور');
+        showToast(`خطا در ترخیص تریلی: ${errorMsg}`, 'error');
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
