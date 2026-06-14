@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
-import { bootstrapDatabase, getDbPool, getRedisClient } from "./server/database";
+import { bootstrapDatabase, getDbPool, getRedisClient, writeServerErrorLog } from "./server/database";
 
 // Load environment variables
 dotenv.config();
@@ -421,7 +421,8 @@ async function startServer() {
       }
     } catch (err: any) {
       console.error("Error in POST /api/orders:", err);
-      res.status(500).json({ error: err.message });
+      writeServerErrorLog("POST /api/orders", err, req.body);
+      res.status(500).json({ error: err.message || "Unknown database error" });
     }
   });
 
@@ -733,6 +734,33 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in POST /api/system/reset-demo:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 6. SYSTEM DIAGNOSTICS & SYSTEM ERROR LOGS
+  app.get("/api/system/error-logs", (req, res) => {
+    try {
+      const logFilePath = path.join(process.cwd(), "server", "db_errors.log");
+      if (fs.existsSync(logFilePath)) {
+        const rawLogs = fs.readFileSync(logFilePath, "utf8");
+        return res.json({ success: true, logs: rawLogs });
+      } else {
+        return res.json({ success: true, logs: "هیچ خطایی در فایل لاگ ثبت نشده است." });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/system/clear-error-logs", (req, res) => {
+    try {
+      const logFilePath = path.join(process.cwd(), "server", "db_errors.log");
+      if (fs.existsSync(logFilePath)) {
+        fs.writeFileSync(logFilePath, "", "utf8");
+      }
+      res.json({ success: true, message: "فایل لاگ خطاها با موفقیت پاکسازی شد." });
+    } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });

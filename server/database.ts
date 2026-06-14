@@ -7,6 +7,44 @@ import path from "path";
 let pool: mysql.Pool | null = null;
 let redis: Redis | null = null;
 
+// Active error logging path
+const LOG_FILE_PATH = path.join(process.cwd(), "server", "db_errors.log");
+
+/**
+ * Writes detailed database/server errors to a persistent log file in the workspace
+ * so the user can easily see or retrieve exact SQL failures, duplicate key info, etc.
+ */
+export function writeServerErrorLog(operation: string, error: any, reqBody?: any) {
+  try {
+    const timestamp = new Date().toISOString();
+    const errorDetails = {
+      timestamp,
+      operation,
+      message: error?.message || "No message",
+      code: error?.code || null,
+      errno: error?.errno || null,
+      sql: error?.sql || null,
+      sqlState: error?.sqlState || null,
+      stack: error?.stack || "No stack trace available",
+      requestBody: reqBody ? JSON.stringify(reqBody) : "None"
+    };
+
+    const logLine = `[${timestamp}] [${operation}]
+Message: ${errorDetails.message}
+Code: ${errorDetails.code} | ErrNo: ${errorDetails.errno} | SqlState: ${errorDetails.sqlState}
+SQL Executed: ${errorDetails.sql || "N/A"}
+Request Body: ${errorDetails.requestBody}
+Stack Trace: ${errorDetails.stack}
+----------------------------------------------------------------------\n`;
+
+    fs.mkdirSync(path.dirname(LOG_FILE_PATH), { recursive: true });
+    fs.appendFileSync(LOG_FILE_PATH, logLine, "utf8");
+    console.log(`📝 [Logger] Database error recorded in db_errors.log for: ${operation}`);
+  } catch (err) {
+    console.error("❌ Failed to write to error log file:", err);
+  }
+}
+
 // Local Mock / Fallback database state & classes
 let isFallbackMode = false;
 let mockPoolInstance: MockPool | null = null;

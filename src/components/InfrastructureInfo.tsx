@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Database, 
   Cpu, 
@@ -13,10 +13,53 @@ import {
   Server, 
   Truck, 
   GitBranch,
-  Layers
+  Layers,
+  RefreshCw,
+  Trash2,
+  Terminal,
+  ShieldAlert
 } from 'lucide-react';
 
 export default function InfrastructureInfo() {
+  const [logs, setLogs] = useState<string>('در حال اتصال به سرور جهت بازیابی لاگ‌های اخیر...');
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const fetchLogs = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/system/error-logs');
+      if (res.ok) {
+        const data = await res.json();
+        setLogs(data.logs || 'هیچ خطایی در فایل لاگ ثبت نشده است.');
+      } else {
+        setLogs('خطا در فراخوانی لاگ‌های سرور.');
+      }
+    } catch (err: any) {
+      setLogs(`خطای شبکه: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const clearLogs = async () => {
+    if (!window.confirm('آیا از پاکسازی کل تاریخچه خطاهای سرور اطمینان دارید؟')) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/system/clear-error-logs', { method: 'POST' });
+      if (res.ok) {
+        setLogs('هیچ خطایی در فایل لاگ ثبت نشده است.');
+      }
+    } catch (err: any) {
+      alert(`خطا در پاکسازی: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLogs();
+  }, []);
+
   return (
     <div className="bg-slate-50 rounded-2xl border border-slate-200/80 p-6 md:p-8 text-right dir-rtl font-sans" id="infrastructure-page">
       <div className="border-b border-slate-200 pb-5 mb-6">
@@ -126,6 +169,42 @@ export default function InfrastructureInfo() {
                 ▼
      [ پنل وب مدیریت کارخانه و ترابری ] <─── (تایید مالی، ثبت راننده، شماره پلاک و ترخیص بار)`}
         </pre>
+      </div>
+
+      {/* Interactive Server Error Logs Panel */}
+      <div className="mt-8 bg-slate-900 text-slate-100 p-6 rounded-xl border border-slate-800" id="infra-error-logs-terminal">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 pb-3 border-b border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <Terminal className="w-5 h-5 text-rose-500" />
+            <h3 className="text-rose-450 font-bold font-sans text-base">🖥️ کنسول گزارش و عیب‌یابی خطاهای زنده سرور (Database Logs):</h3>
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto justify-end">
+            <button
+              onClick={fetchLogs}
+              disabled={loading}
+              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-705 disabled:opacity-50 text-slate-300 px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>بروزرسانی</span>
+            </button>
+            <button
+              onClick={clearLogs}
+              disabled={loading}
+              className="flex items-center gap-1.5 bg-rose-950/40 hover:bg-rose-900/60 disabled:opacity-50 text-rose-300 px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer border border-rose-800/30"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>پاکسازی لاگ</span>
+            </button>
+          </div>
+        </div>
+
+        <p className="text-xs text-slate-400 mb-3 leading-relaxed text-justify">
+          اگر در هنگام ثبت اطلاعات با خطای پایگاه داده روبرو شدید، جزئیات دقیق تراکنش، پیام سرور، و خطای SQL ماریا‌دی‌بی فوراً در کنسول زیر ثبت خواهد شد. می‌توانید محتوای این بخش را جهت عیب‌یابی کپی کرده و برای برنامه‌نویس ارسال کنید:
+        </p>
+
+        <div className="bg-black/80 rounded-lg p-4 font-mono text-xs text-emerald-400 border border-emerald-950/50 h-56 overflow-y-auto scrollbar-thin scrollbar-thumb-emerald-950 dir-ltr text-left whitespace-pre-wrap select-all">
+          {logs}
+        </div>
       </div>
     </div>
   );
