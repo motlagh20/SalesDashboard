@@ -10,7 +10,7 @@ let redis: Redis | null = null;
 // Local Mock / Fallback database state & classes
 let isFallbackMode = false;
 let mockPoolInstance: MockPool | null = null;
-const JSON_FILE_PATH = path.join(process.cwd(), "server", "sales_dashboard.json");
+const JSON_FILE_PATH = path.join(process.cwd(), "server", "salesdashboard.json");
 
 function loadJsonData(): any {
   if (!fs.existsSync(JSON_FILE_PATH)) {

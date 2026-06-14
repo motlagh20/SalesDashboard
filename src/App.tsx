@@ -110,7 +110,12 @@ export default function App() {
         showToast('سفارش جدید با موفقیت ثبت سیستم شد.', 'success');
         refreshAllData();
       } else {
-        showToast('خطا در ثبت سفارش در سرور', 'error');
+        try {
+          const errData = await response.json();
+          showToast(`خطا در ثبت سفارش: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
+        } catch {
+          showToast('خطا در ثبت سفارش در سرور', 'error');
+        }
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -128,7 +133,12 @@ export default function App() {
         showToast('سفارش مورد تایید قرار گرفت و به صف ارسال باربری کارخانه اضافه شد.', 'success');
         refreshAllData();
       } else {
-        showToast('خطا در تایید سفارش در سرور', 'error');
+        try {
+          const errData = await response.json();
+          showToast(`خطا در تایید سفارش: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
+        } catch {
+          showToast('خطا در تایید سفارش در سرور', 'error');
+        }
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -148,7 +158,12 @@ export default function App() {
         showToast('سفارش لغو شد و تاریخچه با علت لغو به‌روزرسانی گردید.', 'info');
         refreshAllData();
       } else {
-        showToast('خطا در رد سفارش در سرور', 'error');
+        try {
+          const errData = await response.json();
+          showToast(`خطا در لغو سفارش: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
+        } catch {
+          showToast('خطا در رد سفارش در سرور', 'error');
+        }
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -168,7 +183,12 @@ export default function App() {
         showToast('سفارش جهت تأمین وسیله نقلیه به کارخانه ارجاع شد.', 'success');
         refreshAllData();
       } else {
-        showToast('خطا در ثبت ارسال به کارخانه', 'error');
+        try {
+          const errData = await response.json();
+          showToast(`خطا در ارجاع به کارخانه: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
+        } catch {
+          showToast('خطا در ثبت ارسال به کارخانه', 'error');
+        }
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -433,7 +453,12 @@ export default function App() {
         showToast(`وسیله نقلیه به رانندگی ${vehicle.driverName} به فاکتور سفارش تخصیص یافت.`, 'success');
         refreshAllData();
       } else {
-        showToast('خطا در تخصیص خودرو در سرور', 'error');
+        try {
+          const errData = await response.json();
+          showToast(`خطا در تخصیص خودرو: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
+        } catch {
+          showToast('خطا در تخصیص خودرو در سرور', 'error');
+        }
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -451,7 +476,12 @@ export default function App() {
         showToast('کامیون فاکتور با موفقیت بارگیری شده و از درب حراست کارخانه ترخیص شد.', 'success');
         refreshAllData();
       } else {
-        showToast('خطا در ترخیص تریلی در سرور', 'error');
+        try {
+          const errData = await response.json();
+          showToast(`خطا در ترخیص تریلی: ${errData.error || 'پاسخ ناموفق سرور'}`, 'error');
+        } catch {
+          showToast('خطا در ترخیص تریلی در سرور', 'error');
+        }
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');

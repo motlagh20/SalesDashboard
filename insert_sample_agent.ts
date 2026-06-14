@@ -68,7 +68,7 @@ async function main() {
 
   // 2. Try JSON Fallback
   try {
-    const jsonPath = path.join(process.cwd(), "server", "sales_dashboard.json");
+    const jsonPath = path.join(process.cwd(), "server", "salesdashboard.json");
     console.log(`📂 Inspecting JSON fallback file at ${jsonPath}...`);
     
     if (fs.existsSync(jsonPath)) {
@@ -81,14 +81,14 @@ async function main() {
 
       const exists = data.agents.some((a: any) => a.agentCode?.toUpperCase() === sampleAgent.agentCode.toUpperCase());
       if (exists) {
-        console.log(`⚠️ Agent with code ${sampleAgent.agentCode} already exists in sales_dashboard.json.`);
+        console.log(`⚠️ Agent with code ${sampleAgent.agentCode} already exists in salesdashboard.json.`);
       } else {
         data.agents.push(sampleAgent);
         fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2), "utf-8");
-        console.log("🎉 Successfully inserted sample agent into sales_dashboard.json!");
+        console.log("🎉 Successfully inserted sample agent into salesdashboard.json!");
       }
     } else {
-      console.error("❌ JSON database file sales_dashboard.json not found.");
+      console.error("❌ JSON database file salesdashboard.json not found.");
     }
   } catch (err: any) {
     console.error("❌ JSON Fallback Inserts threw exception:", err.message);
