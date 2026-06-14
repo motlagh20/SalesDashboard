@@ -28,11 +28,17 @@ export default function InfrastructureInfo() {
     setLoading(true);
     try {
       const res = await fetch('/api/system/error-logs');
-      if (res.ok) {
+      const contentType = res.headers.get("content-type") || "";
+      if (res.ok && contentType.includes("application/json")) {
         const data = await res.json();
         setLogs(data.logs || 'هیچ خطایی در فایل لاگ ثبت نشده است.');
       } else {
-        setLogs('خطا در فراخوانی لاگ‌های سرور.');
+        const text = await res.text();
+        if (text.includes("<!DOCTYPE html>") || text.includes("<html")) {
+          setLogs('⚠️ خطا: وب‌سرور Nginx به جای پاسخ JSON از بک‌اند، صفحه HTML خانه (React App) را برگردانده است.\n\nاین اتفاق به این معنی است که درخواست‌های /api/ به درستی به پورت 3000 پروکسی نمی‌شوند و مستقیماً توسط Nginx به فایل index.html هدایت می‌شوند.\n\nراه‌حل: طبق یادداشت بالا، فایل تنظیمات Nginx را بررسی کنید و مطمئن شوید که بخش location /api/ در بلاک فعال سرور Nginx (که روی IP عمومی گوش می‌دهد) فعال و معتبر است.');
+        } else {
+          setLogs(`خطای سرور (کد وضعیت ${res.status}): ${text.substring(0, 150)}`);
+        }
       }
     } catch (err: any) {
       setLogs(`خطای شبکه: ${err.message}`);
@@ -46,11 +52,19 @@ export default function InfrastructureInfo() {
     setLoading(true);
     try {
       const res = await fetch('/api/system/clear-error-logs', { method: 'POST' });
-      if (res.ok) {
+      const contentType = res.headers.get("content-type") || "";
+      if (res.ok && contentType.includes("application/json")) {
         setLogs('هیچ خطایی در فایل لاگ ثبت نشده است.');
+      } else {
+        const text = await res.text();
+        if (text.includes("<!DOCTYPE html>") || text.includes("<html")) {
+          alert('⚠️ خطا: وب‌سرور Nginx خطای ۴۰۵ یا صفحه HTML برگردانده است. پروکسی Nginx به صورت کامل برای متدهای POST غیرفعال است یا آدرس را اشتباه مسیریابی می‌کند.');
+        } else {
+          alert(`خطای سرور در پاکسازی: ${text.substring(0, 100)}`);
+        }
       }
     } catch (err: any) {
-      alert(`خطا در پاکسازی: ${err.message}`);
+      alert(`خطای شبکه در پاکسازی: ${err.message}`);
     } finally {
       setLoading(false);
     }
