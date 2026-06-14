@@ -19,23 +19,6 @@ async function startServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Debug logging middleware
-  app.use((req, res, next) => {
-    const logMsg = `[${new Date().toISOString()}] ${req.method} ${req.url} - body: ${JSON.stringify(req.body)}\n`;
-    try {
-      fs.appendFileSync("./server_debug.log", logMsg);
-    } catch (e) {}
-    
-    const originalJson = res.json;
-    res.json = function(body) {
-      try {
-        fs.appendFileSync("./server_debug.log", `[${new Date().toISOString()}] RESPONSE for ${req.method} ${req.url} (status: ${res.statusCode}) - body: ${JSON.stringify(body)}\n`);
-      } catch (e) {}
-      return originalJson.call(this, body);
-    };
-    next();
-  });
-
   // --- API Routes ---
 
   // Health check endpoint
@@ -383,7 +366,32 @@ async function startServer() {
       
       // Count orders to generate unique TCL sequence number
       const [countRows] = await db.query("SELECT COUNT(*) as count FROM orders") as any[];
-      const orderNumber = `TCL-1402-0${countRows[0].count + 1}`;
+      let nextNum = (countRows as any[])[0].count + 1;
+
+      // Ensure full compatibility with physical MariaDB/MySQL in production to prevent key duplication
+      try {
+        const [rows] = await db.query("SELECT orderNumber FROM orders") as any[];
+        if (Array.isArray(rows) && rows.length > 0) {
+          const numbers = rows
+            .map((r: any) => {
+              const parts = r.orderNumber ? r.orderNumber.split('-') : [];
+              const numStr = parts[parts.length - 1];
+              return parseInt(numStr, 10);
+            })
+            .filter((n: number) => !isNaN(n));
+          if (numbers.length > 0) {
+            const maxVal = Math.max(...numbers);
+            if (maxVal >= nextNum) {
+              nextNum = maxVal + 1;
+            }
+          }
+        }
+      } catch (err) {
+        // Fallback for mock environment or missing table columns
+        console.warn("⚠️ Unique sequence check failed, using default count index:", err);
+      }
+
+      const orderNumber = `TCL-1402-0${nextNum}`;
       const createdAt = new Date().toISOString();
       const status = "PENDING_APPROVAL";
 
