@@ -141,7 +141,9 @@ export default function App() {
           destinationCity: orderData.destinationCity || 'نامشخص',
           exactAddress: orderData.exactAddress || '',
           phoneNumber: orderData.phoneNumber || '',
-          notes: orderData.notes || ''
+          notes: orderData.notes || '',
+          itemsJson: orderData.itemsJson || null,
+          paymentTrackingCode: orderData.paymentTrackingCode || null
         })
       });
 
@@ -151,6 +153,44 @@ export default function App() {
       } else {
         const errorMsg = await getErrorMessage(response, 'خطا در ثبت سفارش در سرور');
         showToast(`خطا در ثبت سفارش: ${errorMsg}`, 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
+  };
+
+  // 1a. Cancel Order (Called by Representative)
+  const handleCancelOrder = async (orderId: string) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/cancel`, {
+        method: 'PATCH',
+      });
+      if (response.ok) {
+        showToast('سفارش شما با موفقیت لغو شد.', 'success');
+        refreshAllData();
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در لغو سفارش');
+        showToast(`خطا در لغو سفارش: ${errorMsg}`, 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
+  };
+
+  // 1b. Update Payment Tracking Code (Called by Representative)
+  const handleUpdatePaymentTracking = async (orderId: string, paymentTrackingCode: string) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/payment-tracking`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentTrackingCode })
+      });
+      if (response.ok) {
+        showToast('کد رهگیری پرداخت با موفقیت ثبت شد.', 'success');
+        refreshAllData();
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت کد رهگیری پرداخت');
+        showToast(`خطا در ثبت کد رهگیری: ${errorMsg}`, 'error');
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -300,6 +340,28 @@ export default function App() {
     }
   };
 
+  const handleUpdateProduct = async (productData: Product): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/products/${productData.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(productData)
+      });
+      if (response.ok) {
+        showToast('اطلاعات محصول با موفقیت به‌روزرسانی شد.', 'success');
+        refreshAllData();
+        return true;
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت تغییرات محصول');
+        showToast(`خطا در ثبت تغییرات محصول: ${errorMsg}`, 'error');
+        return false;
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+      return false;
+    }
+  };
+
   // 3d. Agent Management (Called by Sales Manager)
   const handleCreateAgent = async (newAgent: Agent): Promise<boolean> => {
     try {
@@ -354,6 +416,28 @@ export default function App() {
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
+  };
+
+  const handleUpdateAgent = async (agentData: Agent): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/agents/${agentData.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(agentData)
+      });
+      if (response.ok) {
+        showToast('اطلاعات نمایندگی با موفقیت به‌روزرسانی شد.', 'success');
+        refreshAllData();
+        return true;
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت تغییرات نمایندگی');
+        showToast(`خطا در ثبت تغییرات نمایندگی: ${errorMsg}`, 'error');
+        return false;
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+      return false;
     }
   };
 
@@ -657,6 +741,8 @@ export default function App() {
                 products={products}
                 agents={agents}
                 onCreateOrder={handleCreateOrder}
+                onCancelOrder={handleCancelOrder}
+                onUpdatePaymentTracking={handleUpdatePaymentTracking}
                 selectedAgent={selectedAgent}
                 setSelectedAgent={setSelectedAgent}
                 showToast={showToast}
@@ -677,9 +763,11 @@ export default function App() {
                 onAddProduct={handleCreateProduct}
                 onToggleProduct={handleToggleProductStatus}
                 onDeleteProduct={handleDeleteProduct}
+                onUpdateProduct={handleUpdateProduct}
                 onAddAgent={handleCreateAgent}
                 onToggleAgent={handleToggleAgentStatus}
                 onDeleteAgent={handleDeleteAgent}
+                onUpdateAgent={handleUpdateAgent}
                 onAddShippingCompany={handleCreateShippingCompany}
                 onToggleShippingCompany={handleToggleShippingCompanyStatus}
                 onDeleteShippingCompany={handleDeleteShippingCompany}
@@ -694,6 +782,7 @@ export default function App() {
               <FactoryDashboard
                 orders={orders}
                 shippingCompanies={shippingCompanies}
+                products={products}
                 onAssignVehicle={handleAssignVehicle}
                 onDispatchOrder={handleDispatchOrder}
                 showToast={showToast}

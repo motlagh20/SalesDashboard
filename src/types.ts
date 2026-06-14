@@ -38,6 +38,8 @@ export interface Order {
   }[];
   vehicleDetails?: VehicleDetails;
   rejectionReason?: string;
+  itemsJson?: string;
+  paymentTrackingCode?: string;
 }
 
 export interface Product {
@@ -51,6 +53,9 @@ export interface Product {
   dimensions?: string; // Dimensions (e.g. "۲۵ * ۴۰ سانتی‌متر")
   coverageInfo?: string; // Usage info e.g., "۱۴ عدد در هر مترمربع" or "۱۲ عدد در هر متر طول"
   isEnabled: boolean; // فعال/غیرفعال بودن محصول
+  primaryUnit?: string;      // واحد اصلی / واحد تولید (مثال: قالب)
+  secondaryUnit?: string;    // واحد فرعی / واحد فروش (مثال: مترمربع)
+  conversionRatio?: number;  // هر ۱ واحد فروش معادل چند واحد تولید است (مثال: ۱۴)
 }
 
 export interface Agent {

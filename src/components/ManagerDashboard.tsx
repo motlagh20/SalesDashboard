@@ -30,7 +30,8 @@ import {
   DollarSign,
   Briefcase,
   ExternalLink,
-  Truck
+  Truck,
+  Edit
 } from 'lucide-react';
 
 interface ManagerDashboardProps {
@@ -45,9 +46,11 @@ interface ManagerDashboardProps {
   onAddProduct: (newProduct: Product) => Promise<boolean>;
   onToggleProduct: (productId: string) => void;
   onDeleteProduct: (productId: string) => void;
+  onUpdateProduct: (productData: Product) => Promise<boolean>;
   onAddAgent: (newAgent: Agent) => Promise<boolean>;
   onToggleAgent: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
+  onUpdateAgent: (agentData: Agent) => Promise<boolean>;
   onAddShippingCompany: (newCompany: ShippingCompany) => Promise<boolean>;
   onToggleShippingCompany: (companyId: string) => void;
   onDeleteShippingCompany: (companyId: string) => void;
@@ -71,9 +74,11 @@ export default function ManagerDashboard({
   onAddProduct,
   onToggleProduct,
   onDeleteProduct,
+  onUpdateProduct,
   onAddAgent,
   onToggleAgent,
   onDeleteAgent,
+  onUpdateAgent,
   onAddShippingCompany,
   onToggleShippingCompany,
   onDeleteShippingCompany,
@@ -104,6 +109,59 @@ export default function ManagerDashboard({
   const [newAgentArea, setNewAgentArea] = useState('');
   const [autoGenAgentCode, setAutoGenAgentCode] = useState(true);
 
+  // Editing state for products and agents
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+
+  const startEditingAgent = (agent: Agent) => {
+    setEditingAgent(agent);
+    setNewAgentName(agent.fullName);
+    setNewAgentAlias(agent.alias);
+    setNewAgentCode(agent.agentCode || '');
+    setNewAgentPhone(agent.phoneNumber);
+    setNewAgentAddress(agent.address);
+    setNewAgentArea(agent.area);
+    setAutoGenAgentCode(false);
+  };
+
+  const cancelEditingAgent = () => {
+    setEditingAgent(null);
+    setNewAgentName('');
+    setNewAgentAlias('');
+    setNewAgentCode('');
+    setNewAgentPhone('');
+    setNewAgentAddress('');
+    setNewAgentArea('');
+    setAutoGenAgentCode(true);
+  };
+
+  const startEditingProduct = (prod: Product) => {
+    setEditingProduct(prod);
+    setNewProdName(prod.name);
+    setNewProdCategory(prod.category);
+    setNewProdPrice(prod.pricePerUnit);
+    setNewProdDesc(prod.description);
+    setNewProdWeight(prod.weight || '');
+    setNewProdDimensions(prod.dimensions || '');
+    setNewProdPrimaryUnit(prod.primaryUnit || 'قالب');
+    setNewProdSecondaryUnit(prod.secondaryUnit || 'مترمربع');
+    setNewProdConversionRatio(prod.conversionRatio ? String(prod.conversionRatio) : '');
+    setHasSecondaryUnit(!!prod.secondaryUnit);
+  };
+
+  const cancelEditingProduct = () => {
+    setEditingProduct(null);
+    setNewProdName('');
+    setNewProdPrice(10000);
+    setNewProdDesc('');
+    setNewProdWeight('');
+    setNewProdDimensions('');
+    setNewProdPrimaryUnit('قالب');
+    setNewProdSecondaryUnit('مترمربع');
+    setNewProdConversionRatio('14');
+    setHasSecondaryUnit(true);
+  };
+
   // Auto-generate agent code on mount or when the agents list updates
   useEffect(() => {
     if (!autoGenAgentCode) return;
@@ -124,14 +182,15 @@ export default function ManagerDashboard({
 
   // Form: Create Product state
   const [newProdName, setNewProdName] = useState('');
-  const [newProdCategory, setNewProdCategory] = useState('roofing');
+  const [newProdCategory, setNewProdCategory] = useState('roof_tile');
   const [newProdPrice, setNewProdPrice] = useState(10000);
-  const [newProdUnit, setNewProdUnit] = useState('عدد');
   const [newProdDesc, setNewProdDesc] = useState('');
   const [newProdWeight, setNewProdWeight] = useState('');
   const [newProdDimensions, setNewProdDimensions] = useState('');
-  const [coverageType, setCoverageType] = useState<'square' | 'linear'>('square');
-  const [coverageVal, setCoverageVal] = useState('');
+  const [hasSecondaryUnit, setHasSecondaryUnit] = useState(true);
+  const [newProdPrimaryUnit, setNewProdPrimaryUnit] = useState('قالب');
+  const [newProdSecondaryUnit, setNewProdSecondaryUnit] = useState('مترمربع');
+  const [newProdConversionRatio, setNewProdConversionRatio] = useState('14');
 
   // Form: Create Shipping Company state
   const [newSCName, setNewSCName] = useState('');
@@ -209,31 +268,41 @@ export default function ManagerDashboard({
       return;
     }
 
-    if (agents.some(a => a.agentCode?.toUpperCase() === code.toUpperCase())) {
+    if (!editingAgent && agents.some(a => a.agentCode?.toUpperCase() === code.toUpperCase())) {
       showToast('این کد نمایندگی قبلاً تعریف شده است.', 'error');
       return;
     }
 
-    const newAgentObject: Agent = {
-      id: `ag-${Date.now()}`,
-      fullName: name,
-      alias: alias,
-      agentCode: code,
-      phoneNumber: phone,
-      address: address,
-      area: area || 'نامشخص',
-      isEnabled: true,
-    };
+    if (editingAgent) {
+      const updatedAgent: Agent = {
+        ...editingAgent,
+        fullName: name,
+        alias: alias,
+        agentCode: code,
+        phoneNumber: phone,
+        address: address,
+        area: area || 'نامشخص'
+      };
+      const success = await onUpdateAgent(updatedAgent);
+      if (success) {
+        cancelEditingAgent();
+      }
+    } else {
+      const newAgentObject: Agent = {
+        id: `ag-${Date.now()}`,
+        fullName: name,
+        alias: alias,
+        agentCode: code,
+        phoneNumber: phone,
+        address: address,
+        area: area || 'نامشخص',
+        isEnabled: true,
+      };
 
-    const success = await onAddAgent(newAgentObject);
-    if (success) {
-      // Reset forms
-      setNewAgentName('');
-      setNewAgentAlias('');
-      setNewAgentCode('');
-      setNewAgentPhone('');
-      setNewAgentAddress('');
-      setNewAgentArea('');
+      const success = await onAddAgent(newAgentObject);
+      if (success) {
+        cancelEditingAgent();
+      }
     }
   };
 
@@ -242,10 +311,13 @@ export default function ManagerDashboard({
     e.preventDefault();
     const name = newProdName.trim();
     const price = newProdPrice;
-    const unit = newProdUnit.trim();
     const desc = newProdDesc.trim();
     const weight = newProdWeight.trim();
     const dims = newProdDimensions.trim();
+
+    const pUnit = newProdPrimaryUnit.trim();
+    const sUnit = hasSecondaryUnit ? newProdSecondaryUnit.trim() : undefined;
+    const ratioVal = hasSecondaryUnit ? Number(newProdConversionRatio) : undefined;
 
     if (!name) {
       showToast('لطفاً نام کالا را وارد نمایید.', 'error');
@@ -255,38 +327,75 @@ export default function ManagerDashboard({
       showToast('لطفاً قیمت معتبری برای کالا تعیین نمایید.', 'error');
       return;
     }
-    if (!unit) {
-      showToast('لطفاً واحد شمارش کالا را انتخاب نمایید.', 'error');
+    if (!pUnit) {
+      showToast('لطفاً واحد اصلی کالا را انتخاب یا وارد نمایید.', 'error');
       return;
     }
+    if (hasSecondaryUnit) {
+      if (!sUnit) {
+        showToast('لطفاً واحد فروش (فرعی) را انتخاب کنید.', 'error');
+        return;
+      }
+      if (!ratioVal || ratioVal <= 0 || isNaN(ratioVal)) {
+        showToast('لطفاً ضریب تبدیل معتبر وارد کنید (مثلاً ۱۴).', 'error');
+        return;
+      }
+      if (newProdConversionRatio.includes('.')) {
+        const decimalPart = newProdConversionRatio.split('.')[1];
+        if (decimalPart.length > 1) {
+          showToast('ضریب تبدیل حداکثر می‌تواند ۱ رقم اعشار داشته باشد (مثال: ۲.۵).', 'error');
+          return;
+        }
+      }
+    }
 
-    const coverageInfoStr = coverageVal.trim() 
-      ? `${coverageVal.trim()} عدد در هر متر ${coverageType === 'square' ? 'مربع' : 'طول'}`
+    // e.g., "هر ۱ مترمربع = ۱۴ قالب" or info representation
+    const coverageInfoStr = hasSecondaryUnit && ratioVal
+      ? `هر ۱ ${sUnit} = ${ratioVal} ${pUnit}`
       : undefined;
 
-    const newProductObject: Product = {
-      id: `prod-${Date.now()}`,
-      name: name,
-      category: newProdCategory,
-      pricePerUnit: Number(price),
-      unit: unit,
-      description: desc || 'محصول سفالی درجه یک مناسب کاربری صنعتی و مسکونی.',
-      weight: weight || undefined,
-      dimensions: dims || undefined,
-      coverageInfo: coverageInfoStr,
-      isEnabled: true,
-    };
+    const finalUnit = hasSecondaryUnit && sUnit ? sUnit : pUnit;
 
-    const success = await onAddProduct(newProductObject);
-    if (success) {
-      // Reset forms
-      setNewProdName('');
-      setNewProdPrice(10000);
-      setNewProdUnit('عدد');
-      setNewProdDesc('');
-      setNewProdWeight('');
-      setNewProdDimensions('');
-      setCoverageVal('');
+    if (editingProduct) {
+      const updatedProduct: Product = {
+        ...editingProduct,
+        name: name,
+        category: newProdCategory,
+        pricePerUnit: Number(price),
+        unit: finalUnit,
+        description: desc || 'محصول سفالی درجه یک مناسب کاربری صنعتی و مسکونی.',
+        weight: weight || undefined,
+        dimensions: dims || undefined,
+        coverageInfo: coverageInfoStr,
+        primaryUnit: pUnit,
+        secondaryUnit: sUnit,
+        conversionRatio: ratioVal,
+      };
+      const success = await onUpdateProduct(updatedProduct);
+      if (success) {
+        cancelEditingProduct();
+      }
+    } else {
+      const newProductObject: Product = {
+        id: `prod-${Date.now()}`,
+        name: name,
+        category: newProdCategory,
+        pricePerUnit: Number(price),
+        unit: finalUnit,
+        description: desc || 'محصول سفالی درجه یک مناسب کاربری صنعتی و مسکونی.',
+        weight: weight || undefined,
+        dimensions: dims || undefined,
+        coverageInfo: coverageInfoStr,
+        isEnabled: true,
+        primaryUnit: pUnit,
+        secondaryUnit: sUnit,
+        conversionRatio: ratioVal,
+      };
+
+      const success = await onAddProduct(newProductObject);
+      if (success) {
+        cancelEditingProduct();
+      }
     }
   };
 
@@ -579,9 +688,32 @@ export default function ManagerDashboard({
                       <span className="text-slate-400 block mb-0.5">محصول مورد معامله:</span>
                       <strong className="text-slate-800">{order.productName}</strong>
                     </div>
-                    <div>
+                     <div>
                       <span className="text-slate-400 block mb-0.5">مقدار کل سفارش:</span>
-                      <strong className="text-slate-800 font-mono">{order.quantity.toLocaleString()} {order.unit}</strong>
+                      <strong className="text-slate-800 font-mono">
+                        {order.quantity.toLocaleString()} {order.unit}
+                        {(() => {
+                          const prod = products.find(p => p.id === order.productId);
+                          if (prod) {
+                            const pUnit = prod.primaryUnit || 'قالب';
+                            if (order.unit !== pUnit) {
+                              let ratio = prod.conversionRatio;
+                              if (!ratio && prod.coverageInfo) {
+                                const parsedNum = prod.coverageInfo.match(/\d+/);
+                                if (parsedNum) ratio = parseInt(parsedNum[0], 10);
+                              }
+                              if (ratio) {
+                                return (
+                                  <span className="text-[10px] text-emerald-600 block font-sans font-normal mt-0.5">
+                                    ({(order.quantity * ratio).toLocaleString()} {pUnit} تولید)
+                                  </span>
+                                );
+                              }
+                            }
+                          }
+                          return null;
+                        })()}
+                      </strong>
                     </div>
                     <div>
                       <span className="text-slate-400 block mb-0.5">نشانی کارگاه مقصد:</span>
@@ -706,8 +838,31 @@ export default function ManagerDashboard({
                           <strong className="text-slate-800 text-sm">{order.customerName}</strong>
                           <span className="text-[9px] bg-slate-100 text-slate-500 font-mono py-0.5 px-1.5 rounded">{order.orderNumber}</span>
                         </div>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          {order.productName} • <strong className="font-mono text-slate-700 text-[11px]">{order.quantity.toLocaleString()} {order.unit}</strong>
+                        <p className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-1">
+                          <span>{order.productName}</span>
+                          <span>•</span>
+                          <strong className="font-mono text-slate-700 text-[11px]">{order.quantity.toLocaleString()} {order.unit}</strong>
+                          {(() => {
+                            const prod = products.find(p => p.id === order.productId);
+                            if (prod) {
+                              const pUnit = prod.primaryUnit || 'قالب';
+                              if (order.unit !== pUnit) {
+                                let ratio = prod.conversionRatio;
+                                if (!ratio && prod.coverageInfo) {
+                                  const parsedNum = prod.coverageInfo.match(/\d+/);
+                                  if (parsedNum) ratio = parseInt(parsedNum[0], 10);
+                                }
+                                if (ratio) {
+                                  return (
+                                    <span className="text-[10px] text-emerald-600 font-sans font-normal">
+                                      ({(order.quantity * ratio).toLocaleString()} {pUnit} تولید)
+                                    </span>
+                                  );
+                                }
+                              }
+                            }
+                            return null;
+                          })()}
                         </p>
                         <p className="text-[10px] text-slate-400">📍 مقصد: {order.destinationCity}</p>
                       </div>
@@ -793,6 +948,13 @@ export default function ManagerDashboard({
                       {/* Utility buttons for agents */}
                       <div className="flex items-center justify-end gap-2 border-t sm:border-t-0 border-slate-100 pt-2 sm:pt-0">
                         <button
+                          onClick={() => startEditingAgent(agent)}
+                          className="bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 p-1.5 rounded-lg transition-all cursor-pointer"
+                          title="ویرایش اطلاعات نمایندگی"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={() => onToggleAgent(agent.id)}
                           className={`text-[10px] py-1 px-2.5 rounded-lg font-bold transition-all cursor-pointer ${
                             agent.isEnabled 
@@ -834,7 +996,7 @@ export default function ManagerDashboard({
                 className="font-bold text-slate-800 hover:text-emerald-700 text-xs flex items-center justify-end gap-1 mb-4 cursor-pointer select-none transition-colors border-b border-slate-200/60 pb-2"
                 title="برای ارسال فرم کلیک کنید"
               >
-                <span>افزودن و ثبت پروتکل نمایندگی جدید</span>
+                <span>{editingAgent ? `ویرایش نمایندگی فروش: ${editingAgent.alias}` : 'افزودن و ثبت پروتکل نمایندگی جدید'}</span>
                 <PlusCircle className="w-4 h-4 text-emerald-600" />
               </h4>
 
@@ -944,14 +1106,25 @@ export default function ManagerDashboard({
                   />
                 </div>
 
-                <button
-                  type="submit"
-                  id="agent-submit-btn"
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>افزودن و ثبت پروتکل نمایندگی جدید</span>
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    id="agent-submit-btn"
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow"
+                  >
+                    {editingAgent ? <Edit className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                    <span>{editingAgent ? 'ذخیره تغییرات نمایندگی' : 'افزودن و ثبت پروتکل نمایندگی جدید'}</span>
+                  </button>
+                  {editingAgent && (
+                    <button
+                      type="button"
+                      onClick={cancelEditingAgent}
+                      className="bg-slate-200 hover:bg-slate-300 text-slate-700 hover:text-slate-800 font-bold py-2.5 px-3 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center"
+                    >
+                      <span>انصراف</span>
+                    </button>
+                  )}
+                </div>
               </form>
             </div>
           </div>
@@ -979,7 +1152,11 @@ export default function ManagerDashboard({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] bg-slate-100 text-slate-600 border border-slate-200 py-0.5 px-2 rounded font-bold">
-                          {prod.category === 'roofing' ? 'سفال سقف' : prod.category === 'bricks' ? 'آجر و بلوک سفالی' : 'آجر نما و نسوز'}
+                          {prod.category === 'roof_tile' || prod.category === 'roofing' ? 'سفال (roof tile)' : 
+                           prod.category === 'ridge_tile' ? 'تیزه (ridge tile)' : 
+                           prod.category === 'ending_ridge_tile' ? 'تیزه انتهایی (ending ridge tile)' : 
+                           prod.category === 'bricks' ? 'آجر و بلوک سفالی (bricks)' : 
+                           prod.category === 'facade' ? 'آجر نما و نسوز' : prod.category}
                         </span>
                         {prod.isEnabled === false && (
                           <span className="text-[9px] bg-rose-100 text-rose-700 py-0.5 px-1.5 rounded-full font-bold">غیرفعال</span>
@@ -1003,6 +1180,14 @@ export default function ManagerDashboard({
 
                     {/* Operational buttons for products */}
                     <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-2.5 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => startEditingProduct(prod)}
+                        className="bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 p-1.5 rounded-lg transition-all cursor-pointer"
+                        title="ویرایش اطلاعات محصول"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         type="button"
                         onClick={() => onToggleProduct(prod.id)}
@@ -1046,7 +1231,7 @@ export default function ManagerDashboard({
                 className="font-bold text-slate-800 hover:text-emerald-700 text-xs flex items-center justify-end gap-1 mb-4 cursor-pointer select-none transition-colors border-b border-slate-200/60 pb-2"
                 title="برای ارسال فرم کلیک کنید"
               >
-                <span>تعریف کالای جدید کارخانه با مشخصات</span>
+                <span>{editingProduct ? `ویرایش کالا: ${editingProduct.name}` : 'تعریف کالای جدید کارخانه با مشخصات'}</span>
                 <FolderPlus className="w-4 h-4 text-emerald-600" />
               </h4>
 
@@ -1072,29 +1257,81 @@ export default function ManagerDashboard({
                       onChange={(e) => setNewProdCategory(e.target.value)}
                       className="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans cursor-pointer"
                     >
-                      <option value="roofing">سفال سقف</option>
-                      <option value="bricks">آجر و بلوک سفالی</option>
-                      <option value="facade">آجر نما و نسوز</option>
+                      <option value="roof_tile">سفال (roof tile)</option>
+                      <option value="ridge_tile">تیزه (ridge tile)</option>
+                      <option value="ending_ridge_tile">تیزه انتهایی (ending ridge tile)</option>
+                      <option value="bricks">آجر و بلوک سفالی (bricks)</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">واحد شمارش فروش: <span className="text-rose-500">*</span></label>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">واحد اصلی (تولید کارخانه): <span className="text-rose-500">*</span></label>
                     <select
-                      value={newProdUnit}
-                      onChange={(e) => setNewProdUnit(e.target.value)}
+                      value={newProdPrimaryUnit}
+                      onChange={(e) => setNewProdPrimaryUnit(e.target.value)}
                       className="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans cursor-pointer"
                     >
-                      <option value="عدد">عدد (سفال سقف)</option>
-                      <option value="قالب">قالب (آجرها)</option>
+                      <option value="قالب">قالب</option>
+                      <option value="عدد">عدد</option>
+                      <option value="مترمربع">مترمربع</option>
                       <option value="مترطول">مترطول</option>
+                      <option value="پالت">پالت</option>
                       <option value="تن">تن فیزیکی</option>
                     </select>
                   </div>
                 </div>
 
+                {/* Switch for Secondary Sales Unit */}
+                <div className="bg-slate-100 p-2.5 rounded-lg border border-slate-200 flex items-center justify-between">
+                  <div className="text-right">
+                    <p className="text-[10px] font-bold text-slate-700">دارای واحد فروش متمایز (واحد فرعی)</p>
+                    <p className="text-[9px] text-slate-500">مثال: فروش بر اساس مترمربع در حالی که تولید بر اساس قالب است</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={hasSecondaryUnit}
+                    onChange={(e) => setHasSecondaryUnit(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 border-slate-300 rounded cursor-pointer"
+                  />
+                </div>
+
+                {hasSecondaryUnit && (
+                  <div className="grid grid-cols-2 gap-2 bg-slate-100/50 p-2.5 rounded-lg border border-slate-200/60">
+                    <div>
+                      <label className="block text-slate-600 text-[10px] mb-1 font-bold">واحد فروش متمایز (فرعی):</label>
+                      <select
+                        value={newProdSecondaryUnit}
+                        onChange={(e) => setNewProdSecondaryUnit(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans cursor-pointer"
+                      >
+                        <option value="مترمربع">مترمربع</option>
+                        <option value="مترطول">مترطول</option>
+                        <option value="عدد">عدد</option>
+                        <option value="قالب">قالب</option>
+                        <option value="پالت">پالت</option>
+                        <option value="تن">تن فیزیکی</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-600 text-[10px] mb-1 font-bold">ضریب تبدیل واحد (تعداد در یک واحد فروش):</label>
+                      <input
+                        type="number"
+                        min="0.1"
+                        step="0.1"
+                        value={newProdConversionRatio}
+                        onChange={(e) => setNewProdConversionRatio(e.target.value)}
+                        placeholder="مثال: ۱۴ یا ۲.۵"
+                        className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-center font-bold"
+                      />
+                    </div>
+                    <div className="col-span-2 text-center text-[9px] text-emerald-800 font-bold bg-emerald-50 py-1 rounded">
+                      💡 هر ۱ {newProdSecondaryUnit} معادل {newProdConversionRatio || '...'} {newProdPrimaryUnit} در فرآیند تولید خواهد بود.
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">قیمت هر واحد (تومان): <span className="text-rose-500">*</span></label>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">قیمت هر واحد {hasSecondaryUnit ? `فروش (${newProdSecondaryUnit})` : `اصلی (${newProdPrimaryUnit})`} (تومان): <span className="text-rose-500">*</span></label>
                     <input
                       type="number"
                       min="1"
@@ -1116,7 +1353,7 @@ export default function ManagerDashboard({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2">
                   <div>
                     <label className="block text-slate-600 text-[10px] mb-1 font-bold">ابعاد فیزیکی نمونه (📐):</label>
                     <input
@@ -1127,28 +1364,6 @@ export default function ManagerDashboard({
                       className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans text-center"
                     />
                   </div>
-                  <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">نوع پوشش (متر طول vs مربع):</label>
-                    <select
-                      value={coverageType}
-                      onChange={(e) => setCoverageType(e.target.value as 'square' | 'linear')}
-                      className="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans cursor-pointer"
-                    >
-                      <option value="square">برحسب مترمربع</option>
-                      <option value="linear">برحسب متر طول</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">تعداد در متراژ کلید اصلی (مثال: ۱۴):</label>
-                  <input
-                    type="text"
-                    placeholder={`مثال: ۱۴ قالب در هر متر ${coverageType === 'square' ? 'مربع' : 'طول'}`}
-                    value={coverageVal}
-                    onChange={(e) => setCoverageVal(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
-                  />
                 </div>
 
                 <div>
@@ -1162,14 +1377,25 @@ export default function ManagerDashboard({
                   />
                 </div>
 
-                <button
-                  type="submit"
-                  id="product-submit-btn"
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>تعریف و ثبت کالای جدید کارخانه</span>
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    id="product-submit-btn"
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow"
+                  >
+                    {editingProduct ? <Edit className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                    <span>{editingProduct ? 'ذخیره تغییرات محصول' : 'تعریف و ثبت کالای جدید کارخانه'}</span>
+                  </button>
+                  {editingProduct && (
+                    <button
+                      type="button"
+                      onClick={cancelEditingProduct}
+                      className="bg-slate-200 hover:bg-slate-300 text-slate-700 hover:text-slate-800 font-bold py-2.5 px-3 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center"
+                    >
+                      <span>انصراف</span>
+                    </button>
+                  )}
+                </div>
               </form>
             </div>
           </div>
@@ -1417,7 +1643,24 @@ export default function ManagerDashboard({
                       </div>
                       
                       <p className="text-xs text-slate-600 mt-1">
-                        📦 محصول: <strong>{order.productName}</strong> ({order.quantity.toLocaleString()} {order.unit})
+                        📦 محصول: <strong>{order.productName}</strong> ({order.quantity.toLocaleString()} {order.unit}
+                        {(() => {
+                          const prod = products.find(p => p.id === order.productId);
+                          if (prod) {
+                            const pUnit = prod.primaryUnit || 'قالب';
+                            if (order.unit !== pUnit) {
+                              let ratio = prod.conversionRatio;
+                              if (!ratio && prod.coverageInfo) {
+                                const parsedNum = prod.coverageInfo.match(/\d+/);
+                                if (parsedNum) ratio = parseInt(parsedNum[0], 10);
+                              }
+                              if (ratio) {
+                                return ` - معادل ${(order.quantity * ratio).toLocaleString()} ${pUnit}`;
+                              }
+                            }
+                          }
+                          return '';
+                        })()})
                       </p>
                       <p className="text-[10px] text-slate-400">📍 مقصد: {order.destinationCity} • ثبت‌شده در: {new Date(order.createdAt).toLocaleString('fa-IR')}</p>
                     </div>

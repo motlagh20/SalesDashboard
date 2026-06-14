@@ -103,6 +103,30 @@ async function startServer() {
     }
   });
 
+  app.put("/api/products/:id", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const { name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, isEnabled } = req.body;
+      
+      await db.query(`
+        UPDATE products SET 
+          name = ?, category = ?, pricePerUnit = ?, unit = ?, description = ?, 
+          weight = ?, dimensions = ?, coverageInfo = ?, primaryUnit = ?, 
+          secondaryUnit = ?, conversionRatio = ?, isEnabled = ? 
+        WHERE id = ?
+      `, [name, category, pricePerUnit, unit, description || null, weight || null, dimensions || null, coverageInfo || null, primaryUnit || null, secondaryUnit || null, conversionRatio || null, isEnabled ? 1 : 0, id]);
+
+      const redis = getRedisClient();
+      if (redis) await redis.del("products_list");
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error in PUT /api/products/:id:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.delete("/api/products/:id", async (req, res) => {
     try {
       const db = getDbPool();
@@ -192,6 +216,29 @@ async function startServer() {
       console.error("Error in PATCH /api/agents/:id/toggle:", err);
       writeServerErrorLog("PATCH /api/agents/:id/toggle", err, req.params);
       res.status(500).json({ error: err.message || "Unknown database error" });
+    }
+  });
+
+  app.put("/api/agents/:id", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const { fullName, alias, agentCode, phoneNumber, address, area, isEnabled } = req.body;
+
+      await db.query(`
+        UPDATE agents SET 
+          fullName = ?, alias = ?, agentCode = ?, phoneNumber = ?, 
+          address = ?, area = ?, isEnabled = ? 
+        WHERE id = ?
+      `, [fullName, alias, agentCode, phoneNumber, address || null, area || null, isEnabled ? 1 : 0, id]);
+
+      const redis = getRedisClient();
+      if (redis) await redis.del("agents_list");
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error in PUT /api/agents/:id:", err);
+      res.status(500).json({ error: err.message });
     }
   });
 
@@ -338,6 +385,8 @@ async function startServer() {
           status: o.status,
           priorityIndex: o.priorityIndex,
           rejectionReason: o.rejectionReason,
+          itemsJson: o.itemsJson,
+          paymentTrackingCode: o.paymentTrackingCode,
           statusHistory: historyMap[o.id] || []
         };
 
@@ -364,13 +413,18 @@ async function startServer() {
   app.post("/api/orders", async (req, res) => {
     try {
       const db = getDbPool();
-      const { customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, notes } = req.body;
+      const { customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, notes, itemsJson, paymentTrackingCode } = req.body;
       
       const id = `ord-${Date.now()}`;
       
       // Count orders to generate unique TCL sequence number
-      const [countRows] = await db.query("SELECT COUNT(*) as count FROM orders") as any[];
-      let nextNum = (countRows as any[])[0].count + 1;
+      let nextNum = 1;
+      try {
+        const [countRows] = await db.query("SELECT COUNT(*) as count FROM orders") as any[];
+        nextNum = (countRows as any[])[0].count + 1;
+      } catch (cErr) {
+        console.warn("Count failed", cErr);
+      }
 
       // Ensure full compatibility with physical MariaDB/MySQL in production to prevent key duplication
       try {
@@ -402,13 +456,14 @@ async function startServer() {
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
-         
+          
         await connection.query(`
           INSERT INTO orders (
             id, orderNumber, customerName, agentCode, productId, productName, quantity, unit,
-            destinationCity, exactAddress, phoneNumber, notes, createdAt, status, priorityIndex
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-        `, [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, notes || null, createdAt, status]);
+            destinationCity, exactAddress, phoneNumber, notes, createdAt, status, priorityIndex,
+            itemsJson, paymentTrackingCode
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        `, [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, notes || null, createdAt, status, itemsJson || null, paymentTrackingCode || null]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
@@ -427,6 +482,69 @@ async function startServer() {
       console.error("Error in POST /api/orders:", err);
       writeServerErrorLog("POST /api/orders", err, req.body);
       res.status(500).json({ error: err.message || "Unknown database error" });
+    }
+  });
+
+  app.patch("/api/orders/:id/cancel", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const updatedAt = new Date().toISOString();
+      const status = "REJECTED";
+      const reason = "لغو فاکتور توسط نماینده";
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        await connection.query("UPDATE orders SET status = ?, rejectionReason = ? WHERE id = ?", [status, reason, id]);
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          VALUES (?, ?, ?, ?)
+        `, [id, status, updatedAt, "درخواست لغو و ابطال سفارش توسط نماینده"]);
+
+        await connection.commit();
+        res.json({ success: true });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/cancel:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/orders/:id/payment-tracking", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const { paymentTrackingCode } = req.body;
+      const updatedAt = new Date().toISOString();
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        await connection.query("UPDATE orders SET paymentTrackingCode = ? WHERE id = ?", [paymentTrackingCode, id]);
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          VALUES (?, ?, ?, ?)
+        `, [id, "PENDING_APPROVAL", updatedAt, `ثبت/ویرایش کد رهگیری پرداخت وجه به شماره: ${paymentTrackingCode}`]);
+
+        await connection.commit();
+        res.json({ success: true });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/payment-tracking:", err);
+      res.status(500).json({ error: err.message });
     }
   });
 

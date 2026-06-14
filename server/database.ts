@@ -434,7 +434,24 @@ function executeQuery(sql: string, values: any[] = []): any {
 
   // 18. INSERT INTO orders
   if (/INSERT\s+INTO\s+orders/i.test(cleanSql)) {
-    const [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, notes, createdAt, status] = values;
+    const id = values[0];
+    const orderNumber = values[1];
+    const customerName = values[2];
+    const agentCode = values[3];
+    const productId = values[4];
+    const productName = values[5];
+    const quantity = values[6];
+    const unit = values[7];
+    const destinationCity = values[8];
+    const exactAddress = values[9];
+    const phoneNumber = values[10];
+    const notes = values[11];
+    const createdAt = values[12];
+    const status = values[13];
+    const priorityIndex = values[14];
+    const itemsJson = values[15];
+    const paymentTrackingCode = values[16];
+
     jsonData.orders.push({
       id,
       orderNumber,
@@ -450,7 +467,7 @@ function executeQuery(sql: string, values: any[] = []): any {
       notes: notes || null,
       createdAt,
       status,
-      priorityIndex: 0,
+      priorityIndex: Number(priorityIndex) || 0,
       sentToFactoryAt: null,
       rejectionReason: null,
       vehicleType: null,
@@ -458,7 +475,9 @@ function executeQuery(sql: string, values: any[] = []): any {
       driverPhone: null,
       licensePlate: null,
       shippingAgency: null,
-      estimatedArrival: null
+      estimatedArrival: null,
+      itemsJson: itemsJson || null,
+      paymentTrackingCode: paymentTrackingCode || null
     });
     saveJsonData(jsonData);
     return [{ affectedRows: 1 }];
@@ -523,6 +542,56 @@ function executeQuery(sql: string, values: any[] = []): any {
         ord.estimatedArrival = estimatedArrival;
         saveJsonData(jsonData);
       }
+    }
+    return [{ affectedRows: 1 }];
+  }
+
+  // 20b. UPDATE products details in fallback SQL
+  if (/UPDATE\s+products\s+SET/i.test(cleanSql) && !/isEnabled\s+=\s+NOT/i.test(cleanSql)) {
+    const [name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, isEnabled, id] = values;
+    const prod = jsonData.products.find((p: any) => p.id === id);
+    if (prod) {
+      prod.name = name;
+      prod.category = category;
+      prod.pricePerUnit = Number(pricePerUnit);
+      prod.unit = unit;
+      prod.description = description || null;
+      prod.weight = weight || null;
+      prod.dimensions = dimensions || null;
+      prod.coverageInfo = coverageInfo || null;
+      prod.primaryUnit = primaryUnit || null;
+      prod.secondaryUnit = secondaryUnit || null;
+      prod.conversionRatio = conversionRatio ? Number(conversionRatio) : null;
+      prod.isEnabled = Number(isEnabled) === 1 || isEnabled === true;
+      saveJsonData(jsonData);
+    }
+    return [{ affectedRows: 1 }];
+  }
+
+  // 20c. UPDATE agents details in fallback SQL
+  if (/UPDATE\s+agents\s+SET/i.test(cleanSql) && !/isEnabled\s+=\s+NOT/i.test(cleanSql)) {
+    const [fullName, alias, agentCode, phoneNumber, address, area, isEnabled, id] = values;
+    const ag = jsonData.agents.find((a: any) => a.id === id);
+    if (ag) {
+      ag.fullName = fullName;
+      ag.alias = alias;
+      ag.agentCode = agentCode;
+      ag.phoneNumber = phoneNumber;
+      ag.address = address || null;
+      ag.area = area || null;
+      ag.isEnabled = Number(isEnabled) === 1 || isEnabled === true;
+      saveJsonData(jsonData);
+    }
+    return [{ affectedRows: 1 }];
+  }
+
+  // 20d. UPDATE order paymentTrackingCode or cancellation in fallback SQL
+  if (/UPDATE\s+orders\s+SET\s+paymentTrackingCode/i.test(cleanSql)) {
+    const [paymentTrackingCode, id] = values;
+    const ord = jsonData.orders.find((o: any) => o.id === id);
+    if (ord) {
+      ord.paymentTrackingCode = paymentTrackingCode;
+      saveJsonData(jsonData);
     }
     return [{ affectedRows: 1 }];
   }
@@ -833,6 +902,13 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "orders", "licensePlate", "VARCHAR(50) NULL");
     await ensureColumnExists(db, "orders", "shippingAgency", "VARCHAR(150) NULL");
     await ensureColumnExists(db, "orders", "estimatedArrival", "VARCHAR(100) NULL");
+    await ensureColumnExists(db, "orders", "itemsJson", "TEXT NULL");
+    await ensureColumnExists(db, "orders", "paymentTrackingCode", "VARCHAR(150) NULL");
+
+    // products primaryUnit, secondaryUnit, conversionRatio
+    await ensureColumnExists(db, "products", "primaryUnit", "VARCHAR(50) NULL");
+    await ensureColumnExists(db, "products", "secondaryUnit", "VARCHAR(50) NULL");
+    await ensureColumnExists(db, "products", "conversionRatio", "DECIMAL(10, 2) NULL");
 
     console.log("✅ [Bootstrap] MariaDB tables checked and synchronized successfully!");
 

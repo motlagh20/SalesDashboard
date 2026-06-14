@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Order, VehicleDetails, OrderStatus, ShippingCompany } from '../types';
+import { Order, VehicleDetails, OrderStatus, ShippingCompany, Product } from '../types';
 import { 
   Truck, 
   CheckSquare, 
@@ -25,6 +25,7 @@ import {
 interface FactoryDashboardProps {
   orders: Order[];
   shippingCompanies: ShippingCompany[];
+  products: Product[];
   onAssignVehicle: (orderId: string, vehicle: VehicleDetails) => void;
   onDispatchOrder: (orderId: string) => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -34,6 +35,7 @@ interface FactoryDashboardProps {
 export default function FactoryDashboard({
   orders,
   shippingCompanies = [],
+  products = [],
   onAssignVehicle,
   onDispatchOrder,
   showToast,
@@ -332,7 +334,30 @@ export default function FactoryDashboard({
                   </div>
                   <div>
                     <span className="text-slate-400 block mb-0.5">حجم کل سفارش بار:</span>
-                    <strong className="text-slate-800 font-mono text-[11px] block">{order.quantity.toLocaleString()} {order.unit}</strong>
+                    <strong className="text-slate-800 font-mono text-[11px] block">
+                      {order.quantity.toLocaleString()} {order.unit}
+                      {(() => {
+                        const prod = products.find(p => p.id === order.productId);
+                        if (prod) {
+                          const pUnit = prod.primaryUnit || 'قالب';
+                          if (order.unit !== pUnit) {
+                            let ratio = prod.conversionRatio;
+                            if (!ratio && prod.coverageInfo) {
+                              const parsedNum = prod.coverageInfo.match(/\d+/);
+                              if (parsedNum) ratio = parseInt(parsedNum[0], 10);
+                            }
+                            if (ratio) {
+                              return (
+                                <span className="text-[10px] text-emerald-600 block font-sans font-normal mt-0.5">
+                                  ({(order.quantity * ratio).toLocaleString()} {pUnit} بارگیری)
+                                </span>
+                              );
+                            }
+                          }
+                        }
+                        return null;
+                      })()}
+                    </strong>
                   </div>
                   <div>
                     <span className="text-slate-400 block mb-0.5">منطقه تحویل تفصیلی:</span>

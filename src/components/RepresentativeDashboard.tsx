@@ -17,7 +17,9 @@ import {
   FileText, 
   ArrowRight,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  Trash2,
+  Coins
 } from 'lucide-react';
 
 interface RepresentativeDashboardProps {
@@ -25,6 +27,8 @@ interface RepresentativeDashboardProps {
   products: Product[];
   agents: Agent[];
   onCreateOrder: (orderData: Partial<Order>) => void;
+  onCancelOrder: (orderId: string) => void;
+  onUpdatePaymentTracking: (orderId: string, paymentTrackingCode: string) => void;
   selectedAgent: string;
   setSelectedAgent: (agent: string) => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -36,6 +40,8 @@ export default function RepresentativeDashboard({
   products,
   agents,
   onCreateOrder,
+  onCancelOrder,
+  onUpdatePaymentTracking,
   selectedAgent,
   setSelectedAgent,
   showToast,
@@ -61,6 +67,48 @@ export default function RepresentativeDashboard({
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  
+  // Multi-item invoice builder states
+  interface InvoiceItem {
+    id: string;
+    productId: string;
+    productName: string;
+    quantity: number;
+    unit: string;
+    pricePerUnit: number;
+  }
+  const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
+  const [paymentTrackingCode, setPaymentTrackingCode] = useState('');
+
+  const handleAddProductToInvoice = () => {
+    if (!productId) {
+      showToast('لطفاً ابتدا محصول را انتخاب کنید.', 'error');
+      return;
+    }
+    if (quantity <= 0) {
+      showToast('مقدار معتبری وارد کنید.', 'error');
+      return;
+    }
+    const prodObj = products.find(p => p.id === productId);
+    if (!prodObj) return;
+
+    const existingIdx = invoiceItems.findIndex(item => item.productId === productId);
+    if (existingIdx !== -1) {
+      const updated = [...invoiceItems];
+      updated[existingIdx].quantity += quantity;
+      setInvoiceItems(updated);
+    } else {
+      setInvoiceItems([...invoiceItems, {
+        id: `item-${Date.now()}`,
+        productId: prodObj.id,
+        productName: prodObj.name,
+        quantity: quantity,
+        unit: prodObj.unit,
+        pricePerUnit: prodObj.pricePerUnit
+      }]);
+    }
+    showToast('محصول به لیست فاکتور افزوده شد.', 'success');
+  };
 
   // Fallback default productId when products populate
   useEffect(() => {
@@ -82,7 +130,7 @@ export default function RepresentativeDashboard({
   }, [selectedAgent, currentAgentObj]);
 
   // Selected product details
-  const selectedProduct = products.find(p => p.id === productId) || products.find(p => p.isEnabled !== false) || products[0] || {
+  const selectedProduct = (products.find(p => p.id === productId) || products.find(p => p.isEnabled !== false) || products[0] || {
     id: '',
     name: 'محصول نامشخص',
     pricePerUnit: 0,
@@ -90,8 +138,11 @@ export default function RepresentativeDashboard({
     description: '',
     weight: '',
     dimensions: '',
-    coverageInfo: ''
-  };
+    coverageInfo: '',
+    primaryUnit: 'قالب',
+    secondaryUnit: 'مترمربع',
+    conversionRatio: 14
+  }) as Product;
   const estimatedPrice = quantity * selectedProduct.pricePerUnit;
 
   // Filter orders for the selected agent
@@ -103,11 +154,23 @@ export default function RepresentativeDashboard({
       showToast('این نمایندگی در حال حاضر غیرفعال است و امکان ثبت سفارش روی آن وجود ندارد.', 'error');
       return;
     }
-    if (!productId) {
-      showToast('لطفاً ابتدا یک محصول معتبر انتخاب کنید.', 'error');
+
+    const finalItems = invoiceItems.length > 0 
+      ? invoiceItems 
+      : [{
+          id: 'item-def',
+          productId,
+          productName: selectedProduct.name,
+          quantity,
+          unit: selectedProduct.unit,
+          pricePerUnit: selectedProduct.pricePerUnit
+        }];
+
+    if (finalItems.length === 1 && !finalItems[0].productId) {
+      showToast('لطفاً حداقل یک محصول به فاکتور سفارش خود اضافه کنید.', 'error');
       return;
     }
-    if (!quantity || quantity <= 0) return;
+
     if (!exactAddress) {
       showToast('لطفاً آدرس دقیق تخلیه را وارد نمایید.', 'error');
       return;
@@ -117,22 +180,33 @@ export default function RepresentativeDashboard({
 
     // Simulate server post delay
     setTimeout(() => {
+      const rootProductId = finalItems[0].productId;
+      const rootProductName = finalItems.length === 1 
+        ? finalItems[0].productName 
+        : `${finalItems[0].productName} (و ${finalItems.length - 1} محصول دیگر)`;
+      const rootQuantity = finalItems.reduce((acc, item) => acc + item.quantity, 0);
+      const rootUnit = finalItems[0].unit;
+
       onCreateOrder({
         customerName: currentAgentObj.alias,
         agentCode: currentAgentObj.agentCode,
-        productId,
-        productName: selectedProduct.name,
-        quantity,
-        unit: selectedProduct.unit,
+        productId: rootProductId,
+        productName: rootProductName,
+        quantity: rootQuantity,
+        unit: rootUnit,
         destinationCity,
         exactAddress,
         phoneNumber,
         notes,
+        itemsJson: JSON.stringify(finalItems),
+        paymentTrackingCode: paymentTrackingCode.trim() || undefined
       });
 
       // Reset form (except address/phone for easy usage)
       setNotes('');
-      setSuccessMessage('سفارش شما با موفقیت ثبت شد و به پنل مدیریت فروش ارسال گردید.');
+      setInvoiceItems([]);
+      setPaymentTrackingCode('');
+      setSuccessMessage('سفارش چندمحصولی شما با موفقیت ثبت شد و به پنل مدیریت فروش ارسال گردید.');
       setIsSubmitting(false);
 
       setTimeout(() => {
@@ -241,8 +315,8 @@ export default function RepresentativeDashboard({
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">مقدار مورد نیاز:</label>
                 <input
                   type="number"
-                  min="100"
-                  step="100"
+                  min="1"
+                  step="any"
                   value={quantity}
                   onChange={(e) => setQuantity(Number(e.target.value))}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-center font-mono font-bold"
@@ -251,10 +325,75 @@ export default function RepresentativeDashboard({
               </div>
             </div>
 
+            {/* Dynamic Conversion to Molds / Production Unit */}
+            {(() => {
+              const pUnit = selectedProduct.primaryUnit || 'قالب';
+              if (selectedProduct.unit !== pUnit) {
+                let ratio = selectedProduct.conversionRatio;
+                if (!ratio && selectedProduct.coverageInfo) {
+                  const parsedNum = selectedProduct.coverageInfo.match(/\d+/);
+                  if (parsedNum) ratio = parseInt(parsedNum[0], 10);
+                }
+                if (ratio) {
+                  return (
+                    <div className="bg-emerald-50/70 text-emerald-950 px-3 py-2 rounded-lg border border-emerald-100 text-[11px] flex justify-between items-center">
+                      <span className="font-mono font-bold text-emerald-700">
+                        {(quantity * ratio).toLocaleString()} {pUnit}
+                      </span>
+                      <span className="text-slate-600">تعداد نهایی محصول برای بخش‌های تولید کارخانه:</span>
+                    </div>
+                  );
+                }
+              }
+              return null;
+            })()}
+
+            <button
+              type="button"
+              onClick={handleAddProductToInvoice}
+              className="w-full bg-slate-150 hover:bg-slate-200 border border-slate-300 text-slate-700 font-bold py-2.5 px-4 rounded-xl text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <PlusCircle className="w-4 h-4 text-emerald-600" />
+              <span>افزودن این محصول به لیست اقلام فاکتور</span>
+            </button>
+
+            {/* List of current built invoice items */}
+            {invoiceItems.length > 0 && (
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                <span className="text-[10px] text-slate-500 font-bold block">اقلام فاکتور ثبت شده در سفارش جاری:</span>
+                <div className="space-y-1.5">
+                  {invoiceItems.map((item, index) => (
+                    <div key={item.id} className="flex justify-between items-center text-[10px] bg-white border border-slate-100 px-3 py-2 rounded shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInvoiceItems(invoiceItems.filter((_, i) => i !== index));
+                        }}
+                        className="text-rose-500 hover:text-rose-700 font-bold cursor-pointer"
+                        title="حذف این الگو"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="text-slate-600 font-mono">
+                        {item.quantity.toLocaleString()} {item.unit} × {item.pricePerUnit.toLocaleString()} تومان
+                      </span>
+                      <strong className="text-slate-800">{item.productName}</strong>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-left text-[11px] font-bold text-emerald-800 bg-emerald-50/50 p-1.5 rounded">
+                  جمع کل پیش‌فاکتور چندمحصولی: {invoiceItems.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0).toLocaleString()} تومان
+                </div>
+              </div>
+            )}
+
             {/* Simulated Live Cost Calculation */}
             <div className="bg-slate-50 p-3 rounded-lg border border-slate-150 flex justify-between items-center text-xs">
               <span className="text-emerald-700 font-bold font-mono">
-                {estimatedPrice.toLocaleString()} تومان
+                {invoiceItems.length > 0
+                  ? invoiceItems.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0).toLocaleString()
+                  : estimatedPrice.toLocaleString()
+                } تومان
               </span>
               <span className="text-slate-500">مجموع تقریبی پیش‌فاکتور خرید:</span>
             </div>
@@ -302,6 +441,17 @@ export default function RepresentativeDashboard({
                   onChange={(e) => setPhoneNumber(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-left"
                   id="form-phone-input"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">کد رهگیری فیش واریز بانکی پیش‌پرداخت (اختیاری):</label>
+                <input
+                  type="text"
+                  placeholder="مثال: ۹۰۸۷۱۲۳۴۸۷۱"
+                  value={paymentTrackingCode}
+                  onChange={(e) => setPaymentTrackingCode(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-center tracking-widest"
                 />
               </div>
 
@@ -362,9 +512,28 @@ export default function RepresentativeDashboard({
                   >
                     {/* Header line of the item */}
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 mb-4">
-                      <span className={`text-[11px] font-bold border py-1 px-2.5 rounded-full ${statusDetails.badge}`}>
-                        {statusDetails.text}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`text-[11px] font-bold border py-1 px-2.5 rounded-full ${statusDetails.badge}`}>
+                          {statusDetails.text}
+                        </span>
+                        {['PENDING_APPROVAL', 'APPROVED_BY_SALES'].includes(order.status) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              askConfirm(
+                                'کنسل کردن سفارش خرید',
+                                'آیا مایل هستید درخواست این سفارش را لغو و مسدود نمایید؟',
+                                () => {
+                                  onCancelOrder(order.id);
+                                }
+                              );
+                            }}
+                            className="bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] py-1 px-2.5 rounded font-bold transition-all border border-rose-100 cursor-pointer"
+                          >
+                            کنسل کردن سفارش
+                          </button>
+                        )}
+                      </div>
                       <div className="text-right">
                         <span className="text-xs font-mono font-bold text-slate-800">{order.orderNumber}</span>
                         <span className="text-[10px] text-slate-400 mr-2 font-mono">({new Date(order.createdAt).toLocaleDateString('fa-IR')})</span>
@@ -372,22 +541,108 @@ export default function RepresentativeDashboard({
                     </div>
 
                     {/* Order details summary */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs mb-4" id={`details-grid-${order.id}`}>
-                      <div>
-                        <span className="text-slate-400 block mb-0.5">محصول سفارش داده شده:</span>
-                        <strong className="text-slate-800 block text-[11px]">{order.productName}</strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block mb-0.5">مقدار حواله خرید:</span>
-                        <strong className="text-slate-800 block font-mono text-[11px]">{order.quantity.toLocaleString()} {order.unit}</strong>
-                      </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs mb-4" id={`details-grid-${order.id}`}>
+                      {order.itemsJson ? (
+                        <div className="md:col-span-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-right space-y-1">
+                          <span className="text-slate-400 font-bold block text-[9.5px] border-b border-slate-200 pb-1 mb-1">اقلام سبد خرید فاکتور چندمحصولی:</span>
+                          {(() => {
+                            try {
+                              const parsed = JSON.parse(order.itemsJson);
+                              if (Array.isArray(parsed)) {
+                                return parsed.map((item: any, i: number) => (
+                                  <div key={i} className="flex justify-between text-[11px] text-slate-700">
+                                    <span>{item.quantity.toLocaleString()} {item.unit} × {item.pricePerUnit.toLocaleString()} تومان</span>
+                                    <strong className="text-slate-800">{item.productName}</strong>
+                                  </div>
+                                ));
+                              }
+                            } catch(e) {}
+                            return <strong className="text-slate-800">{order.productName}</strong>;
+                          })()}
+                        </div>
+                      ) : (
+                        <div>
+                          <span className="text-slate-400 block mb-0.5">محصول سفارش داده شده:</span>
+                          <strong className="text-slate-800 block text-[11px]">{order.productName}</strong>
+                        </div>
+                      )}
+
+                      {!order.itemsJson && (
+                        <div>
+                          <span className="text-slate-400 block mb-0.5">مقدار حواله خرید:</span>
+                          <strong className="text-slate-800 block font-mono text-[11px]">
+                            {order.quantity.toLocaleString()} {order.unit}
+                            {(() => {
+                              const prod = products.find(p => p.id === order.productId);
+                              if (prod) {
+                                const pUnit = prod.primaryUnit || 'قالب';
+                                if (order.unit !== pUnit) {
+                                  let ratio = prod.conversionRatio;
+                                  if (!ratio && prod.coverageInfo) {
+                                    const parsedNum = prod.coverageInfo.match(/\d+/);
+                                    if (parsedNum) ratio = parseInt(parsedNum[0], 10);
+                                  }
+                                  if (ratio) {
+                                    return (
+                                      <span className="text-[10px] text-emerald-600 block font-sans font-normal mt-0.5">
+                                        ({(order.quantity * ratio).toLocaleString()} {pUnit} تولید)
+                                      </span>
+                                    );
+                                  }
+                                }
+                              }
+                              return null;
+                            })()}
+                          </strong>
+                        </div>
+                      )}
+
                       <div>
                         <span className="text-slate-400 block mb-0.5">شهرستان مقصد:</span>
                         <strong className="text-slate-800 block text-[11px]">{order.destinationCity}</strong>
                       </div>
                     </div>
 
-                    {/* Stepper tracking progress */}
+                    {/* Payment Tracking Code Integration */}
+                    <div className="mt-3 bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex items-center justify-between text-xs flex-wrap gap-2 text-right">
+                      <div className="flex items-center gap-1">
+                        <Coins className="w-3.5 h-3.5 text-slate-400" />
+                        <span className="text-slate-500 text-[10px]">کد رهگیری واریز پیش‌پرداخت مالی:</span>
+                      </div>
+                      {order.paymentTrackingCode ? (
+                        <span className="font-mono bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded font-bold block">{order.paymentTrackingCode}</span>
+                      ) : (
+                        order.status === 'PENDING_APPROVAL' ? (
+                          <div className="flex gap-1.5 items-center">
+                            <input
+                              type="text"
+                              id={`tracking-${order.id}`}
+                              placeholder="کد فیش واریز..."
+                              className="bg-white border border-slate-200 rounded px-2 py-1 text-[10px] font-mono text-center focus:outline-none focus:ring-1 focus:ring-emerald-500 w-32 font-bold"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const inp = document.getElementById(`tracking-${order.id}`) as HTMLInputElement;
+                                if (inp && inp.value.trim()) {
+                                  onUpdatePaymentTracking(order.id, inp.value.trim());
+                                  showToast('کد واریزی با موفقیت به حواله اضافه شد.', 'success');
+                                } else {
+                                  showToast('لطفا کد معتبر وارد فرمایید.', 'error');
+                                }
+                              }}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white text-[9.5px] px-2.5 py-1.5 rounded transition-colors cursor-pointer font-bold"
+                            >
+                              ثبت فیش
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 text-[10px]">بدون اطلاعات واریزی</span>
+                        )
+                      )}
+                    </div>
+
+
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/50 mt-4" id={`stepper-${order.id}`}>
                       <h4 className="text-xs font-bold text-slate-600 mb-4 flex items-center justify-end gap-1.5">
                         <span>مراحل طی شده کارتابل مأموریت</span>
