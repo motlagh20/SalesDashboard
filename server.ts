@@ -146,7 +146,8 @@ async function startServer() {
       res.json(agents);
     } catch (err: any) {
       console.error("Error in GET /api/agents:", err);
-      res.status(500).json({ error: err.message });
+      writeServerErrorLog("GET /api/agents", err);
+      res.status(500).json({ error: err.message || "Unknown database error" });
     }
   });
 
@@ -165,6 +166,7 @@ async function startServer() {
       res.status(201).json({ success: true, id });
     } catch (err: any) {
       console.error("Error in POST /api/agents:", err);
+      writeServerErrorLog("POST /api/agents", err, req.body);
       let errMsg = "خطای غیرمنتظره در سرور رخ داده است.";
       if (err.code === "ER_DUP_ENTRY" || err.errno === 1062) {
         const agCode = req.body?.agentCode || "";
@@ -188,7 +190,8 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PATCH /api/agents/:id/toggle:", err);
-      res.status(500).json({ error: err.message });
+      writeServerErrorLog("PATCH /api/agents/:id/toggle", err, req.params);
+      res.status(500).json({ error: err.message || "Unknown database error" });
     }
   });
 
@@ -204,7 +207,8 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in DELETE /api/agents/:id:", err);
-      res.status(500).json({ error: err.message });
+      writeServerErrorLog("DELETE /api/agents/:id", err, req.params);
+      res.status(500).json({ error: err.message || "Unknown database error" });
     }
   });
 

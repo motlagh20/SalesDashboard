@@ -12,7 +12,10 @@ async function main() {
   const port = Number(process.env.DB_PORT) || 3306;
   const user = process.env.DB_USER || "root";
   const password = process.env.DB_PASSWORD || "";
-  const database = process.env.DB_NAME || "salesdashboard";
+  let database = process.env.DB_NAME || "salesdashboard";
+  if (database === "sales_dashboard") {
+    database = "salesdashboard";
+  }
 
   const sampleAgent = {
     id: `ag-manual-${Date.now()}`,

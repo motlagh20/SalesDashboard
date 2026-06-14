@@ -574,7 +574,11 @@ export function getDbPool(): mysql.Pool {
     const port = Number(process.env.DB_PORT) || 3306;
     const user = process.env.DB_USER || "root";
     const password = process.env.DB_PASSWORD || "";
-    const database = process.env.DB_NAME || "salesdashboard";
+    let database = process.env.DB_NAME || "salesdashboard";
+    if (database === "sales_dashboard") {
+      console.log("ℹ️ [Database] Overriding legacy database name 'sales_dashboard' with 'salesdashboard'.");
+      database = "salesdashboard";
+    }
 
     console.log(`[Database] Initializing MariaDB Connection Pool on ${host}:${port} (${database})...`);
     
