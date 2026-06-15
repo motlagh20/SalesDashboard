@@ -10,6 +10,7 @@ import { PRESET_ORDERS, PRESET_PRODUCTS, PRESET_AGENTS, PRESET_SHIPPING_COMPANIE
 import RepresentativeDashboard from './components/RepresentativeDashboard';
 import ManagerDashboard from './components/ManagerDashboard';
 import FactoryDashboard from './components/FactoryDashboard';
+import ShippingCompanyDashboard from './components/ShippingCompanyDashboard';
 import InfrastructureInfo from './components/InfrastructureInfo';
 import { 
   Building2, 
@@ -556,6 +557,27 @@ export default function App() {
     }
   };
 
+  // 4b. Request transport from a shipping company
+  const handleRequestTransport = async (orderId: string, shippingCompanyId: string, shippingAgency: string) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/request-transport`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shippingCompanyId, shippingAgency })
+      });
+
+      if (response.ok) {
+        showToast(`سفارش با موفقیت جهت تامین کامیون به باربری «${shippingAgency}» ارجاع گردید.`, 'success');
+        refreshAllData();
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت ارجاع باربری');
+        showToast(`خطا در ارسال درخواست باربری: ${errorMsg}`, 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
+  };
+
   // 5. Complete Loading and Dispatch Truck (Called by Factory Transport)
   const handleDispatchOrder = async (orderId: string) => {
     try {
@@ -631,17 +653,17 @@ export default function App() {
         </div>
       </header>
 
-      {/* Role Play Tester Nav - EXTREMELY HELPFUL for showcasing interactive system */}
+      {/* Role Play Tester Nav  */}
       <div className="bg-slate-800 text-slate-200 py-3 border-b border-slate-700 shadow-inner" id="role-tester-bar">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-            <span className="text-[11px] text-slate-400 flex items-center justify-end gap-1.5">
-              <span>تست فرآیند خرید دوطرفه با شبیه‌سازی نقش‌ها:</span>
+            <span className="text-[11px] text-slate-400 flex items-center justify-end gap-1.5 flex-row-reverse">
               <Info className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+              <span>تست فرآیند خرید دوطرفه با شبیه‌سازی نقش‌ها:</span>
             </span>
 
             {/* Quick switches buttons */}
-            <div className="flex flex-wrap gap-2 justify-end" id="role-buttons-grid">
+            <div className="flex flex-wrap gap-2 justify-end animate-fade-in" id="role-buttons-grid">
               
               {/* Role 1: Agent */}
               <button
@@ -685,7 +707,21 @@ export default function App() {
                 <span>۳. کارتابل واحد فروش</span>
               </button>
 
-              {/* View 4: Infrastructure Docs */}
+              {/* Role 4: Shipping Company */}
+              <button
+                onClick={() => setActiveRole('SHIPPING_COMPANY')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  activeRole === 'SHIPPING_COMPANY'
+                    ? 'bg-rose-600 text-white shadow-sm'
+                    : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
+                }`}
+                id="role-btn-shipping"
+              >
+                <Truck className="w-3.5 h-3.5" />
+                <span>۴. پنل اختصاصی باربری‌ها</span>
+              </button>
+
+              {/* View 5: Infrastructure Docs */}
               <button
                 onClick={() => setActiveRole('INFRASTRUCTURE')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
@@ -708,16 +744,21 @@ export default function App() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
         <div className="bg-white border-r-4 border-emerald-500 p-4 rounded-xl shadow-sm text-xs text-slate-600 flex items-start gap-3 justify-end" id="workflow-intro-card">
           <div className="flex-1 text-right">
-            <h4 className="font-bold text-slate-800 mb-0.5">
-              {activeRole === 'REPRESENTATIVE' && '📱 کانال اپلیکیشن تحت وب نمایندگی‌ها (آیفون / اندروید)'}
-              {activeRole === 'SALES_MANAGER' && '👔 کارتابل مدیریت بازرگانی و تایید مالی'}
-              {activeRole === 'FACTORY_TRANSPORT' && '🏭 کارتابل واحد فروش و رهگیری ترابری کارخانه'}
-              {activeRole === 'INFRASTRUCTURE' && '⚙️ نیازمندی‌های توسعه زیرساخت نرم‌افزاری در فاز تولید'}
+            <h4 className="font-bold text-slate-800 mb-1 flex items-center justify-end gap-1.5">
+              <span>
+                {activeRole === 'REPRESENTATIVE' && '📱 کانال اپلیکیشن تحت وب نمایندگی‌ها (آیفون / اندروید)'}
+                {activeRole === 'SALES_MANAGER' && '👔 کارتابل مدیریت بازرگانی و تایید مالی'}
+                {activeRole === 'FACTORY_TRANSPORT' && '🏭 کارتابل واحد فروش و رهگیری ترابری کارخانه'}
+                {activeRole === 'SHIPPING_COMPANY' && '🚚 پنل اختصاصی باربری‌ها و اتوبارهای همکار طبرستان'}
+                {activeRole === 'INFRASTRUCTURE' && '⚙️ نیازمندی‌های توسعه زیرساخت نرم‌افزاری در فاز تولید'}
+              </span>
+              <Info className="w-4 h-4 text-emerald-600" />
             </h4>
             <p className="text-slate-500 leading-relaxed text-justify">
               {activeRole === 'REPRESENTATIVE' && 'سفارشات جدید را در فرم زیر ثبت کنید و فاکتور نهایی را برآورد کنید. با ثبت سفارش، اطلاعات بلافاصله در پنل مدیریت بازرگانی رویت خواهد شد. پیگیری وضعیت فاکتور و کامیون اختصاص داده شده با پلاک، راننده و شماره تلفن در همین بخش قابل رویت است.'}
               {activeRole === 'SALES_MANAGER' && 'سفارشات جدید ثبت شده توسط نمایندگان سراسر کشور با تمام فاکتورها در این کارتابل مدیریت بازرگانی ظاهر می‌شود. واحد بازرگانی می‌تواند با تایید سفارش آن را به خط کارخانه بفرستد یا در صورت عدم کفایت اعتباری با درج علت آن را لغو کند. همچنین قابلیت تعریف نمایندگان، محصولات و شرکت‌های حمل و نقل در این پنل تعبیه شده است.'}
-              {activeRole === 'FACTORY_TRANSPORT' && 'زمانی که واحد بازرگانی سفارش را تایید کند، سفارش به ترتیب زمان ورود در صف به واحد فروش کارخانه ارجاع می‌گردد. واحد فروش پلاک خودرو، نوع تریلی و تلفن راننده را مشخص کرده و سفارش‌ها را به صورت تکی یا دسته‌جمعی به باربری منتخب ارسال می‌کند و سپس محصول بارگیری و صادر می‌شود.'}
+              {activeRole === 'FACTORY_TRANSPORT' && 'سفارشات تایید شده بازرگانی در صف کارخانه قرار می‌گیرند. مدیر فروش کارخانه به جای پر کردن فرم‌های طولانی، به راحتی سفارش را با مشخص کردن باربری و نوع نیاز خودرو به باربری مربوطه ارسال می‌کند تا کمترین درگیری ثبتی را تجربه کند.'}
+              {activeRole === 'SHIPPING_COMPANY' && 'باربری‌ها وقتی ارجاع حمل را از واحد فروش کارخانه طبرستان دریافت می‌کنند، درخواست مربوطه به همراه مقدار سفال سقف یا آجر در صف آنها ظاهر می‌شود. آنها با دکمه درج سریع نام راننده و پلاک را با حداقل وقت تلف شده پر کرده و شماره بارنامه صادرشده در برنامه اختصاصی خود را نوشته و سفارش را به نوبت بارگیری تایید می‌کنند.'}
               {activeRole === 'INFRASTRUCTURE' && 'در این لایه فناوری‌ها، زیرساخت پایگاه داده رابطه‌ای، شیوه احراز هویت پیامکی کاربران و نحوه استقرار برنامه جهت دسترسی دائم تمامی گوشی‌های اندروید و آیفون تبیین شده است.'}
             </p>
           </div>
@@ -784,7 +825,19 @@ export default function App() {
                 shippingCompanies={shippingCompanies}
                 products={products}
                 onAssignVehicle={handleAssignVehicle}
+                onRequestTransport={handleRequestTransport}
                 onDispatchOrder={handleDispatchOrder}
+                showToast={showToast}
+                askConfirm={askConfirm}
+              />
+            )}
+
+            {activeRole === 'SHIPPING_COMPANY' && (
+              <ShippingCompanyDashboard
+                orders={orders}
+                shippingCompanies={shippingCompanies}
+                products={products}
+                onAssignVehicle={handleAssignVehicle}
                 showToast={showToast}
                 askConfirm={askConfirm}
               />

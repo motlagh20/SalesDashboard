@@ -387,17 +387,19 @@ async function startServer() {
           rejectionReason: o.rejectionReason,
           itemsJson: o.itemsJson,
           paymentTrackingCode: o.paymentTrackingCode,
+          shippingCompanyId: o.shippingCompanyId,
           statusHistory: historyMap[o.id] || []
         };
 
-        if (o.driverName || o.driverPhone || o.licensePlate || o.shippingAgency) {
+        if (o.driverName || o.driverPhone || o.licensePlate || o.shippingAgency || o.billOfLadingNumber) {
           formatted.vehicleDetails = {
             vehicleType: o.vehicleType,
             driverName: o.driverName,
             driverPhone: o.driverPhone,
             licensePlate: o.licensePlate,
             shippingAgency: o.shippingAgency,
-            estimatedArrival: o.estimatedArrival
+            estimatedArrival: o.estimatedArrival,
+            billOfLadingNumber: o.billOfLadingNumber
           };
         }
         return formatted;
@@ -752,7 +754,7 @@ async function startServer() {
     try {
       const db = getDbPool();
       const { id } = req.params;
-      const { vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival } = req.body;
+      const { vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, billOfLadingNumber, shippingCompanyId } = req.body;
       const updatedAt = new Date().toISOString();
       const status = "VEHICLE_ASSIGNED";
 
@@ -768,14 +770,16 @@ async function startServer() {
             driverPhone = ?,
             licensePlate = ?,
             shippingAgency = ?,
-            estimatedArrival = ?
+            estimatedArrival = ?,
+            billOfLadingNumber = ?,
+            shippingCompanyId = ?
           WHERE id = ?
-        `, [status, vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, id]);
+        `, [status, vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, billOfLadingNumber || null, shippingCompanyId || null, id]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, updatedAt, `تخصیص وسیله نقلیه ${vehicleType} متعلق به باربری ${shippingAgency} به رانندگی ${driverName}`]);
+        `, [id, status, updatedAt, `تخصیص وسیله نقلیه ${vehicleType} متعلق به باربری ${shippingAgency} به رانندگی ${driverName}${billOfLadingNumber ? ` با شماره بارنامه ${billOfLadingNumber}` : ''}`]);
 
         await connection.commit();
         res.json({ success: true });
@@ -787,6 +791,43 @@ async function startServer() {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/assign-vehicle:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/orders/:id/request-transport", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const { shippingCompanyId, shippingAgency } = req.body;
+      const updatedAt = new Date().toISOString();
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        await connection.query(`
+          UPDATE orders SET 
+            shippingCompanyId = ?,
+            shippingAgency = ?
+          WHERE id = ?
+        `, [shippingCompanyId, shippingAgency, id]);
+
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          VALUES (?, ?, ?, ?)
+        `, [id, "SENT_TO_FACTORY", updatedAt, `ارسال درخواست تامین وسیله نقلیه حمل به شرکت حمل و نقل «${shippingAgency}»`]);
+
+        await connection.commit();
+        res.json({ success: true });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/request-transport:", err);
       res.status(500).json({ error: err.message });
     }
   });

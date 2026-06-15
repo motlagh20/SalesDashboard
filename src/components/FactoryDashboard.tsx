@@ -27,6 +27,7 @@ interface FactoryDashboardProps {
   shippingCompanies: ShippingCompany[];
   products: Product[];
   onAssignVehicle: (orderId: string, vehicle: VehicleDetails) => void;
+  onRequestTransport?: (orderId: string, shippingCompanyId: string, shippingAgency: string) => void;
   onDispatchOrder: (orderId: string) => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
@@ -37,6 +38,7 @@ export default function FactoryDashboard({
   shippingCompanies = [],
   products = [],
   onAssignVehicle,
+  onRequestTransport,
   onDispatchOrder,
   showToast,
   askConfirm,
@@ -57,7 +59,7 @@ export default function FactoryDashboard({
   const [driverPhone, setDriverPhone] = useState('0911');
   const [licensePlate, setLicensePlate] = useState('۱۲ ع ۳۴۵ ایران ۷۲');
   const [shippingAgency, setShippingAgency] = useState(firstAgencyName);
-  const [estimatedArrival, setEstimatedArrival] = useState('فردا صبح');
+  const [estimatedArrival, setEstimatedArrival] = useState(new Date().toLocaleDateString('fa-IR'));
 
   // Form states for bulk assignment
   const [bulkShippingAgency, setBulkShippingAgency] = useState(firstAgencyName);
@@ -110,6 +112,7 @@ export default function FactoryDashboard({
     setDriverName('');
     setDriverPhone('0911');
     setLicensePlate('۱۲ ع ۳۴۵ ایران ۷۲');
+    setEstimatedArrival(new Date().toLocaleDateString('fa-IR'));
   };
 
   const handleToggleSelectOrder = (orderId: string) => {
@@ -377,34 +380,104 @@ export default function FactoryDashboard({
                 {/* Sub-tab 1: Pending Assigning Form */}
                 {activeTab === 'PENDING_TRANSPORT' && (
                   <div className="border-t border-slate-150 pt-4" id={`assign-form-parent-${order.id}`}>
-                    {assigningOrderId !== order.id ? (
-                      <div className="flex items-center justify-between flex-wrap gap-2">
-                        <span className="text-[11px] text-slate-500">جهت درج مشخصات راننده حمل‌ونقل دکمه مقابل را بفشارید.</span>
-                        <button
-                          onClick={() => {
-                            setAssigningOrderId(order.id);
-                            // Choose matching driver suggestions to make simulation super intuitive
-                            if (order.destinationCity.includes('اصفهان')) {
-                              setDriverName('غلامرضا صادقی');
-                              setDriverPhone('09139998888');
-                              setLicensePlate('۷۲ ب ۵۵۱ ایران ۵۳');
-                            } else if (order.destinationCity.includes('تهران')) {
-                              setDriverName('کریم قنبری');
-                              setDriverPhone('09121112233');
-                              setLicensePlate('۵۴ ع ۸۹۲ ایران ۷۲');
-                            } else {
-                              setDriverName('محمد یزدانی');
-                              setDriverPhone('09114567890');
-                              setLicensePlate('۳۲ ق ۳۴۵ ایران ۶۲');
-                            }
-                          }}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-4 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
-                        >
-                          <Truck className="w-4 h-4" />
-                          <span>تخصیص وسیله نقلیه و راننده</span>
-                        </button>
+                    {order.shippingCompanyId ? (
+                      <div className="bg-amber-50/50 border border-amber-200 text-amber-900 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-2">
+                          <Truck className="w-5 h-5 text-amber-500 animate-pulse shrink-0" />
+                          <div>
+                            <p className="font-extrabold text-slate-800">درخواست حمل به باربری ارسال شده است</p>
+                            <p className="text-[10px] text-slate-500 mt-0.5">باربری ارجاع شده: <span className="font-bold text-indigo-950">«{shippingCompanies.find(c => c.id === order.shippingCompanyId)?.name}»</span></p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full">در انتظار راننده و بارنامه...</span>
+                          {/* Fallback button to manually force assignment at factory */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAssigningOrderId(order.id);
+                              setShippingAgency(shippingCompanies.find(c => c.id === order.shippingCompanyId)?.name || firstAgencyName);
+                            }}
+                            className="text-[10px] text-indigo-600 hover:text-indigo-800 underline font-bold"
+                          >
+                            ثبت دستی پلاک در کارخانه
+                          </button>
+                        </div>
                       </div>
                     ) : (
+                      assigningOrderId !== order.id ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center bg-slate-50/40 p-3.5 rounded-xl border border-slate-150">
+                          {/* Option 1: Fast referral to Partner Shipping Company */}
+                          <div className="flex flex-col sm:flex-row items-center gap-3 justify-end">
+                            <div className="text-right flex-1 w-full">
+                              <span className="text-[11px] text-slate-500 font-extrabold block">روش اول: ارجاع هوشمند به باربری همکار</span>
+                              <span className="text-[10px] text-slate-400 block">بدون ثبتی اضافه؛ کارتابل راننده و بارنامه در باربری فعال می‌شود.</span>
+                            </div>
+                            
+                            <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                              <select
+                                id={`agency-select-${order.id}`}
+                                className="bg-white border border-slate-250 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-emerald-500 flex-1 sm:w-44"
+                              >
+                                {activeShippingCompanies.map((sc) => (
+                                  <option key={sc.id} value={sc.id}>{sc.name}</option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const selectEl = document.getElementById(`agency-select-${order.id}`) as HTMLSelectElement | null;
+                                  if (selectEl && onRequestTransport) {
+                                    const selectedId = selectEl.value;
+                                    const selectedCompany = activeShippingCompanies.find(c => c.id === selectedId);
+                                    if (selectedCompany) {
+                                      onRequestTransport(order.id, selectedCompany.id, selectedCompany.name);
+                                    }
+                                  }
+                                }}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-8 px-3 rounded-lg text-xs transition-colors shrink-0 flex items-center justify-center gap-1.5"
+                              >
+                                <Send className="w-3 h-3" />
+                                <span>ارسال</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Line Divider */}
+                          <div className="md:hidden border-t border-slate-100 my-1 w-full" />
+
+                          {/* Option 2: Direct factory assignment */}
+                          <div className="flex items-center justify-between gap-3 text-xs md:border-r md:border-slate-200 md:pr-4">
+                            <div className="text-right">
+                              <span className="text-[11px] text-slate-500 font-extrabold block">روش دوم: ثبت مستقیم مشخصات راننده</span>
+                              <span className="text-[10px] text-zinc-400 block">اگر راننده با بارنامه آماده در دفتر کارخانه حضور دارد.</span>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setAssigningOrderId(order.id);
+                                // Choose matching driver suggestions to make simulation super intuitive
+                                if (order.destinationCity.includes('اصفهان')) {
+                                  setDriverName('غلامرضا صادقی');
+                                  setDriverPhone('09139998888');
+                                  setLicensePlate('۷۲ ب ۵۵۱ ایران ۵۳');
+                                } else if (order.destinationCity.includes('تهران')) {
+                                  setDriverName('کریم قنبری');
+                                  setDriverPhone('09121112233');
+                                  setLicensePlate('۵۴ ع ۸۹۲ ایران ۷۲');
+                                } else {
+                                  setDriverName('محمد یزدانی');
+                                  setDriverPhone('09114567890');
+                                  setLicensePlate('۳۲ ق ۳۴۵ ایران ۶۲');
+                                }
+                              }}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-lg text-[11px] font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0"
+                            >
+                              <Truck className="w-3.5 h-3.5" />
+                              <span>ثبت مستقیم</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
                       <form onSubmit={(e) => handleAssignSubmit(e, order.id)} className="bg-slate-50/50 p-4 rounded-xl border border-slate-200 space-y-4">
                         <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-2">
                           <span className="text-xs font-bold text-slate-700">تکمیل فرم حواله راننده جهت خروج</span>
@@ -478,12 +551,12 @@ export default function FactoryDashboard({
                           </div>
 
                           <div>
-                            <label className="block text-slate-600 mb-1 font-bold">زمان تخمینی بارگیری و رسیدن:</label>
+                            <label className="block text-slate-600 mb-1 font-bold">تاریخ بارگیری (صدور بارنامه):</label>
                             <input
                               type="text"
                               value={estimatedArrival}
                               onChange={(e) => setEstimatedArrival(e.target.value)}
-                              className="w-full bg-white border border-slate-200 rounded px-2.5 py-1 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
+                              className="w-full bg-white border border-slate-200 rounded px-2.5 py-1 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans text-center font-bold"
                             />
                           </div>
                         </div>
@@ -504,7 +577,7 @@ export default function FactoryDashboard({
                           </button>
                         </div>
                       </form>
-                    )}
+                    ))}
                   </div>
                 )}
 

@@ -12,6 +12,7 @@ export interface VehicleDetails {
   licensePlate: string;
   shippingAgency: string;
   estimatedArrival?: string;
+  billOfLadingNumber?: string; // شماره بارنامه صادره از سیستم باربری صادرکننده
 }
 
 export interface Order {
@@ -40,6 +41,7 @@ export interface Order {
   rejectionReason?: string;
   itemsJson?: string;
   paymentTrackingCode?: string;
+  shippingCompanyId?: string; // شناسه شرکت حمل و نقل ارجاع شده
 }
 
 export interface Product {
@@ -78,4 +80,4 @@ export interface ShippingCompany {
   isEnabled: boolean;
 }
 
-export type UserRole = 'REPRESENTATIVE' | 'SALES_MANAGER' | 'FACTORY_TRANSPORT';
+export type UserRole = 'REPRESENTATIVE' | 'SALES_MANAGER' | 'FACTORY_TRANSPORT' | 'SHIPPING_COMPANY';

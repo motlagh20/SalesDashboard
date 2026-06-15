@@ -31,8 +31,11 @@ import {
   Briefcase,
   ExternalLink,
   Truck,
-  Edit
+  Edit,
+  Printer
 } from 'lucide-react';
+
+import { printOrders } from '../utils/printHelper';
 
 interface ManagerDashboardProps {
   orders: Order[];
@@ -107,7 +110,7 @@ export default function ManagerDashboard({
   const [newAgentPhone, setNewAgentPhone] = useState('');
   const [newAgentAddress, setNewAgentAddress] = useState('');
   const [newAgentArea, setNewAgentArea] = useState('');
-  const [autoGenAgentCode, setAutoGenAgentCode] = useState(true);
+  const [autoGenAgentCode, setAutoGenAgentCode] = useState(false);
 
   // Editing state for products and agents
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -132,7 +135,7 @@ export default function ManagerDashboard({
     setNewAgentPhone('');
     setNewAgentAddress('');
     setNewAgentArea('');
-    setAutoGenAgentCode(true);
+    setAutoGenAgentCode(false);
   };
 
   const startEditingProduct = (prod: Product) => {
@@ -683,58 +686,225 @@ export default function ManagerDashboard({
                     <span className="text-xs font-mono font-bold text-slate-700">{order.orderNumber}</span>
                   </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs py-3.5">
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 text-xs py-3">
                     <div>
-                      <span className="text-slate-400 block mb-0.5">محصول مورد معامله:</span>
-                      <strong className="text-slate-800">{order.productName}</strong>
-                    </div>
-                     <div>
-                      <span className="text-slate-400 block mb-0.5">مقدار کل سفارش:</span>
-                      <strong className="text-slate-800 font-mono">
-                        {order.quantity.toLocaleString()} {order.unit}
-                        {(() => {
-                          const prod = products.find(p => p.id === order.productId);
-                          if (prod) {
-                            const pUnit = prod.primaryUnit || 'قالب';
-                            if (order.unit !== pUnit) {
-                              let ratio = prod.conversionRatio;
-                              if (!ratio && prod.coverageInfo) {
-                                const parsedNum = prod.coverageInfo.match(/\d+/);
-                                if (parsedNum) ratio = parseInt(parsedNum[0], 10);
-                              }
-                              if (ratio) {
-                                return (
-                                  <span className="text-[10px] text-emerald-600 block font-sans font-normal mt-0.5">
-                                    ({(order.quantity * ratio).toLocaleString()} {pUnit} تولید)
-                                  </span>
-                                );
-                              }
-                            }
-                          }
-                          return null;
-                        })()}
-                      </strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block mb-0.5">نشانی کارگاه مقصد:</span>
+                      <span className="text-slate-400 block mb-0.5">نشانی کارگاه مقصد (شهرستان):</span>
                       <strong className="text-slate-800 flex items-center justify-end gap-1">
                         <span>{order.destinationCity}</span>
                         <MapPin className="w-3.5 h-3.5 text-slate-400" />
                       </strong>
                     </div>
                     <div>
-                      <span className="text-slate-400 block mb-0.5">درج حواله سیستمی:</span>
+                      <span className="text-slate-400 block mb-0.5">زمان ثبت سیستمی درخواست:</span>
                       <strong className="text-slate-500 font-mono">{new Date(order.createdAt).toLocaleString('fa-IR')}</strong>
+                    </div>
+                    <div className="col-span-2 lg:col-span-1">
+                      <span className="text-slate-400 block mb-0.5">خلاصه کل سفارش:</span>
+                      <strong className="text-slate-700">
+                        {(() => {
+                          if (order.itemsJson) {
+                            try {
+                              const parsed = JSON.parse(order.itemsJson);
+                              if (Array.isArray(parsed) && parsed.length > 0) {
+                                return parsed.map((item: any) => `${item.productName} (${item.quantity?.toLocaleString()} ${item.unit || order.unit})`).join(' + ');
+                              }
+                            } catch (e) {}
+                          }
+                          return `${order.productName} به میزان ${order.quantity.toLocaleString()} ${order.unit}`;
+                        })()}
+                      </strong>
                     </div>
                   </div>
 
-                  <div className="bg-slate-50 p-2.5 rounded-lg text-[11px] text-slate-600 mb-4 space-y-1 text-right">
-                    <p>📍 <strong>آدرس تخلیه کالا:</strong> {order.exactAddress}</p>
-                    <p>📞 <strong>تلفن تخلیه کالا:</strong> {order.phoneNumber}</p>
-                    {order.notes && <p className="text-slate-600 font-medium">📝 <strong>ملاحظات ارسال:</strong> {order.notes}</p>}
+                  {/* Order items and pricing details block */}
+                  <div className="my-3 bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 text-right shadow-sm">
+                    <h4 className="text-xs font-bold text-indigo-900 border-b border-indigo-100 pb-2 mb-3 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <FileText className="w-4 h-4 text-indigo-600" />
+                        <span>جزئیات دقیق اقلام سبد خرید فاکتور مالی</span>
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">حواله #{order.orderNumber}</span>
+                    </h4>
+
+                    {order.itemsJson ? (
+                      <div className="space-y-2">
+                        {(() => {
+                          try {
+                            const parsed = JSON.parse(order.itemsJson);
+                            if (Array.isArray(parsed) && parsed.length > 0) {
+                              let totalSum = 0;
+                              return (
+                                <>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-xs text-slate-700 text-right">
+                                      <thead>
+                                        <tr className="border-b border-slate-200 text-slate-400 text-[10px] font-bold">
+                                          <th className="pb-1.5 font-bold">نام محصول</th>
+                                          <th className="pb-1.5 text-center font-bold">مقدار</th>
+                                          <th className="pb-1.5 text-center font-bold">قیمت واحد (تومان)</th>
+                                          <th className="pb-1.5 text-left font-bold">جمع کل (تومان)</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                        {parsed.map((item: any, idx: number) => {
+                                          const rowTotal = (item.quantity || 0) * (item.pricePerUnit || 0);
+                                          totalSum += rowTotal;
+                                          return (
+                                            <tr key={idx} className="hover:bg-slate-100/50">
+                                              <td className="py-2 font-bold text-slate-800">{item.productName || order.productName}</td>
+                                              <td className="py-2 text-center font-mono font-bold text-slate-700">
+                                                {item.quantity ? item.quantity.toLocaleString() : '۱'} {item.unit || order.unit}
+                                              </td>
+                                              <td className="py-2 text-center font-mono text-slate-600">
+                                                {item.pricePerUnit ? item.pricePerUnit.toLocaleString() : '۰'}
+                                              </td>
+                                              <td className="py-2 text-left font-mono font-extrabold text-indigo-700">
+                                                {rowTotal.toLocaleString()}
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+
+                                  <div className="border-t border-slate-200 pt-3 mt-2 flex flex-col sm:flex-row items-center justify-between gap-2 bg-white/70 p-2.5 rounded-lg border border-slate-100">
+                                    <div className="text-right">
+                                      <span className="text-[10px] text-slate-400 block mb-0.5">کد رهگیری پیش‌پرداخت مالی:</span>
+                                      {order.paymentTrackingCode ? (
+                                        <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-100 py-1 px-2.5 rounded">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                          <span>فیش واریزی: {order.paymentTrackingCode}</span>
+                                        </div>
+                                      ) : (
+                                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-100 py-1 px-2.5 rounded">
+                                          ⚠️ فاقد کد پیگیری پیش‌پرداخت (بدون ثبت فیش)
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-left font-sans sm:text-left self-stretch sm:self-auto flex items-center justify-between sm:justify-end gap-3">
+                                      <span className="text-slate-500 font-normal">مبلغ کل فاکتور:</span>
+                                      <strong className="text-sm font-black text-rose-600 font-mono">
+                                        {totalSum.toLocaleString()} تومان
+                                      </strong>
+                                    </div>
+                                  </div>
+                                </>
+                              );
+                            }
+                          } catch (e) {
+                            console.error("Error parsing itemsJson", e);
+                          }
+                          return null;
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {/* Single-product detailed presentation */}
+                        {(() => {
+                          const prod = products.find(p => p.id === order.productId);
+                          const priceUnit = prod ? prod.pricePerUnit : 0;
+                          const totalSum = order.quantity * priceUnit;
+                          return (
+                            <>
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-xs text-slate-700 text-right">
+                                  <thead>
+                                    <tr className="border-b border-slate-200 text-slate-400 text-[10px] font-bold">
+                                      <th className="pb-1.5 font-bold">نام محصول</th>
+                                      <th className="pb-1.5 text-center font-bold">مقدار سفارش</th>
+                                      <th className="pb-1.5 text-center font-bold">قیمت واحد (تومان)</th>
+                                      <th className="pb-1.5 text-left font-bold">جمع کل (تومان)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr className="hover:bg-slate-100/50">
+                                      <td className="py-2.5 font-bold text-slate-800">{order.productName}</td>
+                                      <td className="py-2.5 text-center font-mono font-bold text-slate-700">
+                                        {order.quantity.toLocaleString()} {order.unit}
+                                        {prod && order.unit !== (prod.primaryUnit || 'قالب') && (() => {
+                                          let ratio = prod.conversionRatio;
+                                          if (!ratio && prod.coverageInfo) {
+                                            const parsedNum = prod.coverageInfo.match(/\d+/);
+                                            if (parsedNum) ratio = parseInt(parsedNum[0], 10);
+                                          }
+                                          if (ratio) {
+                                            return (
+                                              <span className="text-[10px] text-emerald-600 block font-normal mt-0.5">
+                                                ({(order.quantity * ratio).toLocaleString()} {prod.primaryUnit || 'قالب'} تولید)
+                                              </span>
+                                            );
+                                          }
+                                          return null;
+                                        })()}
+                                      </td>
+                                      <td className="py-2.5 text-center font-mono text-slate-600">
+                                        {priceUnit ? priceUnit.toLocaleString() : 'پیگیری تلفنی'}
+                                      </td>
+                                      <td className="py-2.5 text-left font-mono font-extrabold text-indigo-700">
+                                        {totalSum ? totalSum.toLocaleString() : 'بررسی بازار'}
+                                      </td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+
+                              <div className="border-t border-slate-200 pt-3 mt-2 flex flex-col sm:flex-row items-center justify-between gap-2 bg-white/70 p-2.5 rounded-lg border border-slate-100 text-xs">
+                                <div className="text-right">
+                                  <span className="text-[10px] text-slate-400 block mb-0.5">کد رهگیری پیش‌پرداخت مالی:</span>
+                                  {order.paymentTrackingCode ? (
+                                    <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-100 py-1 px-2.5 rounded">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                      <span>فیش واریزی: {order.paymentTrackingCode}</span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-100 py-1 px-2.5 rounded">
+                                      ⚠️ فاقد کد پیگیری پیش‌پرداخت (بدون ثبت فیش)
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-left font-sans sm:text-left self-stretch sm:self-auto flex items-center justify-between sm:justify-end gap-3">
+                                  <span className="text-slate-500 font-normal">مبلغ کل فاکتور:</span>
+                                  <strong className="text-sm font-black text-rose-600 font-mono">
+                                    {totalSum ? `${totalSum.toLocaleString()} تومان` : 'مشخص بازار'}
+                                  </strong>
+                                </div>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex justify-end gap-2.5">
+                  <div className="bg-slate-50 p-3 rounded-lg text-[11px] text-slate-600 mb-4 space-y-1.5 text-right border border-slate-200/50">
+                    <p className="flex items-start gap-1">
+                      <span>📍</span>
+                      <span><strong>آدرس دقیق تخلیه کالا:</strong> {order.exactAddress}</span>
+                    </p>
+                    <p className="flex items-start gap-1">
+                      <span>📞</span>
+                      <span><strong>تلفن متصدی تخلیه:</strong> <span className="font-mono">{order.phoneNumber}</span></span>
+                    </p>
+                    {order.notes && (
+                      <p className="text-slate-700 font-medium bg-amber-50/40 p-1.5 rounded border border-amber-100/50 flex items-start gap-1">
+                        <span>📝</span>
+                        <span><strong>ملاحظات ارسال سفارش:</strong> {order.notes}</span>
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => printOrders([order], products, agents)}
+                      className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 py-1.5 px-3 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                      title="پیش‌نمایش و چاپ فاکتور حواله"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>چاپ حواله</span>
+                    </button>
+
                     {rejectionInputId !== order.id ? (
                       <button
                         onClick={() => setRejectionInputId(order.id)}
@@ -797,22 +967,39 @@ export default function ManagerDashboard({
                   صف فعال: {visibleOrders.length} مورد
                 </span>
                 {visibleOrders.length > 0 && onDispatchAllToFactory && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      askConfirm(
-                        'ارسال نهایی و دسته‌جمعی به کارخانه',
-                        'آیا مایلید تمامی سفارشات تأیید شده حاضر در صف را به بخش تولید و ترابری کارخانه جهت تخصیص فوری کامیون ارسال نمایید؟',
-                        () => {
-                          onDispatchAllToFactory();
-                        }
-                      );
-                    }}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3.5 rounded-lg text-xs cursor-pointer transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-                  >
-                    <Navigation className="w-4 h-4" />
-                    <span>ارسال همه به کارخانه</span>
-                  </button>
+                  <div className="flex flex-wrap gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        printOrders(visibleOrders, products, agents);
+                        showToast('📥 فایل PDF گروهی کلیه سفارشات صف جهت چاپ صادر شد.', 'success');
+                      }}
+                      className="bg-white hover:bg-slate-100 border border-slate-350 text-slate-700 font-bold py-2 px-3.5 rounded-lg text-xs cursor-pointer transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                      title="چاپ و ایجاد PDF گروهی برای کل صف جاری"
+                    >
+                      <Printer className="w-4 h-4 text-slate-500" />
+                      <span>چاپ دسته‌جمعی صف</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        askConfirm(
+                          'ارسال نهایی و دسته‌جمعی به کارخانه',
+                          'آیا مایلید تمامی سفارشات تأیید شده حاضر در صف را به خط تولید و ترابری کارخانه ارسال نمایید؟ همچنین فایل PDF رسمی کلیه حواله‌ها جهت بایگانی فیزیکی خودکار صادر و چاپ خواهد شد.',
+                          () => {
+                            printOrders(visibleOrders, products, agents);
+                            showToast('📥 حواله فیزیکی و PDF کلیه سفارشات صادر شد.', 'success');
+                            onDispatchAllToFactory();
+                          }
+                        );
+                      }}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3.5 rounded-lg text-xs cursor-pointer transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Navigation className="w-4 h-4" />
+                      <span>ارسال همه به کارخانه</span>
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -838,11 +1025,34 @@ export default function ManagerDashboard({
                           <strong className="text-slate-800 text-sm">{order.customerName}</strong>
                           <span className="text-[9px] bg-slate-100 text-slate-500 font-mono py-0.5 px-1.5 rounded">{order.orderNumber}</span>
                         </div>
-                        <p className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-1">
-                          <span>{order.productName}</span>
-                          <span>•</span>
-                          <strong className="font-mono text-slate-700 text-[11px]">{order.quantity.toLocaleString()} {order.unit}</strong>
+                        <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-1">
                           {(() => {
+                            if (order.itemsJson) {
+                              try {
+                                const parsed = JSON.parse(order.itemsJson);
+                                if (Array.isArray(parsed) && parsed.length > 0) {
+                                  return (
+                                    <div className="flex flex-wrap gap-1.5 mt-1">
+                                      {parsed.map((item: any, i: number) => (
+                                        <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 py-0.5 px-2 rounded-md font-medium text-[10px]">
+                                          {item.productName}: <strong className="font-mono text-slate-950">{item.quantity?.toLocaleString()} {item.unit || order.unit}</strong>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  );
+                                }
+                              } catch (e) {}
+                            }
+                            return (
+                              <p className="flex flex-wrap items-center gap-1">
+                                <span>{order.productName}</span>
+                                <span>•</span>
+                                <strong className="font-mono text-slate-700 text-[11px]">{order.quantity.toLocaleString()} {order.unit}</strong>
+                              </p>
+                            );
+                          })()}
+                          {(() => {
+                            if (order.itemsJson) return null; // Skip ratio conversion for multi-item orders
                             const prod = products.find(p => p.id === order.productId);
                             if (prod) {
                               const pUnit = prod.primaryUnit || 'قالب';
@@ -863,7 +1073,7 @@ export default function ManagerDashboard({
                             }
                             return null;
                           })()}
-                        </p>
+                        </div>
                         <p className="text-[10px] text-slate-400">📍 مقصد: {order.destinationCity}</p>
                       </div>
                     </div>
@@ -891,13 +1101,32 @@ export default function ManagerDashboard({
                         </button>
                       </div>
 
+                      {/* Print single order document */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          printOrders([order], products, agents);
+                          showToast('📥 پیش‌نمایش حواله خروج جهت چاپ و ذخیره PDF آماده شد.', 'info');
+                        }}
+                        className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 py-1.5 px-2.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                        title="چاپ حواله فیزیکی تک محصولی"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-slate-500" />
+                        <span>چاپ حواله</span>
+                      </button>
+
                       {/* Explicit SEND action - moves to factory line */}
                       <button
-                        onClick={() => onDispatchToFactory(order.id)}
+                        onClick={() => {
+                          printOrders([order], products, agents);
+                          showToast('📥 حواله خروج کالا صادر شد و برای پرونده فیزیکی به پرینتر ارسال گردید.', 'success');
+                          onDispatchToFactory(order.id);
+                        }}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white py-1.5 px-3 rounded-lg text-[11px] font-bold cursor-pointer transition-colors flex items-center gap-1 shadow-sm"
+                        title="ارسال نهایی به کارخانه و چاپ اتوماتیک نسخه فیزیکی حواله"
                       >
                         <Navigation className="w-3.5 h-3.5" />
-                        <span>ارسال نهایی به کارخانه</span>
+                        <span>ارسال و چاپ</span>
                       </button>
                     </div>
 
@@ -1030,7 +1259,7 @@ export default function ManagerDashboard({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-slate-600 text-[10px] font-bold">
-                      کد یکتای نمایندگی: <span className="text-rose-500">*</span>
+                      کد نمایندگی (تفصیلی حسابداری): <span className="text-rose-500">*</span>
                     </label>
                     <label className="flex items-center gap-1 cursor-pointer select-none">
                       <input
@@ -1045,7 +1274,7 @@ export default function ManagerDashboard({
                         }}
                         className="w-3.5 h-3.5 text-emerald-600 accent-emerald-600 cursor-pointer"
                       />
-                      <span className="text-[10px] text-slate-500 font-sans font-medium">ایجاد خودکار</span>
+                      <span className="text-[10px] text-slate-500 font-sans font-medium">ایجاد خودکار سیستم</span>
                     </label>
                   </div>
                   {autoGenAgentCode ? (
@@ -1060,12 +1289,15 @@ export default function ManagerDashboard({
                   ) : (
                     <input
                       type="text"
-                      placeholder="مثال: AG-2500"
+                      placeholder="مثال: ۱۰۱۰۲ یا AG-2500"
                       value={newAgentCode}
                       onChange={(e) => setNewAgentCode(e.target.value)}
                       className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
                     />
                   )}
+                  <p className="text-[9px] text-slate-400 mt-1">
+                    جهت تسهیل در فرآیند مغایرت‌گیری و کنترل حساب‌ها، کد تفصیلی نمایندگی در سیستم نرم‌افزاری حسابداری را درج کنید.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -1642,42 +1874,80 @@ export default function ManagerDashboard({
                         </span>
                       </div>
                       
-                      <p className="text-xs text-slate-600 mt-1">
-                        📦 محصول: <strong>{order.productName}</strong> ({order.quantity.toLocaleString()} {order.unit}
+                      <div className="text-xs text-slate-600 mt-1">
                         {(() => {
-                          const prod = products.find(p => p.id === order.productId);
-                          if (prod) {
-                            const pUnit = prod.primaryUnit || 'قالب';
-                            if (order.unit !== pUnit) {
-                              let ratio = prod.conversionRatio;
-                              if (!ratio && prod.coverageInfo) {
-                                const parsedNum = prod.coverageInfo.match(/\d+/);
-                                if (parsedNum) ratio = parseInt(parsedNum[0], 10);
+                          if (order.itemsJson) {
+                            try {
+                              const parsed = JSON.parse(order.itemsJson);
+                              if (Array.isArray(parsed) && parsed.length > 0) {
+                                return (
+                                  <div className="flex flex-wrap gap-1.5 mt-1">
+                                    <span>📦 اقلام سفارش چندمحصولی:</span>
+                                    {parsed.map((item: any, i: number) => (
+                                      <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 py-0.5 px-2 rounded font-medium text-[10px]">
+                                        {item.productName}: <strong className="font-mono text-slate-950">{item.quantity?.toLocaleString()} {item.unit || order.unit}</strong>
+                                      </span>
+                                    ))}
+                                  </div>
+                                );
                               }
-                              if (ratio) {
-                                return ` - معادل ${(order.quantity * ratio).toLocaleString()} ${pUnit}`;
-                              }
-                            }
+                            } catch (e) {}
                           }
-                          return '';
-                        })()})
-                      </p>
+                          return (
+                            <p className="text-xs text-slate-600">
+                              📦 محصول: <strong>{order.productName}</strong> ({order.quantity.toLocaleString()} {order.unit}
+                              {(() => {
+                                const prod = products.find(p => p.id === order.productId);
+                                if (prod) {
+                                  const pUnit = prod.primaryUnit || 'قالب';
+                                  if (order.unit !== pUnit) {
+                                    let ratio = prod.conversionRatio;
+                                    if (!ratio && prod.coverageInfo) {
+                                      const parsedNum = prod.coverageInfo.match(/\d+/);
+                                      if (parsedNum) ratio = parseInt(parsedNum[0], 10);
+                                    }
+                                    if (ratio) {
+                                      return ` - معادل ${(order.quantity * ratio).toLocaleString()} ${pUnit}`;
+                                    }
+                                  }
+                                }
+                                return '';
+                              })()})
+                            </p>
+                          );
+                        })()}
+                      </div>
                       <p className="text-[10px] text-slate-400">📍 مقصد: {order.destinationCity} • ثبت‌شده در: {new Date(order.createdAt).toLocaleString('fa-IR')}</p>
                     </div>
 
-                    {order.vehicleDetails && (
-                      <div className="bg-emerald-50/50 rounded-lg p-2 border border-emerald-100/50 text-[10px] text-slate-600 font-mono text-right shrink-0">
-                        <p className="font-bold text-emerald-800 text-[11px]">🚒 ترابری اختصاص‌یافته:</p>
-                        <p>{order.vehicleDetails.vehicleType} • {order.vehicleDetails.driverName}</p>
-                        <p>📞 {order.vehicleDetails.driverPhone} • 🏷️ {order.vehicleDetails.licensePlate}</p>
-                      </div>
-                    )}
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      {order.vehicleDetails && (
+                        <div className="bg-emerald-50/50 rounded-lg p-2 border border-emerald-100/50 text-[10px] text-slate-600 font-mono text-right">
+                          <p className="font-bold text-emerald-800 text-[11px]">🚒 ترابری اختصاص‌یافته:</p>
+                          <p>{order.vehicleDetails.vehicleType} • {order.vehicleDetails.driverName}</p>
+                          <p>📞 {order.vehicleDetails.driverPhone} • 🏷️ {order.vehicleDetails.licensePlate}</p>
+                        </div>
+                      )}
 
-                    {order.status === 'REJECTED' && order.rejectionReason && (
-                      <div className="bg-rose-50 rounded border border-rose-100 p-2 text-[10px] text-rose-800 shrink-0 text-right">
-                        <strong>❌ علت لغو حواله:</strong> {order.rejectionReason}
-                      </div>
-                    )}
+                      {order.status === 'REJECTED' && order.rejectionReason && (
+                        <div className="bg-rose-50 rounded border border-rose-100 p-2 text-[10px] text-rose-800 text-right">
+                          <strong>❌ علت لغو حواله:</strong> {order.rejectionReason}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          printOrders([order], products, agents);
+                          showToast('📥 پیش‌نمایش حواله آرشیوی جهت پرینت مجدد و ذخیره PDF بارگذاری شد.', 'success');
+                        }}
+                        className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 hover:text-slate-850 py-1 px-3 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all self-end"
+                        title="چاپ مجدد حواله خروج رسمی"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-slate-500" />
+                        <span>چاپ مجدد حواله</span>
+                      </button>
+                    </div>
 
                   </div>
                 ))}

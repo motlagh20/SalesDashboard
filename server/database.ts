@@ -477,7 +477,9 @@ function executeQuery(sql: string, values: any[] = []): any {
       shippingAgency: null,
       estimatedArrival: null,
       itemsJson: itemsJson || null,
-      paymentTrackingCode: paymentTrackingCode || null
+      paymentTrackingCode: paymentTrackingCode || null,
+      billOfLadingNumber: null,
+      shippingCompanyId: null
     });
     saveJsonData(jsonData);
     return [{ affectedRows: 1 }];
@@ -530,16 +532,41 @@ function executeQuery(sql: string, values: any[] = []): any {
         saveJsonData(jsonData);
       }
     } else if (/vehicleType\s+=\s+\?/i.test(cleanSql)) {
-      const [status, vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, id] = values;
+      if (values.length >= 10) {
+        const [status, vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, billOfLadingNumber, shippingCompanyId, id] = values;
+        const ord = jsonData.orders.find((o: any) => o.id === id);
+        if (ord) {
+          ord.status = status;
+          ord.vehicleType = vehicleType;
+          ord.driverName = driverName;
+          ord.driverPhone = driverPhone;
+          ord.licensePlate = licensePlate;
+          ord.shippingAgency = shippingAgency;
+          ord.estimatedArrival = estimatedArrival;
+          ord.billOfLadingNumber = billOfLadingNumber;
+          ord.shippingCompanyId = shippingCompanyId;
+          saveJsonData(jsonData);
+        }
+      } else {
+        const [status, vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, id] = values;
+        const ord = jsonData.orders.find((o: any) => o.id === id);
+        if (ord) {
+          ord.status = status;
+          ord.vehicleType = vehicleType;
+          ord.driverName = driverName;
+          ord.driverPhone = driverPhone;
+          ord.licensePlate = licensePlate;
+          ord.shippingAgency = shippingAgency;
+          ord.estimatedArrival = estimatedArrival;
+          saveJsonData(jsonData);
+        }
+      }
+    } else if (/shippingCompanyId\s+=\s+\?/i.test(cleanSql)) {
+      const [shippingCompanyId, shippingAgency, id] = values;
       const ord = jsonData.orders.find((o: any) => o.id === id);
       if (ord) {
-        ord.status = status;
-        ord.vehicleType = vehicleType;
-        ord.driverName = driverName;
-        ord.driverPhone = driverPhone;
-        ord.licensePlate = licensePlate;
+        ord.shippingCompanyId = shippingCompanyId;
         ord.shippingAgency = shippingAgency;
-        ord.estimatedArrival = estimatedArrival;
         saveJsonData(jsonData);
       }
     }
@@ -904,6 +931,8 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "orders", "estimatedArrival", "VARCHAR(100) NULL");
     await ensureColumnExists(db, "orders", "itemsJson", "TEXT NULL");
     await ensureColumnExists(db, "orders", "paymentTrackingCode", "VARCHAR(150) NULL");
+    await ensureColumnExists(db, "orders", "billOfLadingNumber", "VARCHAR(100) NULL");
+    await ensureColumnExists(db, "orders", "shippingCompanyId", "VARCHAR(150) NULL");
 
     // products primaryUnit, secondaryUnit, conversionRatio
     await ensureColumnExists(db, "products", "primaryUnit", "VARCHAR(50) NULL");

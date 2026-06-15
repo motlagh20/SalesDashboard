@@ -145,7 +145,7 @@ export const PRESET_ORDERS: Order[] = [
       driverPhone: '09117772222',
       licensePlate: '۵۴ ع ۸۹۲ ایران ۷۲',
       shippingAgency: 'باربری ترانزیت شمال',
-      estimatedArrival: '۲۴ ساعت آینده'
+      estimatedArrival: '۱۴۰۵/۰۳/۲۲'
     }
   },
   {
@@ -174,7 +174,7 @@ export const PRESET_ORDERS: Order[] = [
       driverPhone: '09139998888',
       licensePlate: '۷۲ ب ۵۵۱ ایران ۵۳',
       shippingAgency: 'باربری زاینده‌رود',
-      estimatedArrival: 'فردا صبح ساعت ۸'
+      estimatedArrival: '۱۴۰۵/۰۳/۲۴'
     }
   },
   {

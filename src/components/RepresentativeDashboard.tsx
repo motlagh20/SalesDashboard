@@ -612,7 +612,7 @@ export default function RepresentativeDashboard({
                       {order.paymentTrackingCode ? (
                         <span className="font-mono bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded font-bold block">{order.paymentTrackingCode}</span>
                       ) : (
-                        order.status === 'PENDING_APPROVAL' ? (
+                        order.status !== 'REJECTED' ? (
                           <div className="flex gap-1.5 items-center">
                             <input
                               type="text"
@@ -763,13 +763,13 @@ export default function RepresentativeDashboard({
                                 <span className="text-[7px] leading-3">IRAN</span>
                               </div>
                               <div className="px-3.5 text-sm tracking-widest text-slate-900 font-mono flex gap-1 h-full items-center">
-                                {order.vehicleDetails.licensePlate.split(' ').map((term, index) => (
+                                {(order.vehicleDetails.licensePlate || '').split(' ').map((term, index) => (
                                   <span key={index}>{term}</span>
                                 ))}
                               </div>
                             </div>
                             <div className="text-right text-[11px] text-slate-500">
-                              🚚 پلاک راننده اختصاصی (همگام برخط) • زمان تخمینی رسیدن: <strong>{order.vehicleDetails.estimatedArrival || '۲۴ ساعت آینده'}</strong>
+                              🚚 پلاک راننده اختصاصی (همگام برخط) • تاریخ مقرر بارگیری: <strong>{order.vehicleDetails.estimatedArrival || new Date().toLocaleDateString('fa-IR')}</strong>
                             </div>
                           </div>
                         </div>
