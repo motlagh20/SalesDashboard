@@ -331,37 +331,59 @@ export default function FactoryDashboard({
 
                 {/* Grid info */}
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs mb-4" id={`factory-info-grid-${order.id}`}>
-                  <div>
-                    <span className="text-slate-400 block mb-0.5">محصول سفری کارخانه:</span>
-                    <strong className="text-slate-800 text-[11px] block">{order.productName}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block mb-0.5">حجم کل سفارش بار:</span>
-                    <strong className="text-slate-800 font-mono text-[11px] block">
-                      {order.quantity.toLocaleString()} {order.unit}
+                  {order.itemsJson ? (
+                    <div className="col-span-2 bg-indigo-50/50 p-2.5 rounded-lg border border-indigo-100 space-y-1.5 text-right">
+                      <span className="text-indigo-900 font-bold block text-[10px] border-b border-indigo-100 pb-1 mb-1">اقلام تفکیکی سفارش جهت بارگیری:</span>
                       {(() => {
-                        const prod = products.find(p => p.id === order.productId);
-                        if (prod) {
-                          const pUnit = prod.primaryUnit || 'قالب';
-                          if (order.unit !== pUnit) {
-                            let ratio = prod.conversionRatio;
-                            if (!ratio && prod.coverageInfo) {
-                              const parsedNum = prod.coverageInfo.match(/\d+/);
-                              if (parsedNum) ratio = parseInt(parsedNum[0], 10);
-                            }
-                            if (ratio) {
-                              return (
-                                <span className="text-[10px] text-emerald-600 block font-sans font-normal mt-0.5">
-                                  ({(order.quantity * ratio).toLocaleString()} {pUnit} بارگیری)
-                                </span>
-                              );
-                            }
+                        try {
+                          const parsed = JSON.parse(order.itemsJson);
+                          if (Array.isArray(parsed)) {
+                            return parsed.map((item: any, i: number) => (
+                              <div key={i} className="flex justify-between text-[11px] text-slate-800 font-medium">
+                                <span className="font-mono text-slate-950 font-bold bg-white px-2 py-0.5 rounded border border-indigo-100">{item.quantity.toLocaleString()} {item.unit || order.unit}</span>
+                                <strong className="text-indigo-950">{item.productName}</strong>
+                              </div>
+                            ));
                           }
-                        }
-                        return null;
+                        } catch (e) {}
+                        return <strong className="text-slate-800">{order.productName}</strong>;
                       })()}
-                    </strong>
-                  </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <span className="text-slate-400 block mb-0.5">محصول سفری کارخانه:</span>
+                        <strong className="text-slate-800 text-[11px] block">{order.productName}</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block mb-0.5">حجم کل سفارش بار:</span>
+                        <strong className="text-slate-800 font-mono text-[11px] block">
+                          {order.quantity.toLocaleString()} {order.unit}
+                          {(() => {
+                            const prod = products.find(p => p.id === order.productId);
+                            if (prod) {
+                              const pUnit = prod.primaryUnit || 'قالب';
+                              if (order.unit !== pUnit) {
+                                let ratio = prod.conversionRatio;
+                                if (!ratio && prod.coverageInfo) {
+                                  const parsedNum = prod.coverageInfo.match(/\d+/);
+                                  if (parsedNum) ratio = parseInt(parsedNum[0], 10);
+                                }
+                                if (ratio) {
+                                  return (
+                                    <span className="text-[10px] text-emerald-600 block font-sans font-normal mt-0.5">
+                                      ({(order.quantity * ratio).toLocaleString()} {pUnit} بارگیری)
+                                    </span>
+                                  );
+                                }
+                              }
+                            }
+                            return null;
+                          })()}
+                        </strong>
+                      </div>
+                    </>
+                  )}
                   <div>
                     <span className="text-slate-400 block mb-0.5">منطقه تحویل تفصیلی:</span>
                     <strong className="text-slate-800 text-[11px] block flex items-center justify-end gap-1">

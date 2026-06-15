@@ -379,6 +379,7 @@ async function startServer() {
           destinationCity: o.destinationCity,
           exactAddress: o.exactAddress,
           phoneNumber: o.phoneNumber,
+          buyerName: o.buyerName,
           notes: o.notes,
           createdAt: o.createdAt,
           sentToFactoryAt: o.sentToFactoryAt,
@@ -415,7 +416,7 @@ async function startServer() {
   app.post("/api/orders", async (req, res) => {
     try {
       const db = getDbPool();
-      const { customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, notes, itemsJson, paymentTrackingCode } = req.body;
+      const { customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName, notes, itemsJson, paymentTrackingCode } = req.body;
       
       const id = `ord-${Date.now()}`;
       
@@ -462,10 +463,10 @@ async function startServer() {
         await connection.query(`
           INSERT INTO orders (
             id, orderNumber, customerName, agentCode, productId, productName, quantity, unit,
-            destinationCity, exactAddress, phoneNumber, notes, createdAt, status, priorityIndex,
+            destinationCity, exactAddress, phoneNumber, buyerName, notes, createdAt, status, priorityIndex,
             itemsJson, paymentTrackingCode
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-        `, [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, notes || null, createdAt, status, itemsJson || null, paymentTrackingCode || null]);
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        `, [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName || null, notes || null, createdAt, status, itemsJson || null, paymentTrackingCode || null]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)

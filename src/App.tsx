@@ -142,6 +142,7 @@ export default function App() {
           destinationCity: orderData.destinationCity || 'نامشخص',
           exactAddress: orderData.exactAddress || '',
           phoneNumber: orderData.phoneNumber || '',
+          buyerName: orderData.buyerName || '',
           notes: orderData.notes || '',
           itemsJson: orderData.itemsJson || null,
           paymentTrackingCode: orderData.paymentTrackingCode || null

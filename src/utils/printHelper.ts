@@ -8,7 +8,8 @@ import { Order, Product, Agent } from '../types';
 /**
  * Generates an elegant, consolidated single-page printable list of orders
  * representing registered requests dispatched to the factory.
- * Optimized for physical filing, incorporatingAgent Code/Name, Product details, Total Quantities, and Destination Addresses.
+ * Optimized for narrow-margin printing and physical filing, incorporating
+ * Agent Code/Name, itemized product details with separate rows/badges, and customer contact numbers.
  */
 export function printOrders(orders: Order[], products: Product[], agents: Agent[]) {
   if (!orders || orders.length === 0) return;
@@ -40,17 +41,24 @@ export function printOrders(orders: Order[], products: Product[], agents: Agent[
       ? `${agent.alias} (کد: ${agent.agentCode})` 
       : `${order.customerName} (کد: ${order.agentCode || 'نامشخص'})`;
 
-    // 2. Resolve Product details (with support for multiple items of the order)
+    // 2. Resolve Product details (showing items separately "به تفکیک")
     let productDetailsText = '';
     if (order.itemsJson) {
       try {
         const parsedItems = JSON.parse(order.itemsJson);
         if (Array.isArray(parsedItems)) {
-          productDetailsText = parsedItems.map(item => {
+          productDetailsText = parsedItems.map((item, idx) => {
             const qty = item.quantity || 0;
             totalQuantitySum += qty;
-            return `${item.productName || 'کالا'} • ${qty.toLocaleString('fa-IR')} ${item.unit || order.unit || 'عدد'}`;
-          }).join('<br/>');
+            return `
+              <div style="padding: 4px 0; border-bottom: ${idx < parsedItems.length - 1 ? '1px dashed #e2e8f0' : 'none'}; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                <span style="font-weight: bold; color: #1e3a8a;">${item.productName || 'کالا'}</span>
+                <span style="background-color: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-weight: bold; color: #0f172a; font-family: 'Tahoma', sans-serif;">
+                  ${qty.toLocaleString('fa-IR')} ${item.unit || order.unit || 'عدد'}
+                </span>
+              </div>
+            `;
+          }).join('');
         }
       } catch (e) {
         // Fallback below
@@ -60,21 +68,34 @@ export function printOrders(orders: Order[], products: Product[], agents: Agent[
     if (!productDetailsText) {
       const qty = order.quantity || 0;
       totalQuantitySum += qty;
-      productDetailsText = `${order.productName || 'محصول'} • ${qty.toLocaleString('fa-IR')} ${order.unit || 'عدد'}`;
+      productDetailsText = `
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <span style="font-weight: bold; color: #1e3a8a;">${order.productName || 'محصول'}</span>
+          <span style="background-color: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-weight: bold; color: #0f172a; font-family: 'Tahoma', sans-serif;">
+            ${qty.toLocaleString('fa-IR')} ${order.unit || 'عدد'}
+          </span>
+        </div>
+      `;
     }
 
-    // 3. Exact Address formatting
-    const addressLabel = `<strong style="color: #0f172a;">${order.destinationCity}</strong> - ${order.exactAddress || 'آدرس ثبت نشده'}`;
+    // 3. Exact Address with the buyer's name & phone number
+    const buyerSuffix = order.buyerName 
+      ? `<div style="margin-bottom: 4.5px; font-size: 11px;"><span style="color: #475569;">خریدار:</span> <strong style="color: #16a34a;">${order.buyerName}</strong></div>` 
+      : '';
+    const phoneSuffix = order.phoneNumber 
+      ? ` • <span style="color: #475569; font-weight: bold;">تلفن خریدار:</span> <span style="font-family: 'Tahoma', sans-serif; font-weight: bold; color: #0369a1;">${order.phoneNumber}</span>` 
+      : '';
+    const addressLabel = `${buyerSuffix}<strong style="color: #0f172a;">${order.destinationCity}</strong> - ${order.exactAddress || 'آدرس ثبت نشده'}${phoneSuffix}`;
 
     tableRowsHtml += `
-      <tr style="border-bottom: 1px solid #cbd5e1; text-align: right; vertical-align: top;">
+      <tr style="border-bottom: 1px solid #cbd5e1; text-align: right; vertical-align: middle;">
         <td style="padding: 10px; font-weight: bold; text-align: center; border-left: 1px solid #e2e8f0; font-family: 'Tahoma', sans-serif;">${(index + 1).toLocaleString('fa-IR')}</td>
         <td style="padding: 10px; border-left: 1px solid #e2e8f0; font-family: monospace; font-size: 10px; color: #475569; text-align: center;">${order.orderNumber}</td>
         <td style="padding: 10px; border-left: 1px solid #e2e8f0; font-weight: bold; color: #1e3a8a;">${agentLabel}</td>
         <td style="padding: 10px; border-left: 1px solid #e2e8f0; line-height: 1.5; font-size: 11px;">
           ${productDetailsText}
         </td>
-        <td style="padding: 10px; font-size: 11px; max-width: 250px; white-space: normal; word-break: break-all;">${addressLabel}</td>
+        <td style="padding: 10px; font-size: 11px; max-width: 280px; white-space: normal; word-break: break-all;">${addressLabel}</td>
       </tr>
     `;
   });
@@ -98,20 +119,20 @@ export function printOrders(orders: Order[], products: Product[], agents: Agent[
             border: none !important;
             box-shadow: none !important;
             margin: 0 !important;
-            padding: 8mm 10mm !important;
+            padding: 5mm !important;
             width: auto !important;
             max-width: none !important;
           }
         }
         @page {
           size: A4 portrait;
-          margin: 10mm 8mm 10mm 8mm;
+          margin: 5mm; /* Narrow Margin Setting */
         }
         body {
           font-family: 'Tahoma', 'Segoe UI', Arial, sans-serif;
           background-color: #f1f5f9;
           margin: 0;
-          padding: 20px;
+          padding: 10px;
           direction: rtl;
         }
         td, th {
@@ -120,54 +141,64 @@ export function printOrders(orders: Order[], products: Product[], agents: Agent[
       </style>
     </head>
     <body>
-      <div class="print-sheet" style="font-family: 'Tahoma', 'Segoe UI', Arial; font-size: 12px; line-height: 1.6; color: #334155; max-width: 850px; margin: 0 auto; background-color: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 25px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+      <div class="print-sheet" style="font-family: 'Tahoma', 'Segoe UI', Arial; font-size: 11px; line-height: 1.5; color: #334155; max-width: 850px; margin: 0 auto; background-color: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
         
         <!-- Document Header Banner -->
-        <table style="width: 100%; border-bottom: 2px solid #1e3a8a; padding-bottom: 12px; margin-bottom: 15px;">
+        <table style="width: 100%; border-bottom: 2px solid #1e3a8a; padding-bottom: 12px; margin-bottom: 12px;">
           <tr>
-            <td style="width: 30%; text-align: right; vertical-align: middle;">
-              <div style="font-size: 10px; color: #475569; line-height: 1.7;">
-                <strong>نوع سند:</strong> لیست تجمیعی سفارشات ارسالی<br/>
-                <strong>واحد صادرکننده:</strong> مدیریت بازرگانی طبرستان<br/>
-                <strong>دستگاه چاپی:</strong> وب-سامانه متمرکز برخط
+            <!-- RIGHT CELL: Company Logo and branding -->
+            <td style="width: 35%; text-align: right; vertical-align: middle;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <!-- Minimal Corporate Hexagon/Kiln Identity Logo -->
+                <div style="width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; background-color: #1e3a8a; border-radius: 8px; padding: 4px;">
+                  <svg width="34" height="34" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2L2 9L12 16L22 9L12 2Z" fill="#ffffff" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+                    <path d="M2 14L12 21L22 14" stroke="#e2e8f0" stroke-width="1.5" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+                <div>
+                  <div style="font-size: 13px; font-weight: bold; color: #1e3a8a; font-family: 'Tahoma', sans-serif;">سفال طبرستان</div>
+                  <div style="font-size: 9px; color: #475569; font-weight: normal; margin-top: 1px;">تولیدی صنایع سفال طبرستان</div>
+                </div>
               </div>
             </td>
-            <td style="width: 40%; text-align: center; vertical-align: middle;">
-              <h2 style="margin: 0; font-size: 15px; color: #1e3a8a; font-weight: bold;">صنایع سفال بام و آجر طبرستان</h2>
-              <h3 style="margin: 4px 0 0 0; font-size: 12px; color: #0f172a; font-weight: bold;">خلاصه درخواست‌های ثبت‌شده و ارسالی به کارخانه</h3>
+
+            <!-- CENTER CELL: Document Title -->
+            <td style="width: 35%; text-align: center; vertical-align: middle;">
+              <h2 style="margin: 0; font-size: 14px; color: #1e3a8a; font-weight: bold;">تولیدی صنایع سفال طبرستان</h2>
+              <h3 style="margin: 3px 0 0 0; font-size: 11px; color: #0f172a; font-weight: bold;">خلاصه درخواست‌های ثبت‌‌شده و ارسالی به کارخانه</h3>
             </td>
+
+            <!-- LEFT CELL: Document Metadata, Date & Process Status -->
             <td style="width: 30%; text-align: left; vertical-align: middle;">
-              <div style="font-size: 10px; color: #475569; line-height: 1.7;">
-                <strong>تاریخ گزارش:</strong> ${printDate}<br/>
-                <strong>ساعت چاپ:</strong> ${printTime}<br/>
-                <strong>وضعیت فرآیند:</strong> <span style="color: #10b981; font-weight: bold;">ارسال شده به خط تولید</span>
+              <div style="font-size: 10px; color: #475569; line-height: 1.7; text-align: left;">
+                <strong>تاریخ:</strong> ${printDate}<br/>
+                <strong>ساعت:</strong> ${printTime}<br/>
+                <strong>وضعیت:</strong> <span style="color: #10b981; font-weight: bold;">ارسال شده</span>
               </div>
             </td>
           </tr>
         </table>
 
-        <!-- Statistics Indicators Bar -->
-        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 15px; margin-bottom: 15px; background-color: #f8fafc; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+        <!-- Statistics Indicators Bar (with physical reference label deleted) -->
+        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; background-color: #f8fafc; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
           <div>
-            <strong>تعداد کل حواله‌ها:</strong> <span style="font-family: 'Tahoma', sans-serif; font-weight: bold; color: #1e3a8a;">${totalUniqueOrders.toLocaleString('fa-IR')} مورد</span>
+            <strong>تعداد کل سفارش‌ها:</strong> <span style="font-family: 'Tahoma', sans-serif; font-weight: bold; color: #1e3a8a;">${totalUniqueOrders.toLocaleString('fa-IR')} مورد</span>
           </div>
           <div>
             <strong>مجموع کلی اقلام درخواستی:</strong> <span style="font-family: 'Tahoma', sans-serif; font-weight: bold; color: #1e3a8a;">${totalQuantitySum.toLocaleString('fa-IR')} واحد</span>
           </div>
-          <div style="color: #e11d48; font-weight: bold; font-size: 10px;">
-            ⚠️ مرجع فیزیکی پرونده‌های ثبتی دفتر بازرگانی
-          </div>
         </div>
 
-        <!-- Main Consolidated Table -->
+        <!-- Main Consolidated Table (Terminology changed to "سفارش") -->
         <table style="width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden;">
           <thead>
             <tr style="background-color: #1e3a8a; color: white; height: 35px; text-align: right;">
               <th style="width: 6%; text-align: center; border-left: 1px solid rgba(255,255,255,0.2);">ردیف</th>
-              <th style="width: 14%; text-align: center; border-left: 1px solid rgba(255,255,255,0.2);">شماره حواله</th>
+              <th style="width: 14%; text-align: center; border-left: 1px solid rgba(255,255,255,0.2);">شماره سفارش</th>
               <th style="width: 25%; padding-right: 10px; border-left: 1px solid rgba(255,255,255,0.2);">کد و نام نمایندگی</th>
-              <th style="width: 25%; padding-right: 10px; border-left: 1px solid rgba(255,255,255,0.2);">جزئیات محصول و مقدار</th>
-              <th style="width: 30%; padding-right: 10px;">آدرس دقیق مقصد (تخلیه کالا)</th>
+              <th style="width: 30%; padding-right: 10px; border-left: 1px solid rgba(255,255,255,0.2);">جزئیات محصول و مقدار</th>
+              <th style="width: 25%; padding-right: 10px;">آدرس دقیق مقصد (تخلیه کالا)</th>
             </tr>
           </thead>
           <tbody>
@@ -176,29 +207,24 @@ export function printOrders(orders: Order[], products: Product[], agents: Agent[
         </table>
 
         <!-- Signature Block for Audits and Archives -->
-        <table style="width: 100%; margin-top: 45px; border-top: 1px solid #cbd5e1; padding-top: 25px; text-align: center; font-size: 11px;">
+        <table style="width: 100%; margin-top: 40px; border-top: 1px solid #cbd5e1; padding-top: 20px; text-align: center; font-size: 11px;">
           <tr>
-            <td style="width: 33.3%;">
-              <strong>مسئول واحد بازرگانی (صادرکننده‌)</strong><br/>
+            <td style="width: 50%;">
+              <strong>مدیر بازرگانی/مدیرعامل (صادرکننده‌)</strong><br/>
               <span style="font-size: 9px; color: #16a34a; font-weight: bold;">( تایید سیستمی متمرکز )</span><br/><br/><br/>
-              <span style="color: #94a3b8;">طبرستان - تایید شد</span>
+              <span style="color: #475569; font-weight: bold;">تولیدی صنایع سفال طبرستان</span>
             </td>
-            <td style="width: 33.4%;">
-              <strong>سرپرست تولید و انبار کارخانه</strong><br/>
+            <td style="width: 50%;">
+              <strong>مدیرکارخانه</strong><br/>
               <span style="font-size: 9px; color: #475569;">( جهت تطبیق و خروج کالا )</span><br/><br/><br/>
-              <span style="color: #cbd5e1;">...................................</span>
-            </td>
-            <td style="width: 33.3%;">
-              <strong>مسئول هماهنگی باربری اختصاصی</strong><br/>
-              <span style="font-size: 9px; color: #475569;">( نوبت‌دهی و اعزام خودرو )</span><br/><br/><br/>
               <span style="color: #cbd5e1;">...................................</span>
             </td>
           </tr>
         </table>
 
-        <!-- Security Bar and Identifier Tag -->
-        <div style="font-size: 9px; color: #94a3b8; text-align: center; margin-top: 40px; border-top: 1px dashed #e2e8f0; padding-top: 8px;">
-          لیست مکانیزه سیستمی برای سوابق فیزیکی • صنایع سفال و آجر طبرستان • کد کنترل ایمنی: <span style="font-family: monospace;">TBR-BATCH-${(orders.map(o => o.id.slice(0, 2)).join('')).toUpperCase() || 'SYS'}</span>
+        <!-- Security Bar and Identifier Tag with new brand representation -->
+        <div style="font-size: 9px; color: #94a3b8; text-align: center; margin-top: 35px; border-top: 1px dashed #e2e8f0; padding-top: 8px;">
+          لیست مکانیزه سیستمی برای سوابق فیزیکی • تولیدی صنایع سفال طبرستان • کد کنترل ایمنی: <span style="font-family: monospace;">TBR-BATCH-${(orders.map(o => o.id.slice(0, 2)).join('')).toUpperCase() || 'SYS'}</span>
         </div>
 
       </div>

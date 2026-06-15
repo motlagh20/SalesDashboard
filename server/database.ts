@@ -448,9 +448,9 @@ function executeQuery(sql: string, values: any[] = []): any {
     const notes = values[11];
     const createdAt = values[12];
     const status = values[13];
-    const priorityIndex = values[14];
-    const itemsJson = values[15];
-    const paymentTrackingCode = values[16];
+    const itemsJson = values[14];
+    const paymentTrackingCode = values[15];
+    const priorityIndex = 0;
 
     jsonData.orders.push({
       id,
@@ -878,6 +878,7 @@ export async function bootstrapDatabase() {
         destinationCity VARCHAR(100) NOT NULL,
         exactAddress TEXT,
         phoneNumber VARCHAR(20) NOT NULL,
+        buyerName VARCHAR(255) NULL,
         notes TEXT,
         createdAt VARCHAR(50) NOT NULL,
         sentToFactoryAt VARCHAR(50) NULL,
@@ -931,6 +932,7 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "orders", "estimatedArrival", "VARCHAR(100) NULL");
     await ensureColumnExists(db, "orders", "itemsJson", "TEXT NULL");
     await ensureColumnExists(db, "orders", "paymentTrackingCode", "VARCHAR(150) NULL");
+    await ensureColumnExists(db, "orders", "buyerName", "VARCHAR(255) NULL");
     await ensureColumnExists(db, "orders", "billOfLadingNumber", "VARCHAR(100) NULL");
     await ensureColumnExists(db, "orders", "shippingCompanyId", "VARCHAR(150) NULL");
 

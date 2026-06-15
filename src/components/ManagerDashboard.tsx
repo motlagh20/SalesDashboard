@@ -485,7 +485,7 @@ export default function ManagerDashboard({
   const statusTags: Record<OrderStatus, { text: string; css: string }> = {
     PENDING_APPROVAL: { text: 'در انتظار تایید', css: 'bg-amber-100 text-amber-800' },
     APPROVED_BY_SALES: { text: 'تایید شده (در صف اولویت‌بندی)', css: 'bg-indigo-100 text-indigo-800' },
-    SENT_TO_FACTORY: { text: 'ارسال شده به کارخانه', css: 'bg-blue-100 text-blue-800' },
+    SENT_TO_FACTORY: { text: 'ارسال شده', css: 'bg-blue-100 text-blue-800' },
     VEHICLE_ASSIGNED: { text: 'وسیله نقلیه تخصیص یافته', css: 'bg-amber-100 text-amber-800' },
     LOADED_AND_DISPATCHED: { text: 'بارگیری شده و حرکت کرده', css: 'bg-emerald-100 text-emerald-800' },
     REJECTED: { text: 'رد شده توسط مدیریت', css: 'bg-rose-100 text-rose-800' },
@@ -682,6 +682,9 @@ export default function ManagerDashboard({
                     <div className="flex items-center gap-2">
                       <strong className="text-slate-800 text-sm">{order.customerName}</strong>
                       <span className="text-[10px] bg-slate-100 text-slate-500 font-mono py-0.5 px-2 rounded">کد نماینده: {order.agentCode}</span>
+                      {order.buyerName && (
+                        <span className="text-[10.5px] bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 py-0.5 px-2 rounded">خریدار: {order.buyerName}</span>
+                      )}
                     </div>
                     <span className="text-xs font-mono font-bold text-slate-700">{order.orderNumber}</span>
                   </div>
@@ -723,7 +726,7 @@ export default function ManagerDashboard({
                         <FileText className="w-4 h-4 text-indigo-600" />
                         <span>جزئیات دقیق اقلام سبد خرید فاکتور مالی</span>
                       </span>
-                      <span className="text-[10px] text-slate-500 font-mono">حواله #{order.orderNumber}</span>
+                      <span className="text-[10px] text-slate-500 font-mono">سفارش #{order.orderNumber}</span>
                     </h4>
 
                     {order.itemsJson ? (
@@ -878,13 +881,19 @@ export default function ManagerDashboard({
                   </div>
 
                   <div className="bg-slate-50 p-3 rounded-lg text-[11px] text-slate-600 mb-4 space-y-1.5 text-right border border-slate-200/50">
+                    {order.buyerName && (
+                      <p className="flex items-start gap-1">
+                        <span>👤</span>
+                        <span><strong>خریدار (مشتری نهایی):</strong> <strong className="text-emerald-800">{order.buyerName}</strong></span>
+                      </p>
+                    )}
                     <p className="flex items-start gap-1">
                       <span>📍</span>
                       <span><strong>آدرس دقیق تخلیه کالا:</strong> {order.exactAddress}</span>
                     </p>
                     <p className="flex items-start gap-1">
                       <span>📞</span>
-                      <span><strong>تلفن متصدی تخلیه:</strong> <span className="font-mono">{order.phoneNumber}</span></span>
+                      <span><strong>تلفن خریدار:</strong> <span className="font-mono">{order.phoneNumber}</span></span>
                     </p>
                     {order.notes && (
                       <p className="text-slate-700 font-medium bg-amber-50/40 p-1.5 rounded border border-amber-100/50 flex items-start gap-1">
@@ -899,10 +908,10 @@ export default function ManagerDashboard({
                       type="button"
                       onClick={() => printOrders([order], products, agents)}
                       className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 py-1.5 px-3 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
-                      title="پیش‌نمایش و چاپ فاکتور حواله"
+                      title="پیش‌نمایش و چاپ فاکتور سفارش"
                     >
                       <Printer className="w-3.5 h-3.5" />
-                      <span>چاپ حواله</span>
+                      <span>چاپ سفارش</span>
                     </button>
 
                     {rejectionInputId !== order.id ? (
@@ -911,7 +920,7 @@ export default function ManagerDashboard({
                         className="bg-rose-50 hover:bg-rose-100 text-rose-700 py-1.5 px-3.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
                       >
                         <XCircle className="w-3.5 h-3.5" />
-                        <span>رد حواله سفارش</span>
+                        <span>رد سفارش</span>
                       </button>
                     ) : (
                       <div className="flex items-center gap-2 bg-rose-50 p-1.5 rounded-lg border border-rose-200">
@@ -986,10 +995,10 @@ export default function ManagerDashboard({
                       onClick={() => {
                         askConfirm(
                           'ارسال نهایی و دسته‌جمعی به کارخانه',
-                          'آیا مایلید تمامی سفارشات تأیید شده حاضر در صف را به خط تولید و ترابری کارخانه ارسال نمایید؟ همچنین فایل PDF رسمی کلیه حواله‌ها جهت بایگانی فیزیکی خودکار صادر و چاپ خواهد شد.',
+                          'آیا مایلید تمامی سفارشات تأیید شده حاضر در صف را به خط تولید و ترابری کارخانه ارسال نمایید؟ همچنین فایل PDF رسمی کلیه سفارشات صادر و چاپ خواهد شد.',
                           () => {
                             printOrders(visibleOrders, products, agents);
-                            showToast('📥 حواله فیزیکی و PDF کلیه سفارشات صادر شد.', 'success');
+                            showToast('📥 سند رسمی و PDF کلیه سفارشات صادر شد.', 'success');
                             onDispatchAllToFactory();
                           }
                         );
@@ -1021,9 +1030,12 @@ export default function ManagerDashboard({
                       </div>
 
                       <div className="text-right">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 font-sans">
                           <strong className="text-slate-800 text-sm">{order.customerName}</strong>
                           <span className="text-[9px] bg-slate-100 text-slate-500 font-mono py-0.5 px-1.5 rounded">{order.orderNumber}</span>
+                          {order.buyerName && (
+                            <span className="text-[9px] bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 py-0.5 px-1.5 rounded">خریدار: {order.buyerName}</span>
+                          )}
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-1">
                           {(() => {
@@ -1106,24 +1118,24 @@ export default function ManagerDashboard({
                         type="button"
                         onClick={() => {
                           printOrders([order], products, agents);
-                          showToast('📥 پیش‌نمایش حواله خروج جهت چاپ و ذخیره PDF آماده شد.', 'info');
+                          showToast('📥 پیش‌نمایش سفارش جهت چاپ و ذخیره PDF آماده شد.', 'info');
                         }}
                         className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 py-1.5 px-2.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-sm"
-                        title="چاپ حواله فیزیکی تک محصولی"
+                        title="چاپ سفارش"
                       >
                         <Printer className="w-3.5 h-3.5 text-slate-500" />
-                        <span>چاپ حواله</span>
+                        <span>چاپ سفارش</span>
                       </button>
 
                       {/* Explicit SEND action - moves to factory line */}
                       <button
                         onClick={() => {
                           printOrders([order], products, agents);
-                          showToast('📥 حواله خروج کالا صادر شد و برای پرونده فیزیکی به پرینتر ارسال گردید.', 'success');
+                          showToast('📥 سفارش خروج کالا صادر شد و به صف چاپ ارسال گردید.', 'success');
                           onDispatchToFactory(order.id);
                         }}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white py-1.5 px-3 rounded-lg text-[11px] font-bold cursor-pointer transition-colors flex items-center gap-1 shadow-sm"
-                        title="ارسال نهایی به کارخانه و چاپ اتوماتیک نسخه فیزیکی حواله"
+                        title="ارسال نهایی به کارخانه و چاپ اتوماتیک نسخه سفارش"
                       >
                         <Navigation className="w-3.5 h-3.5" />
                         <span>ارسال و چاپ</span>
@@ -1792,7 +1804,7 @@ export default function ManagerDashboard({
         {activeTab === 'ARCHIVAL_ORDERS' && (
           <div className="space-y-4">
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-[11px] text-slate-600 flex items-center justify-end gap-1.5">
-              <span>در زیر می‌توانید وضعیت تمامی حواله‌های صادر شده گذشته، رد شده یا ارسال شده به مقصد را دنبال کنید.</span>
+              <span>در زیر می‌توانید وضعیت تمامی سفارش‌های صادر شده گذشته، رد شده یا ارسال شده به مقصد را دنبال کنید.</span>
               <FileText className="w-4 h-4 text-slate-500 flex-shrink-0" />
             </div>
 
@@ -1869,6 +1881,9 @@ export default function ManagerDashboard({
                       <div className="flex items-center gap-2">
                         <strong className="text-slate-800 text-sm">{order.customerName}</strong>
                         <span className="text-[10px] bg-slate-100 text-slate-500 font-mono py-0.5 px-1.5 rounded">{order.orderNumber}</span>
+                        {order.buyerName && (
+                          <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 py-0.5 px-1.5 rounded">خریدار: {order.buyerName}</span>
+                        )}
                         <span className={`text-[9px] font-bold py-0.5 px-2 rounded-full ${statusTags[order.status]?.css}`}>
                           {statusTags[order.status]?.text}
                         </span>
@@ -1931,7 +1946,7 @@ export default function ManagerDashboard({
 
                       {order.status === 'REJECTED' && order.rejectionReason && (
                         <div className="bg-rose-50 rounded border border-rose-100 p-2 text-[10px] text-rose-800 text-right">
-                          <strong>❌ علت لغو حواله:</strong> {order.rejectionReason}
+                          <strong>❌ علت لغو سفارش:</strong> {order.rejectionReason}
                         </div>
                       )}
 
@@ -1939,13 +1954,13 @@ export default function ManagerDashboard({
                         type="button"
                         onClick={() => {
                           printOrders([order], products, agents);
-                          showToast('📥 پیش‌نمایش حواله آرشیوی جهت پرینت مجدد و ذخیره PDF بارگذاری شد.', 'success');
+                          showToast('📥 پیش‌نمایش سفارش آرشیوی جهت پرینت مجدد و ذخیره PDF بارگذاری شد.', 'success');
                         }}
                         className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 hover:text-slate-850 py-1 px-3 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all self-end"
-                        title="چاپ مجدد حواله خروج رسمی"
+                        title="چاپ مجدد سفارش خروج رسمی"
                       >
                         <Printer className="w-3.5 h-3.5 text-slate-500" />
-                        <span>چاپ مجدد حواله</span>
+                        <span>چاپ مجدد سفارش</span>
                       </button>
                     </div>
 

@@ -27,6 +27,7 @@ export interface Order {
   destinationCity: string;
   exactAddress: string;
   phoneNumber: string;
+  buyerName?: string;
   notes?: string;
   createdAt: string;
   sentToFactoryAt?: string; // زمان ارسال به خط کارخانه

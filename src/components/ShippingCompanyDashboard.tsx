@@ -341,10 +341,29 @@ export default function ShippingCompanyDashboard({
                     <div className="lg:col-span-4 space-y-3 border-l border-slate-100 pl-4">
                       <div>
                         <span className="text-[11px] text-slate-400 block mb-0.5">نوع و مقدار کالا سفال</span>
-                        <p className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5 justify-end">
-                          <span>{order.productName}</span>
-                          <span className="text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded text-[10px] font-black">{order.quantity.toLocaleString('fa-IR')} {order.unit}</span>
-                        </p>
+                        {order.itemsJson ? (
+                          <div className="space-y-1.5 mt-1 bg-indigo-50/50 p-2 rounded-lg border border-indigo-100">
+                            {(() => {
+                              try {
+                                const parsed = JSON.parse(order.itemsJson);
+                                if (Array.isArray(parsed)) {
+                                  return parsed.map((item: any, i: number) => (
+                                    <div key={i} className="flex justify-between items-center text-[10.5px] text-slate-800">
+                                      <span className="font-mono text-indigo-700 bg-white px-1.5 py-0.5 rounded border border-indigo-100/50 font-bold">{item.quantity.toLocaleString('fa-IR')} {item.unit || order.unit}</span>
+                                      <strong className="text-right text-indigo-950">{item.productName}</strong>
+                                    </div>
+                                  ));
+                                }
+                              } catch(e) {}
+                              return <p className="text-xs text-slate-700">{order.productName}</p>;
+                            })()}
+                          </div>
+                        ) : (
+                          <p className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5 justify-end">
+                            <span>{order.productName}</span>
+                            <span className="text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded text-[10px] font-black">{order.quantity.toLocaleString('fa-IR')} {order.unit}</span>
+                          </p>
+                        )}
                       </div>
 
                       <div>

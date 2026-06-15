@@ -64,6 +64,7 @@ export default function RepresentativeDashboard({
   const [destinationCity, setDestinationCity] = useState('تهران - شهریار');
   const [exactAddress, setExactAddress] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [buyerName, setBuyerName] = useState('');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -197,6 +198,7 @@ export default function RepresentativeDashboard({
         destinationCity,
         exactAddress,
         phoneNumber,
+        buyerName,
         notes,
         itemsJson: JSON.stringify(finalItems),
         paymentTrackingCode: paymentTrackingCode.trim() || undefined
@@ -205,6 +207,7 @@ export default function RepresentativeDashboard({
       // Reset form (except address/phone for easy usage)
       setNotes('');
       setInvoiceItems([]);
+      setBuyerName('');
       setPaymentTrackingCode('');
       setSuccessMessage('سفارش چندمحصولی شما با موفقیت ثبت شد و به پنل مدیریت فروش ارسال گردید.');
       setIsSubmitting(false);
@@ -222,7 +225,7 @@ export default function RepresentativeDashboard({
       case 'APPROVED_BY_SALES':
         return { text: 'تایید فروش / در صف اولویت‌بندی', badge: 'bg-indigo-100 text-indigo-800 border-indigo-200' };
       case 'SENT_TO_FACTORY':
-        return { text: 'ارسال شده به کارخانه / تأمین کامیون', badge: 'bg-blue-100 text-blue-800 border-blue-200' };
+        return { text: 'ارسال شده / تأمین کامیون', badge: 'bg-blue-100 text-blue-800 border-blue-200' };
       case 'VEHICLE_ASSIGNED':
         return { text: 'تخصیص وسیله نقلیه (ترابری)', badge: 'bg-amber-100 text-amber-800 border-amber-200' };
       case 'LOADED_AND_DISPATCHED':
@@ -401,6 +404,19 @@ export default function RepresentativeDashboard({
             {/* Destination lookup / Inputs */}
             <div className="grid grid-cols-1 gap-4">
               <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">مشخصات خریدار (نام/نام خانوادگی یا نام شرکت): <span className="text-rose-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  placeholder="مثال: جناب آقای حسینی / شرکت پارس بتن..."
+                  value={buyerName}
+                  onChange={(e) => setBuyerName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans"
+                  id="form-buyer-name-input"
+                />
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">استان / شهر مقصد تخلیه:</label>
                 <select
                   value={destinationCity}
@@ -433,7 +449,7 @@ export default function RepresentativeDashboard({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">تلفن هماهنگ کننده کارگاه:</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">تلفن خریدار:</label>
                 <input
                   type="text"
                   required
@@ -601,6 +617,13 @@ export default function RepresentativeDashboard({
                         <span className="text-slate-400 block mb-0.5">شهرستان مقصد:</span>
                         <strong className="text-slate-800 block text-[11px]">{order.destinationCity}</strong>
                       </div>
+
+                      {order.buyerName && (
+                        <div>
+                          <span className="text-slate-400 block mb-0.5">مشخصات خریدار:</span>
+                          <strong className="text-emerald-800 block text-[11px]">{order.buyerName}</strong>
+                        </div>
+                      )}
                     </div>
 
                     {/* Payment Tracking Code Integration */}
