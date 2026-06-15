@@ -394,9 +394,15 @@ export default function FactoryDashboard({
                 </div>
 
                 {/* Address block */}
-                <div className="bg-slate-50 p-3 rounded-lg text-xs text-slate-600 mb-4" id={`fac-address-box-${order.id}`}>
-                  <p className="text-justify text-slate-500">📍 <strong>آدرس تخلیه کارگاه مقصد:</strong> {order.exactAddress}</p>
-                  {order.notes && <p className="text-justify text-slate-600 mt-1 font-semibold">📝 ملاحظات ترابری نماینده: {order.notes}</p>}
+                <div className="bg-slate-50 p-3.5 rounded-lg text-xs text-slate-600 mb-4 space-y-1.5 border border-slate-200/60" id={`fac-address-box-${order.id}`}>
+                  {order.buyerName && (
+                    <p className="text-slate-700"><strong>👤 خریدار (مشتری نهایی):</strong> <span className="font-bold text-emerald-800 bg-emerald-50/50 py-0.5 px-1.5 rounded">{order.buyerName}</span></p>
+                  )}
+                  <p className="text-justify text-slate-500"><strong>📍 آدرس دقیق تخلیه خریدار:</strong> {order.exactAddress}</p>
+                  {order.phoneNumber && (
+                    <p className="text-slate-700"><strong>📞 تلفن تماس خریدار:</strong> <span className="font-mono font-bold text-slate-800">{order.phoneNumber}</span></p>
+                  )}
+                  {order.notes && <p className="text-justify text-slate-600 font-semibold bg-amber-50/50 p-1.5 rounded border border-amber-100/50">📝 ملاحظات ترابری نماینده: {order.notes}</p>}
                 </div>
 
                 {/* Sub-tab 1: Pending Assigning Form */}

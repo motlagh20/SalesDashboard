@@ -367,6 +367,14 @@ export default function ShippingCompanyDashboard({
                       </div>
 
                       <div>
+                        <span className="text-[11px] text-slate-400 block mb-0.5">خریدار بار (مشتری نهایی)</span>
+                        <p className="text-xs text-emerald-800 flex items-center gap-1 justify-end font-extrabold bg-emerald-50 px-2 py-1 rounded">
+                          <span>{order.buyerName || 'ثبت نشده'}</span>
+                          <span className="text-emerald-600">👤</span>
+                        </p>
+                      </div>
+
+                      <div>
                         <span className="text-[11px] text-slate-400 block mb-0.5">مقصد تخلیه بار</span>
                         <p className="text-xs text-slate-700 flex items-center gap-1 justify-end font-medium">
                           <span className="text-slate-800 font-extrabold">{order.destinationCity}</span>
@@ -376,7 +384,7 @@ export default function ShippingCompanyDashboard({
                       </div>
 
                       <div>
-                        <span className="text-[11px] text-slate-400 block mb-0.5">شماره همراه گیرنده / نماینده</span>
+                        <span className="text-[11px] text-slate-400 block mb-0.5">شماره همراه گیرنده (خریدار)</span>
                         <p className="text-xs font-mono text-slate-700 flex items-center gap-1 justify-end">
                           <span>{order.phoneNumber}</span>
                           <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />

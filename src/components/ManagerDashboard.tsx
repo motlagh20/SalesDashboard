@@ -880,23 +880,21 @@ export default function ManagerDashboard({
                     )}
                   </div>
 
-                  <div className="bg-slate-50 p-3 rounded-lg text-[11px] text-slate-600 mb-4 space-y-1.5 text-right border border-slate-200/50">
-                    {order.buyerName && (
-                      <p className="flex items-start gap-1">
-                        <span>👤</span>
-                        <span><strong>خریدار (مشتری نهایی):</strong> <strong className="text-emerald-800">{order.buyerName}</strong></span>
-                      </p>
-                    )}
-                    <p className="flex items-start gap-1">
-                      <span>📍</span>
-                      <span><strong>آدرس دقیق تخلیه کالا:</strong> {order.exactAddress}</span>
+                  <div className="bg-emerald-50/20 p-3.5 rounded-lg text-[11.5px] text-slate-600 mb-4 space-y-2 text-right border border-emerald-100/40 shadow-sm">
+                    <p className="flex items-start gap-1.5 border-b border-emerald-100/20 pb-1.5 mb-1.5">
+                      <span className="text-emerald-600">👤</span>
+                      <span><strong>نام خریدار (مشتری نهایی):</strong> <strong className="text-emerald-800 text-xs">{order.buyerName || 'ثبت نشده'}</strong></span>
                     </p>
-                    <p className="flex items-start gap-1">
-                      <span>📞</span>
-                      <span><strong>تلفن خریدار:</strong> <span className="font-mono">{order.phoneNumber}</span></span>
+                    <p className="flex items-start gap-1.5">
+                      <span className="text-emerald-600">📍</span>
+                      <span><strong>آدرس دقیق تخلیه کالا (خریدار):</strong> <span className="text-slate-800 font-medium">{order.exactAddress}</span></span>
+                    </p>
+                    <p className="flex items-start gap-1.5">
+                      <span className="text-emerald-600">📞</span>
+                      <span><strong>تلفن همراه خریدار:</strong> <strong className="text-slate-800 font-mono text-xs">{order.phoneNumber}</strong></span>
                     </p>
                     {order.notes && (
-                      <p className="text-slate-700 font-medium bg-amber-50/40 p-1.5 rounded border border-amber-100/50 flex items-start gap-1">
+                      <p className="text-slate-700 font-medium bg-amber-50/50 p-2 rounded border border-amber-100/60 flex items-start gap-1.5 mt-2">
                         <span>📝</span>
                         <span><strong>ملاحظات ارسال سفارش:</strong> {order.notes}</span>
                       </p>

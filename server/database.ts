@@ -445,11 +445,29 @@ function executeQuery(sql: string, values: any[] = []): any {
     const destinationCity = values[8];
     const exactAddress = values[9];
     const phoneNumber = values[10];
-    const notes = values[11];
-    const createdAt = values[12];
-    const status = values[13];
-    const itemsJson = values[14];
-    const paymentTrackingCode = values[15];
+
+    let buyerName = null;
+    let notes = null;
+    let createdAt = null;
+    let status = null;
+    let itemsJson = null;
+    let paymentTrackingCode = null;
+
+    if (values.length >= 17) {
+      buyerName = values[11];
+      notes = values[12];
+      createdAt = values[13];
+      status = values[14];
+      itemsJson = values[15];
+      paymentTrackingCode = values[16];
+    } else {
+      notes = values[11];
+      createdAt = values[12];
+      status = values[13];
+      itemsJson = values[14];
+      paymentTrackingCode = values[15];
+    }
+
     const priorityIndex = 0;
 
     jsonData.orders.push({
@@ -464,6 +482,7 @@ function executeQuery(sql: string, values: any[] = []): any {
       destinationCity,
       exactAddress: exactAddress || null,
       phoneNumber,
+      buyerName: buyerName || null,
       notes: notes || null,
       createdAt,
       status,
