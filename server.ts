@@ -30,6 +30,16 @@ async function startServer() {
     });
   });
 
+  // Serve the uploadable logo.png from root workspace
+  app.get("/logo.png", (req, res) => {
+    const logoPath = path.join(process.cwd(), "logo.png");
+    if (fs.existsSync(logoPath)) {
+      res.sendFile(logoPath);
+    } else {
+      res.status(404).send("Logo not found");
+    }
+  });
+
   // 1. PRODUCTS API
   app.get("/api/products", async (req, res) => {
     try {
