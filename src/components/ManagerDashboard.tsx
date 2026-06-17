@@ -1300,7 +1300,7 @@ export default function ManagerDashboard({
                  onClick={() => setPartnerSubTab('USERS')}
                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
                    partnerSubTab === 'USERS'
-                     ? 'bg-slate-850 text-white shadow-sm font-bold'
+                     ? 'bg-slate-800 text-white shadow-sm font-bold'
                      : 'text-slate-500 hover:text-slate-800'
                  }`}
                >
@@ -1313,7 +1313,7 @@ export default function ManagerDashboard({
                  onClick={() => setPartnerSubTab('AGENTS')}
                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
                    partnerSubTab === 'AGENTS'
-                     ? 'bg-slate-850 text-white shadow-sm font-bold'
+                     ? 'bg-slate-800 text-white shadow-sm font-bold'
                      : 'text-slate-500 hover:text-slate-800'
                  }`}
                >
@@ -1326,7 +1326,7 @@ export default function ManagerDashboard({
                  onClick={() => setPartnerSubTab('SHIPPING')}
                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
                    partnerSubTab === 'SHIPPING'
-                     ? 'bg-slate-850 text-white shadow-sm font-bold'
+                     ? 'bg-slate-800 text-white shadow-sm font-bold'
                      : 'text-slate-500 hover:text-slate-800'
                  }`}
                >
@@ -1929,7 +1929,7 @@ export default function ManagerDashboard({
                       placeholder="مثال: TRANS-NORTH"
                       value={newSCCode}
                       onChange={(e) => setNewSCCode(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-855 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
                       required
                     />
                   </div>
@@ -1959,7 +1959,7 @@ export default function ManagerDashboard({
 
                   <button
                     type="submit"
-                    className="w-full bg-slate-850 hover:bg-slate-900 text-white font-extrabold py-2 px-4 rounded text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-2 px-4 rounded text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
                   >
                     <span>ثبت شرکت حمل و نقل جدید</span>
                     <PlusCircle className="w-4 h-4" />
@@ -2648,7 +2648,7 @@ export default function ManagerDashboard({
                           printOrders([order], products, agents);
                           showToast('📥 پیش‌نمایش سفارش آرشیوی جهت پرینت مجدد و ذخیره PDF بارگذاری شد.', 'success');
                         }}
-                        className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 hover:text-slate-850 py-1 px-3 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all self-end"
+                        className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 hover:text-slate-800 py-1 px-3 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all self-end"
                         title="چاپ مجدد سفارش خروج رسمی"
                       >
                         <Printer className="w-3.5 h-3.5 text-slate-500" />

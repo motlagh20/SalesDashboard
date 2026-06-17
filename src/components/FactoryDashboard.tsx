@@ -254,7 +254,7 @@ export default function FactoryDashboard({
                   <select
                     value={bulkShippingAgency}
                     onChange={(e) => setBulkShippingAgency(e.target.value)}
-                    className="bg-white border border-slate-250 rounded px-2.5 py-1 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    className="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   >
                     {activeShippingCompanies.map((sc) => (
                       <option key={sc.id} value={sc.name}>{sc.name}</option>
@@ -270,7 +270,7 @@ export default function FactoryDashboard({
                   <select
                     value={bulkVehicleType}
                     onChange={(e) => setBulkVehicleType(e.target.value)}
-                    className="bg-white border border-slate-250 rounded px-2.5 py-1 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    className="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   >
                     <option value="تریلی ۱۸ چرخ لبه‌دار">تریلی ۱۸ چرخ لبه‌دار</option>
                     <option value="کامیون جفت ۱۰ تن">کامیون جفت ۱۰ تن</option>
@@ -445,7 +445,7 @@ export default function FactoryDashboard({
                             <div className="flex items-center gap-1.5 w-full sm:w-auto">
                               <select
                                 id={`agency-select-${order.id}`}
-                                className="bg-white border border-slate-250 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-emerald-500 flex-1 sm:w-44"
+                                className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-emerald-500 flex-1 sm:w-44"
                               >
                                 {activeShippingCompanies.map((sc) => (
                                   <option key={sc.id} value={sc.id}>{sc.name}</option>

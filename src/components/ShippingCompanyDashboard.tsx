@@ -441,7 +441,7 @@ export default function ShippingCompanyDashboard({
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 text-xs text-slate-700">
                             <div>
                               <span className="text-[10px] text-slate-400 block">نوع خودرو حمل</span>
-                              <strong className="text-slate-850 font-extrabold">{order.vehicleDetails.vehicleType}</strong>
+                              <strong className="text-slate-800 font-extrabold">{order.vehicleDetails.vehicleType}</strong>
                             </div>
                             <div>
                               <span className="text-[10px] text-slate-400 block">راننده</span>
@@ -456,7 +456,7 @@ export default function ShippingCompanyDashboard({
                             </div>
                             <div>
                               <span className="text-[10px] text-slate-400 block">پلاک خودرو</span>
-                              <span className="bg-white border text-center font-bold font-mono py-0.5 px-2 rounded tracking-wider border-slate-250 block w-max ml-auto mt-0.5 select-all">{order.vehicleDetails.licensePlate}</span>
+                              <span className="bg-white border text-center font-bold font-mono py-0.5 px-2 rounded tracking-wider border-slate-300 block w-max ml-auto mt-0.5 select-all">{order.vehicleDetails.licensePlate}</span>
                             </div>
                             <div>
                               <span className="text-[10px] text-slate-400 block text-rose-600 font-extrabold">شماره بارنامه صادره</span>
@@ -520,7 +520,7 @@ export default function ShippingCompanyDashboard({
                                   key={index}
                                   type="button"
                                   onClick={() => handleQuickFill(dr)}
-                                  className="px-2 py-1 bg-white hover:bg-slate-100 hover:text-indigo-900 border border-slate-250 rounded text-[9px] text-slate-600 font-bold transition-all cursor-pointer shadow-sm"
+                                  className="px-2 py-1 bg-white hover:bg-slate-100 hover:text-indigo-900 border border-slate-300 rounded text-[9px] text-slate-600 font-bold transition-all cursor-pointer shadow-sm"
                                 >
                                   {dr.label}
                                 </button>
@@ -536,7 +536,7 @@ export default function ShippingCompanyDashboard({
                               <select
                                 value={vehicleType}
                                 onChange={(e) => setVehicleType(e.target.value)}
-                                className="w-full bg-white border border-slate-250 rounded px-2 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="w-full bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-indigo-500"
                               >
                                 <option value="تریلی ۱۸ چرخ لبه‌دار">تریلی ۱۸ چرخ لبه‌دار</option>
                                 <option value="تریلی چادردار ترانزیت">تریلی چادردار ترانزیت</option>
@@ -553,7 +553,7 @@ export default function ShippingCompanyDashboard({
                                 value={driverName}
                                 onChange={(e) => setDriverName(e.target.value)}
                                 placeholder="احمد عابدی"
-                                className="w-full bg-white border border-slate-250 rounded px-3 py-1.5 text-xs text-slate-850 font-sans focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="w-full bg-white border border-slate-300 rounded px-3 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-indigo-500"
                               />
                             </div>
 
@@ -564,7 +564,7 @@ export default function ShippingCompanyDashboard({
                                 value={driverPhone}
                                 onChange={(e) => setDriverPhone(e.target.value)}
                                 placeholder="09115556677"
-                                className="w-full bg-white border border-slate-250 rounded px-3 py-1.5 text-xs font-mono text-left focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="w-full bg-white border border-slate-300 rounded px-3 py-1.5 text-xs font-mono text-left focus:outline-none focus:ring-1 focus:ring-indigo-500"
                               />
                             </div>
 
@@ -575,7 +575,7 @@ export default function ShippingCompanyDashboard({
                                 value={licensePlate}
                                 onChange={(e) => setLicensePlate(e.target.value)}
                                 placeholder="۱۲ ع ۳۴۵ ایران ۷۲"
-                                className="w-full bg-white border border-slate-250 rounded px-3 py-1.5 text-xs font-sans text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="w-full bg-white border border-slate-300 rounded px-3 py-1.5 text-xs font-sans text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
                               />
                             </div>
 
@@ -600,7 +600,7 @@ export default function ShippingCompanyDashboard({
                                 value={estimatedArrival}
                                 onChange={(e) => setEstimatedArrival(e.target.value)}
                                 placeholder="مثلا: ۱۴۰۵/۰۳/۲۵"
-                                className="w-full bg-white border border-slate-250 rounded px-3 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-indigo-500 text-center font-bold"
+                                className="w-full bg-white border border-slate-300 rounded px-3 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:ring-1 focus:ring-indigo-500 text-center font-bold"
                               />
                             </div>
 
@@ -616,7 +616,7 @@ export default function ShippingCompanyDashboard({
                             </button>
                             <button
                               type="submit"
-                              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-lg text-xs transition-all cursor-pointer flex items-center gap-1.5"
+                              className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-lg text-xs transition-all cursor-pointer flex items-center gap-1.5"
                             >
                               <CheckCircle className="w-4 h-4" />
                               <span>ثبت و تخصیص قطعی خودرو</span>

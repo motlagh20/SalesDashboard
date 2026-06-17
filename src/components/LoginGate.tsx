@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Smartphone, ShieldCheck, ArrowRight, Lock, Key, User } from 'lucide-react';
 import { AppUser } from '../types';
+import TabarestanLogo from './TabarestanLogo';
 
 interface LoginGateProps {
   onLoginSuccess: (user: AppUser) => void;
@@ -255,9 +256,9 @@ export default function LoginGate({ onLoginSuccess, showToast }: LoginGateProps)
       <div className="w-full max-w-md bg-slate-800 border border-slate-700 rounded-2xl shadow-xl overflow-hidden z-10 text-right">
         
         {/* Top header branding */}
-        <div className="bg-gradient-to-l from-slate-950 to-slate-850 p-6 text-center border-b border-slate-700/50">
-          <div className="w-14 h-14 bg-gradient-to-tr from-amber-500 to-yellow-600 rounded-xl mx-auto flex items-center justify-center shadow-lg shadow-amber-500/10 mb-3">
-            <ShieldCheck className="w-8 h-8 text-slate-900" />
+        <div className="bg-gradient-to-l from-slate-950 to-slate-800 p-6 text-center border-b border-slate-700/50">
+          <div className="mx-auto flex items-center justify-center mb-3">
+            <TabarestanLogo className="w-16 h-16 text-emerald-500" />
           </div>
           <h1 className="text-sm font-black text-white">سامانه هوشمند فروش سفال طبرستان</h1>
           <p className="text-[10px] text-slate-400 mt-1">پروسه تایید مالی، ترابری، صدور بارنامه و ترخیص کارخانه</p>

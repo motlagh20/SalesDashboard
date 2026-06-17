@@ -13,8 +13,8 @@ import FactoryDashboard from './components/FactoryDashboard';
 import ShippingCompanyDashboard from './components/ShippingCompanyDashboard';
 import InfrastructureInfo from './components/InfrastructureInfo';
 import LoginGate from './components/LoginGate';
+import TabarestanLogo from './components/TabarestanLogo';
 import { 
-  Building2, 
   Smartphone, 
   ShieldAlert, 
   Truck, 
@@ -747,8 +747,8 @@ export default function App() {
             
             {/* Header Brand */}
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-emerald-600 rounded-lg text-white font-bold" id="app-logo">
-                <Building2 className="w-5 h-5" />
+              <div className="shrink-0 flex items-center justify-center" id="app-logo">
+                <TabarestanLogo className="w-9 h-9 text-emerald-500" />
               </div>
               <div>
                 <h1 className="text-sm sm:text-base font-extrabold tracking-tight">تولیدی صنایع سفال طبرستان</h1>
