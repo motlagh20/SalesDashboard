@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Order, VehicleDetails, ShippingCompany, Product } from '../types';
+import { Order, VehicleDetails, ShippingCompany, Product, AppUser } from '../types';
 import { 
   Truck, 
   MapPin, 
@@ -29,6 +29,7 @@ interface ShippingCompanyDashboardProps {
   onAssignVehicle: (orderId: string, vehicle: VehicleDetails) => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
+  currentUser?: AppUser | null;
 }
 
 // Preset frequent drivers for quick instant filling (to save high-value company time)
@@ -63,12 +64,25 @@ export default function ShippingCompanyDashboard({
   onAssignVehicle,
   showToast,
   askConfirm,
+  currentUser,
 }: ShippingCompanyDashboardProps) {
   // Select which shipping company is simulating/viewing
   const activeCompanies = shippingCompanies.filter(sc => sc.isEnabled);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(
-    activeCompanies.length > 0 ? activeCompanies[0].id : 'sc-1'
-  );
+  const getInitialCompanyId = () => {
+    if (currentUser?.role === 'SHIPPING_COMPANY' && currentUser.shippingCompanyId) {
+      return currentUser.shippingCompanyId;
+    }
+    return activeCompanies.length > 0 ? activeCompanies[0].id : 'sc-1';
+  };
+
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(getInitialCompanyId());
+
+  // Force company ID to match user profile when logged in
+  React.useEffect(() => {
+    if (currentUser?.role === 'SHIPPING_COMPANY' && currentUser.shippingCompanyId) {
+      setSelectedCompanyId(currentUser.shippingCompanyId);
+    }
+  }, [currentUser]);
 
   const [activeTab, setActiveTab] = useState<'NEW_REQUESTS' | 'COMPLETED'>('NEW_REQUESTS');
   const [searchQuery, setSearchQuery] = useState('');
@@ -176,36 +190,51 @@ export default function ShippingCompanyDashboard({
     <div className="space-y-6 text-right dir-rtl font-sans" id="shipping-company-dashboard">
       
       {/* Simulation Selector Bar */}
-      <div className="bg-gradient-to-r from-blue-900 to-indigo-950 text-white rounded-2xl p-5 shadow-md border border-indigo-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-base sm:text-lg font-extrabold flex items-center gap-2 justify-end">
-            <span>درگاه اختصاصی و پنل تعاملی شرکت‌های حمل و نقل همکار</span>
-            <Building className="w-5 h-5 text-emerald-400" />
-          </h2>
-          <p className="text-xs text-indigo-200 mt-1">
-            جهت تست فرآیند، ابتدا شرکت باربری مورد نظر را انتخاب و درخواست‌های ارجاع داده شده کارخانه را مشاهده فرمایید.
-          </p>
-        </div>
+      {currentUser?.role === 'SALES_MANAGER' ? (
+        <div className="bg-gradient-to-r from-blue-900 to-indigo-950 text-white rounded-2xl p-5 shadow-md border border-indigo-800 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-fade-in">
+          <div>
+            <h2 className="text-base sm:text-lg font-extrabold flex items-center gap-2 justify-end">
+              <span>درگاه اختصاصی و پنل تعاملی شرکت‌های حمل و نقل همکار</span>
+              <Building className="w-5 h-5 text-emerald-400" />
+            </h2>
+            <p className="text-xs text-indigo-200 mt-1">
+              جهت تست فرآیند، ابتدا شرکت باربری مورد نظر را انتخاب و درخواست‌های ارجاع داده شده کارخانه را مشاهده فرمایید.
+            </p>
+          </div>
 
-        <div className="flex items-center gap-2.5 bg-indigo-900/50 p-2 rounded-xl border border-indigo-700/60 self-start md:self-auto">
-          <span className="text-xs text-indigo-200 font-bold shrink-0">ورود شبیه‌سازی باعنوان:</span>
-          <select
-            value={selectedCompanyId}
-            onChange={(e) => {
-              setSelectedCompanyId(e.target.value);
-              setAssigningOrderId(null);
-            }}
-            className="bg-slate-900 text-white border border-indigo-500 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-emerald-400 font-bold focus:outline-none"
-            id="shipping-company-login-select"
-          >
-            {shippingCompanies.map((sc) => (
-              <option key={sc.id} value={sc.id}>
-                {sc.name} {sc.isEnabled ? '' : '(غیرفعال)'}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2.5 bg-indigo-900/50 p-2 rounded-xl border border-indigo-700/60 self-start md:self-auto">
+            <span className="text-xs text-indigo-200 font-bold shrink-0">ورود شبیه‌سازی باعنوان:</span>
+            <select
+              value={selectedCompanyId}
+              onChange={(e) => {
+                setSelectedCompanyId(e.target.value);
+                setAssigningOrderId(null);
+              }}
+              className="bg-slate-900 text-white border border-indigo-500 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-emerald-400 font-bold focus:outline-none cursor-pointer"
+              id="shipping-company-login-select"
+            >
+              {shippingCompanies.map((sc) => (
+                <option key={sc.id} value={sc.id}>
+                  {sc.name} {sc.isEnabled ? '' : '(غیرفعال)'}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-gradient-to-r from-slate-900 to-slate-950 text-white rounded-2xl p-5 shadow-md border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4" id="shipping-company-locked-header">
+          <div>
+            <h2 className="text-base sm:text-lg font-extrabold flex items-center gap-2 justify-end">
+              <span>درگاه اختصاصی حمل و نقل همکار: {currentCompany?.name}</span>
+              <Building className="w-5 h-5 text-emerald-400" />
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              اتصال امن • پنل اختصاصی ثبت مشخصات راننده، خودرو و صدور فوری برگ ترخیص بارهای سفال طبرستان
+            </p>
+          </div>
+          <span className="text-[10px] bg-emerald-500/15 text-emerald-400 py-1 px-3 border border-emerald-500/20 rounded-full font-bold">🔐 اتصال امن فعال شد</span>
+        </div>
+      )}
 
       {/* Main Stats and Interface Container */}
       <div className="bg-white rounded-2xl border border-slate-205 shadow-sm p-6" id="shipping-main-card">

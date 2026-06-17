@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Order, OrderStatus, Product, Agent, ShippingCompany } from '../types';
+import { Order, OrderStatus, Product, Agent, ShippingCompany, AppUser, UserRole } from '../types';
 import { 
   CheckCircle, 
   XCircle, 
@@ -63,7 +63,7 @@ interface ManagerDashboardProps {
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
 }
 
-type PanelTab = 'APPROVED_PRIORITIES' | 'PENDING_APPROVAL' | 'AGENTS_MGMT' | 'PRODUCTS_MGMT' | 'SHIPPING_MGMT' | 'ARCHIVAL_ORDERS';
+type PanelTab = 'APPROVED_PRIORITIES' | 'PENDING_APPROVAL' | 'AGENTS_MGMT' | 'PRODUCTS_MGMT' | 'SHIPPING_MGMT' | 'ARCHIVAL_ORDERS' | 'USERS_MGMT' | 'PARTNERS_MGMT';
 
 export default function ManagerDashboard({
   orders,
@@ -92,6 +92,9 @@ export default function ManagerDashboard({
 }: ManagerDashboardProps) {
   // Navigation tabs for the Manager workspace
   const [activeTab, setActiveTab] = useState<PanelTab>('PENDING_APPROVAL');
+  
+  // Sub-filter for combined Partners & Users view
+  const [partnerSubTab, setPartnerSubTab] = useState<'AGENTS' | 'SHIPPING' | 'USERS'>('USERS');
   
   // Sub-filter state for archival logs
   const [archiveStatusFilter, setArchiveStatusFilter] = useState<string>('ALL');
@@ -200,6 +203,123 @@ export default function ManagerDashboard({
   const [newSCCode, setNewSCCode] = useState('');
   const [newSCPhone, setNewSCPhone] = useState('');
   const [newSCManagerName, setNewSCManagerName] = useState('');
+
+  // --- USERS MANAGEMENT STATE ---
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [newUsername, setNewUsername] = useState('');
+  const [newUserFullName, setNewUserFullName] = useState('');
+  const [newUserPhone, setNewUserPhone] = useState('');
+  const [newUserRole, setNewUserRole] = useState<UserRole>('REPRESENTATIVE');
+  const [newUserAgentCode, setNewUserAgentCode] = useState('');
+  const [newUserSCId, setNewUserSCId] = useState('');
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch('/api/users');
+      if (res.ok) {
+        const data = await res.json();
+        setUsers(data);
+      }
+    } catch (err) {
+      console.error('Error fetching users:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUsername.trim() || !newUserFullName.trim() || !newUserPhone.trim() || !newUserRole) {
+      showToast('لطفاً کلیه فیلدهای ستاره‌دار را تکمیل کنید.', 'error');
+      return;
+    }
+    try {
+      const payload = {
+        username: newUsername,
+        fullName: newUserFullName,
+        phoneNumber: newUserPhone,
+        role: newUserRole,
+        agentCode: newUserRole === 'REPRESENTATIVE' ? newUserAgentCode : null,
+        shippingCompanyId: newUserRole === 'SHIPPING_COMPANY' ? newUserSCId : null,
+      };
+
+      const endpoint = editingUserId ? `/api/users/${editingUserId}` : '/api/users';
+      const method = editingUserId ? 'PUT' : 'POST';
+
+      const res = await fetch(endpoint, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        showToast(editingUserId ? '✅ اطلاعات کاربر با موفقیت ویرایش شد.' : '✅ کاربر جدید با موفقیت به سامانه اضافه گردید.', 'success');
+        setNewUsername('');
+        setNewUserFullName('');
+        setNewUserPhone('');
+        setNewUserRole('REPRESENTATIVE');
+        setNewUserAgentCode('');
+        setNewUserSCId('');
+        setEditingUserId(null);
+        fetchUsers();
+      } else {
+        const errData = await res.json();
+        showToast(errData.error || 'خطایی در ثبت اطلاعات کاربر رخ داد.', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('ارتباط با سرور برقرار نشد.', 'error');
+    }
+  };
+
+  const handleToggleUser = async (userId: string) => {
+    try {
+      const res = await fetch(`/api/users/${userId}/toggle`, { method: 'PATCH' });
+      if (res.ok) {
+        showToast('🔄 وضعیت حساب کاربری تغییر یافت.', 'success');
+        fetchUsers();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    askConfirm(
+      'حذف کاربر',
+      'آیا از حذف کامل این کاربر از سیستم اطمینان دارید؟',
+      async () => {
+        try {
+          const res = await fetch(`/api/users/${userId}`, { method: 'DELETE' });
+          if (res.ok) {
+            showToast('🗑️ کاربر با موفقیت از سیستم حذف گردید.', 'success');
+            fetchUsers();
+            if (editingUserId === userId) {
+              setEditingUserId(null);
+              setNewUsername('');
+              setNewUserFullName('');
+              setNewUserPhone('');
+            }
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    );
+  };
+
+  const handleStartEditUser = (user: AppUser) => {
+    setEditingUserId(user.id);
+    setNewUsername(user.username);
+    setNewUserFullName(user.fullName);
+    setNewUserPhone(user.phoneNumber);
+    setNewUserRole(user.role);
+    setNewUserAgentCode(user.agentCode || '');
+    setNewUserSCId(user.shippingCompanyId || '');
+  };
 
   // Metrics calculations
   const totalVolume = orders.reduce((sum, o) => o.status !== 'REJECTED' ? sum + o.quantity : sum, 0);
@@ -574,17 +694,20 @@ export default function ManagerDashboard({
               <span>اولویت‌بندی ارسال کارخانه ({approvedButPendingDispatch.length})</span>
             </button>
 
-            {/* Tab 3: Agents */}
+            {/* Tab 3: Unified Partners & Users Management */}
             <button
-              onClick={() => setActiveTab('AGENTS_MGMT')}
+              onClick={() => {
+                setActiveTab('PARTNERS_MGMT');
+                fetchUsers();
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'AGENTS_MGMT'
-                  ? 'bg-slate-800 text-white shadow-sm'
+                activeTab === 'PARTNERS_MGMT'
+                  ? 'bg-slate-800 text-white shadow-sm ring-2 ring-slate-300'
                   : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
               }`}
             >
-              <Users className="w-3.5 h-3.5" />
-              <span>مدیریت نمایندگی‌ها ({agents.length})</span>
+              <Users className="w-3.5 h-3.5 text-amber-400" />
+              <span>نمایندگی‌ها و دسترسی کاربران ({agents.length} نمایندگی / {users.length} کاربر)</span>
             </button>
 
             {/* Tab 4: Products */}
@@ -602,10 +725,13 @@ export default function ManagerDashboard({
 
             {/* Tab 5: Shipping Companies */}
             <button
-              onClick={() => setActiveTab('SHIPPING_MGMT')}
+              onClick={() => {
+                setActiveTab('PARTNERS_MGMT');
+                setPartnerSubTab('SHIPPING');
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'SHIPPING_MGMT'
-                  ? 'bg-blue-600 text-white shadow-sm'
+                activeTab === 'PARTNERS_MGMT' && partnerSubTab === 'SHIPPING'
+                  ? 'bg-blue-600 text-white shadow-sm ring-2 ring-slate-300'
                   : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
               }`}
             >
@@ -1147,9 +1273,70 @@ export default function ManagerDashboard({
           </div>
         )}
 
-        {/* RENDER SECTION C: AGENTS WORKSPACE (مدیریت نمایندگی‌ها) */}
-        {activeTab === 'AGENTS_MGMT' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-right" id="agents-mgmt-panel">
+        {/* RENDER SECTION C: PARTNERS & USERS WORKSPACE (مدیریت متمرکز همکاران رسمی و کدهای امنیتی) */}
+        {activeTab === 'PARTNERS_MGMT' && (
+          <div className="space-y-6 text-right">
+            
+            {/* Explanatory Banner on Corporate Security Policy */}
+            <div className="bg-gradient-to-l from-slate-900 to-indigo-950 border border-slate-700/60 rounded-2xl p-5 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4 text-right animate-fade-in" id="security-control-banner">
+              <div className="space-y-1">
+                <h4 className="text-sm font-black text-amber-400 flex items-center gap-1.5 justify-end">
+                  <span>مدیریت متمرکز نمایندگی‌های رسمی و دسترسی به سامانه (سفال طبرستان)</span>
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                </h4>
+                <p className="text-[11px] text-slate-300 leading-relaxed font-sans max-w-4xl">
+                  پیرو آیین‌نامه انضباطی سازمان فروش، اختصاص پنل نمایندگان صرفاً بر اساس قراردادهای تجاری منعقد شده مقدور است. هرگونه تعریف حساب کاربری غیراز این بخش ممنوع بوده و حق فعال‌سازی، غیرفعالسازی و تغییر کدهای تفصیلیِ نمایندگان و باربری‌های همکار منحصراً در غیاب ثبت‌نام عمومی، در اختیار اداره بازرگانی است.
+                </p>
+              </div>
+              <div className="bg-amber-500/10 text-amber-400 py-1.5 px-3 rounded-xl border border-amber-500/20 text-[10px] font-bold self-start md:self-auto shrink-0 font-mono tracking-wider">
+                System Mode: Corporate Only
+              </div>
+            </div>
+
+             {/* Sub-tab Switches */}
+             <div className="flex bg-slate-100 p-1 rounded-xl max-w-2xl mx-auto border border-slate-200" id="partners-sub-navigation">
+               <button
+                 type="button"
+                 onClick={() => setPartnerSubTab('USERS')}
+                 className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
+                   partnerSubTab === 'USERS'
+                     ? 'bg-slate-850 text-white shadow-sm font-bold'
+                     : 'text-slate-500 hover:text-slate-800'
+                 }`}
+               >
+                 <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
+                 <span>کلیدها و حساب‌ها ({users.length} کاربر)</span>
+               </button>
+               
+               <button
+                 type="button"
+                 onClick={() => setPartnerSubTab('AGENTS')}
+                 className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
+                   partnerSubTab === 'AGENTS'
+                     ? 'bg-slate-850 text-white shadow-sm font-bold'
+                     : 'text-slate-500 hover:text-slate-800'
+                 }`}
+               >
+                 <Users className="w-3.5 h-3.5" />
+                 <span>نمایندگان فروش ({agents.length})</span>
+               </button>
+
+               <button
+                 type="button"
+                 onClick={() => setPartnerSubTab('SHIPPING')}
+                 className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
+                   partnerSubTab === 'SHIPPING'
+                     ? 'bg-slate-850 text-white shadow-sm font-bold'
+                     : 'text-slate-500 hover:text-slate-800'
+                 }`}
+               >
+                 <Truck className="w-3.5 h-3.5 text-blue-500" />
+                 <span>شرکت‌های حمل و نقل ({shippingCompanies.length})</span>
+               </button>
+             </div>
+
+            {partnerSubTab === 'AGENTS' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-right" id="agents-mgmt-panel">
             
             {/* Left Box: Simple list of agents (Take 7 columns) */}
             <div className="lg:col-span-7 space-y-4">
@@ -1368,6 +1555,417 @@ export default function ManagerDashboard({
                   )}
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {partnerSubTab === 'USERS' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-right animate-fade-in font-sans" id="users-mgmt-panel">
+            
+            {/* Right block: Users list (8 columns) */}
+            <div className="lg:col-span-8 space-y-4">
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                        <th className="p-3 font-sans">نام و مسئولیت</th>
+                        <th className="p-3 font-sans">نام کاربری</th>
+                        <th className="p-3 font-sans">شماره تماس (جهت پیامک)</th>
+                        <th className="p-3 font-sans">نقش سیستمی</th>
+                        <th className="p-3 font-sans">منتسب به</th>
+                        <th className="p-3 font-sans text-center">وضعیت</th>
+                        <th className="p-3 font-sans text-center w-20">عملیات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users.map((u) => {
+                        const matchedAgent = agents.find(a => a.agentCode === u.agentCode);
+                        const matchedSC = shippingCompanies.find(sc => sc.id === u.shippingCompanyId);
+                        return (
+                          <tr key={u.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                            <td className="p-3 font-bold text-slate-800 font-sans">{u.fullName}</td>
+                            <td className="p-3 font-mono text-slate-600">{u.username}</td>
+                            <td className="p-3 font-mono text-slate-600">{u.phoneNumber}</td>
+                            <td className="p-3 font-sans">
+                              <span className={`py-0.5 px-2 rounded-full text-[10px] font-bold font-sans ${
+                                u.role === 'SALES_MANAGER' ? 'bg-amber-100 text-amber-800' :
+                                u.role === 'REPRESENTATIVE' ? 'bg-emerald-100 text-emerald-800' :
+                                u.role === 'FACTORY_TRANSPORT' ? 'bg-blue-100 text-blue-800' :
+                                'bg-indigo-100 text-indigo-800'
+                              }`}>
+                                {u.role === 'SALES_MANAGER' ? 'مدیر بازرگانی' :
+                                 u.role === 'REPRESENTATIVE' ? 'نماینده فروش' :
+                                 u.role === 'FACTORY_TRANSPORT' ? 'ترابری کارخانه' :
+                                 'شرکت باربری'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-slate-500 font-sans">
+                              {u.role === 'REPRESENTATIVE' && matchedAgent ? (
+                                <span className="text-[10px] font-extrabold text-emerald-700">🏢 {matchedAgent.alias}</span>
+                              ) : u.role === 'SHIPPING_COMPANY' && matchedSC ? (
+                                <span className="text-[10px] font-extrabold text-blue-700 font-sans">🚚 {matchedSC.name}</span>
+                              ) : (
+                                <span className="text-slate-400 font-sans">-</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-center font-sans">
+                              <span className={`inline-flex items-center gap-1 py-0.5 px-2 rounded text-[10px] font-bold ${
+                                u.isEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${u.isEnabled ? 'bg-emerald-600' : 'bg-rose-600'}`} />
+                                {u.isEnabled ? 'مجاز به ورود' : 'منع ورود (تعلیق)'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    setEditingUserId(u.id);
+                                    setNewUserFullName(u.fullName);
+                                    setNewUsername(u.username);
+                                    setNewUserPhone(u.phoneNumber);
+                                    setNewUserRole(u.role);
+                                    setNewUserAgentCode(u.agentCode || '');
+                                    setNewUserSCId(u.shippingCompanyId || '');
+                                  }}
+                                  className="text-slate-500 hover:text-emerald-600 p-1 cursor-pointer transition-colors"
+                                  title="ویرایش دسترسی کاربر"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleToggleUser(u.id)}
+                                  className="text-slate-500 hover:text-amber-600 p-1 cursor-pointer transition-colors"
+                                  title={u.isEnabled ? 'تعلیق موقت' : 'مجاز نمودن ورود'}
+                                >
+                                  <ShieldCheck className={`w-3.5 h-3.5 ${u.isEnabled ? 'text-slate-400' : 'text-rose-500'}`} />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    askConfirm(
+                                      'حذف دسترسی کاربری',
+                                      `آیا نسبت به حذف دائمی مجوز ورود جناب «${u.fullName}» به سامانه اطمینان حاصل دارید؟ پرونده‌های نمایندگی وی در سایر جداول حفظ و فقط ورود با این مشخصات مسدود می‌گردد.`,
+                                      () => handleDeleteUser(u.id)
+                                    );
+                                  }}
+                                  className="text-slate-500 hover:text-rose-600 p-1 cursor-pointer transition-colors"
+                                  title="حذف دسترسی"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {users.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="text-center py-8 text-slate-400 font-sans">
+                            هیچ حسابی تعریف نشده است.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Left block: Add/Edit User (4 columns) */}
+            <div className="lg:col-span-4 bg-slate-50 p-4 md:p-5 rounded-xl border border-slate-200 shadow-inner">
+              <h4 className="font-bold text-slate-800 text-xs flex items-center justify-end gap-1 mb-4 border-b border-slate-200/60 pb-2">
+                <span>{editingUserId ? 'ویرایش مجوز دسترسی کاربر' : 'تعریف دسترسی سیستمی جدید'}</span>
+                <ShieldCheck className="w-4 h-4 text-amber-500" />
+              </h4>
+
+              <form onSubmit={handleAddUser} className="space-y-3.5">
+                <div>
+                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">
+                    نام و نام خانوادگی مسئول: <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثال: حمیدرضا احمدی"
+                    value={newUserFullName}
+                    onChange={(e) => setNewUserFullName(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">
+                    نام کاربری ورود (یکتا - انگلیسی): <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثال: hammid_ahmadi"
+                    value={newUsername}
+                    onChange={(e) => setNewUsername(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-left"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">
+                    تلفن همراه فعال (جهت دریافت پیامک OTP ورود): <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="مثال: 09120000001"
+                    value={newUserPhone}
+                    onChange={(e) => setNewUserPhone(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-left"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-600 text-[10px] mb-1 font-bold">
+                    سطح و نقش دسترسی به دشبورد: <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={newUserRole}
+                    onChange={(e) => {
+                      const val = e.target.value as UserRole;
+                      setNewUserRole(val);
+                      setNewUserAgentCode('');
+                      setNewUserSCId('');
+                    }}
+                    className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans cursor-pointer"
+                    required
+                  >
+                    <option value="REPRESENTATIVE">۱. نماینده مقیم فروش (کد نمایندگی)</option>
+                    <option value="FACTORY_TRANSPORT">۲. مسئول ترابری و لجستیک کارخانه</option>
+                    <option value="SHIPPING_COMPANY">۳. متصدی شرکت باربری همکار</option>
+                    <option value="SALES_MANAGER">۴. معـاونت / مدیر بازرگانی کارخانه</option>
+                  </select>
+                </div>
+
+                {newUserRole === 'REPRESENTATIVE' && (
+                  <div className="animate-fade-in bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100 font-sans">
+                    <label className="block text-emerald-800 text-[9px] mb-1 font-bold">
+                      لینک به دیتای نمایندگی رسمی: <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={newUserAgentCode}
+                      onChange={(e) => setNewUserAgentCode(e.target.value)}
+                      className="w-full bg-white border border-emerald-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:ring-1 focus:ring-emerald-500 font-sans cursor-pointer"
+                      required
+                    >
+                      <option value="">-- انتخاب نمایندگی متناظر در قراردادها --</option>
+                      {agents.map((ag) => (
+                        <option key={ag.id} value={ag.agentCode}>
+                          {ag.alias} (کد تفصیلی: {ag.agentCode})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[8px] text-emerald-600 mt-1 font-sans">پس از ورود، داده‌های این نماینده به‌صورت خودکار و انحصاری فیلتر می‌شوند.</p>
+                  </div>
+                )}
+
+                {newUserRole === 'SHIPPING_COMPANY' && (
+                  <div className="animate-fade-in bg-blue-50/50 p-2.5 rounded-lg border border-blue-100 font-sans">
+                    <label className="block text-blue-800 text-[9px] mb-1 font-bold">
+                      لینک به هویت شرکت ترانزیت: <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={newUserSCId}
+                      onChange={(e) => setNewUserSCId(e.target.value)}
+                      className="w-full bg-white border border-blue-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:ring-1 focus:ring-emerald-500 font-sans cursor-pointer"
+                      required
+                    >
+                      <option value="">-- انتخاب شرکت حمل و نقل متناظر --</option>
+                      {shippingCompanies.map((sc) => (
+                        <option key={sc.id} value={sc.id}>
+                          {sc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="submit"
+                    className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1 shadow font-sans"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>{editingUserId ? 'ثبت ویرایش دسترسی' : 'ایجاد حساب کاربری'}</span>
+                  </button>
+                  {editingUserId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingUserId(null);
+                        setNewUsername('');
+                        setNewUserFullName('');
+                        setNewUserPhone('');
+                        setNewUserRole('REPRESENTATIVE');
+                        setNewUserAgentCode('');
+                        setNewUserSCId('');
+                      }}
+                      className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-3 rounded-lg text-xs transition-colors cursor-pointer font-sans"
+                    >
+                      انصراف
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+          </div>
+        )}
+
+        {partnerSubTab === 'SHIPPING' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-right animate-fade-in font-sans pb-10" id="shipping-subtab-panel">
+            {/* Right block: Companies List (8 columns) */}
+            <div className="lg:col-span-8 space-y-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-600 flex items-center justify-between gap-1.5">
+                <div className="text-right">
+                  <h4 className="font-bold text-slate-800">ناوگان‌های همکار طبرستان</h4>
+                  <p className="text-[10px] text-slate-500 mt-0.5">در زمان تخصیص وسیله نقلیه در کارخانه، امکان ارجاع تکی یا گروهی سفارش به ترابری شرکت‌های منتخب زیر فراهم خواهد بود.</p>
+                </div>
+                <Truck className="w-5 h-5 text-indigo-500 flex-shrink-0" />
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <table className="w-full text-right border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 font-bold border-b border-rose-100">
+                      <th className="p-3">نام شرکت حمل و نقل</th>
+                      <th className="p-3 font-sans">کد ترابری</th>
+                      <th className="p-3">مدیر عامل / رابط</th>
+                      <th className="p-3">شماره تماس پشتیبانی</th>
+                      <th className="p-3 text-center">وضعیت همکاری</th>
+                      <th className="p-3 text-center">عملیات</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shippingCompanies.map((company) => (
+                      <tr key={company.id} className="border-b border-slate-100 hover:bg-slate-50 transition-all">
+                        <td className="p-3 font-bold text-slate-900 flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded bg-blue-500 block"></span>
+                          <span>{company.name}</span>
+                        </td>
+                        <td className="p-3 font-mono text-slate-600 font-bold">{company.code}</td>
+                        <td className="p-3 text-slate-600">{company.managerName}</td>
+                        <td className="p-3 font-mono text-slate-600">{company.phoneNumber}</td>
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={() => onToggleShippingCompany(company.id)}
+                            className={`px-2 py-1 rounded text-[10px] font-bold transition-colors cursor-pointer ${
+                              company.isEnabled
+                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                            }`}
+                          >
+                            {company.isEnabled ? '✅ فعال و در دسترس' : '❌ تعلیق موقت'}
+                          </button>
+                        </td>
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={() => {
+                              askConfirm(
+                                'حذف شرکت حمل و نقل',
+                                `آیا از حذف شرکت حمل و نقل «${company.name}» مطمئن هستید؟ با این کار دیگر امکان ارجاع سفارش به این شرکت وجود نخواهد داشت.`,
+                                () => {
+                                  onDeleteShippingCompany(company.id);
+                                  showToast(`شرکت حمل و نقل ${company.name} از ناوگان حذف شد.`, 'info');
+                                }
+                              );
+                            }}
+                            className="p-1 px-1.5 hover:bg-rose-50 text-rose-500 hover:text-rose-700 rounded transition-all cursor-pointer"
+                            title="حذف شرکت"
+                          >
+                            <Trash2 className="w-4 h-4 mx-auto" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {shippingCompanies.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="p-8 text-center text-slate-400">
+                          هیچ شرکت حمل و نقل تعریف شده‌ای یافت نشد. لطفاً از پنل سمت چپ اقدام نمایید.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Left block: Create Company Form (4 columns) */}
+            <div className="lg:col-span-4 space-y-4">
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+                <h3 
+                  className="text-xs font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-4 flex items-center justify-end gap-1.5 select-none"
+                >
+                  <span>تعریف آژانس حمل و نقل همکار جدید</span>
+                  <PlusCircle className="w-4 h-4 text-emerald-600" />
+                </h3>
+
+                <form id="shipping-registration-form-sub" onSubmit={handleShippingCompanySubmit} className="space-y-4 text-right">
+                  <div>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">نام شرکت حمل و نقل: <span className="text-rose-500">*</span></label>
+                    <input
+                      type="text"
+                      placeholder="مثال: ترابری جهان گستر شمال"
+                      value={newSCName}
+                      onChange={(e) => setNewSCName(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">کد یکتا ترابری (به انگلیسی): <span className="text-rose-500">*</span></label>
+                    <input
+                      type="text"
+                      placeholder="مثال: TRANS-NORTH"
+                      value={newSCCode}
+                      onChange={(e) => setNewSCCode(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-855 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">نام مدیر عامل / مسئول ترابری:</label>
+                    <input
+                      type="text"
+                      placeholder="مثال: جناب آقای مهندس موسوی"
+                      value={newSCManagerName}
+                      onChange={(e) => setNewSCManagerName(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">تلفن پشتیبانی و هماهنگی: <span className="text-rose-500">*</span></label>
+                    <input
+                      type="text"
+                      placeholder="مثال: 01133224422"
+                      value={newSCPhone}
+                      onChange={(e) => setNewSCPhone(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      required
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full bg-slate-850 hover:bg-slate-900 text-white font-extrabold py-2 px-4 rounded text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <span>ثبت شرکت حمل و نقل جدید</span>
+                    <PlusCircle className="w-4 h-4" />
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
         )}
@@ -1643,154 +2241,250 @@ export default function ManagerDashboard({
           </div>
         )}
 
-        {/* RENDER SECTION F: SHIPPING COMPANIES MANAGEMENT (مدیریت شرکت‌های حمل و نقل) */}
-        {activeTab === 'SHIPPING_MGMT' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="shipping-companies-workspace">
+
+        {/* RENDER SECTION F: USERS & PERMISSIONS SYSTEM (تعریف کاربران و سطوح دسترسی) */}
+        {activeTab === 'USERS_MGMT' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-right animate-fadeIn" id="users-mgmt-panel">
             
-            {/* Right block: Companies List (2/3 width) */}
-            <div className="lg:col-span-2 space-y-4">
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-600 flex items-center justify-between gap-1.5">
+            {/* Right block: Users list (8 columns) */}
+            <div className="lg:col-span-8 space-y-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-600 flex items-center justify-between gap-1.5 font-sans">
                 <div className="text-right">
-                  <h4 className="font-bold text-slate-800">ناوگان‌های همکار طبرستان</h4>
-                  <p className="text-[10px] text-slate-500 mt-0.5">در زمان تخصیص وسیله نقلیه در کارخانه، امکان ارجاع تکی یا گروهی سفارش به ترابری شرکت‌های منتخب زیر فراهم خواهد بود.</p>
+                  <h4 className="font-bold text-slate-800">تعریف کاربران و مدیریت سطوح دسترسی سامانه طبرستان</h4>
+                  <p className="text-[10px] text-slate-500 mt-0.5 font-sans">کاربران تعریف‌شده می‌توانند با شماره تلفن خود و دریافت کد تایید پیامکی (OTP) وارد کارتابل اختصاصی خود شوند.</p>
                 </div>
-                <Truck className="w-5 h-5 text-indigo-500 flex-shrink-0" />
+                <Users className="w-5 h-5 text-amber-500 flex-shrink-0" />
               </div>
 
-              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                <table className="w-full text-right border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-100 text-slate-700 font-bold border-b border-rose-100">
-                      <th className="p-3">نام شرکت حمل و نقل</th>
-                      <th className="p-3">کد ترابری</th>
-                      <th className="p-3">مدیر عامل / رابط</th>
-                      <th className="p-3">شماره تماس پشتیبانی</th>
-                      <th className="p-3 text-center">وضعیت همکاری</th>
-                      <th className="p-3 text-center">عملیات</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shippingCompanies.map((company) => (
-                      <tr key={company.id} className="border-b border-slate-100 hover:bg-slate-50 transition-all">
-                        <td className="p-3 font-bold text-slate-900 flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded bg-blue-500 block"></span>
-                          <span>{company.name}</span>
-                        </td>
-                        <td className="p-3 font-mono text-slate-600">{company.code}</td>
-                        <td className="p-3 text-slate-600">{company.managerName}</td>
-                        <td className="p-3 font-mono text-slate-600">{company.phoneNumber}</td>
-                        <td className="p-3 text-center">
-                          <button
-                            onClick={() => onToggleShippingCompany(company.id)}
-                            className={`px-2 py-1 rounded text-[10px] font-bold transition-colors cursor-pointer ${
-                              company.isEnabled
-                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
-                            }`}
-                          >
-                            {company.isEnabled ? '✅ فعال و در دسترس' : '❌ تعلیق موقت'}
-                          </button>
-                        </td>
-                        <td className="p-3 text-center">
-                          <button
-                            onClick={() => {
-                              askConfirm(
-                                'حذف شرکت حمل و نقل',
-                                `آیا از حذف شرکت حمل و نقل «${company.name}» مطمئن هستید؟ با این کار دیگر امکان ارجاع سفارش به این شرکت وجود نخواهد داشت.`,
-                                () => {
-                                  onDeleteShippingCompany(company.id);
-                                  showToast(`شرکت حمل و نقل ${company.name} از ناوگان حذف شد.`, 'info');
-                                }
-                              );
-                            }}
-                            className="p-1 px-1.5 hover:bg-rose-50 text-rose-500 hover:text-rose-700 rounded transition-all cursor-pointer"
-                            title="حذف شرکت"
-                          >
-                            <Trash2 className="w-4 h-4 mx-auto" />
-                          </button>
-                        </td>
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right border-collapse text-xs font-sans">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-rose-100">
+                        <th className="p-3">نام و مسئولیت</th>
+                        <th className="p-3">نام کاربری</th>
+                        <th className="p-3">شماره تماس (جهت پیامک)</th>
+                        <th className="p-3">نقش سیستمی</th>
+                        <th className="p-3">منتسب به</th>
+                        <th className="p-3 text-center">وضعیت</th>
+                        <th className="p-3 text-center w-20">عملیات</th>
                       </tr>
-                    ))}
-                    {shippingCompanies.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="p-8 text-center text-slate-400">
-                          هیچ شرکت حمل و نقل تعریف شده‌ای یافت نشد. لطفاً از پنل سمت چپ اقدام نمایید.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {users.map((u) => {
+                        // Resolve assignment description
+                        let matchDesc = '-';
+                        if (u.role === 'REPRESENTATIVE' && u.agentCode) {
+                          const ag = agents.find(a => a.agentCode === u.agentCode);
+                          matchDesc = ag ? `نمایندگی ${ag.alias}` : `کد نمایندگی ${u.agentCode}`;
+                        } else if (u.role === 'SHIPPING_COMPANY' && u.shippingCompanyId) {
+                          const sc = shippingCompanies.find(s => s.id === u.shippingCompanyId);
+                          matchDesc = sc ? `شرکت ${sc.name}` : `شناسه باربری ${u.shippingCompanyId}`;
+                        }
+
+                        // Resolve Role Badge colors
+                        let roleColor = 'bg-slate-100 text-slate-800';
+                        let roleLabel = 'ناشناس';
+                        if (u.role === 'SALES_MANAGER') {
+                          roleColor = 'bg-amber-100 text-amber-800 border border-amber-200';
+                          roleLabel = 'مدیر بازرگانی و مالی';
+                        } else if (u.role === 'REPRESENTATIVE') {
+                          roleColor = 'bg-blue-100 text-blue-800 border border-blue-200';
+                          roleLabel = 'نماینده فروش مقیم';
+                        } else if (u.role === 'FACTORY_TRANSPORT') {
+                          roleColor = 'bg-purple-100 text-purple-800 border border-purple-200';
+                          roleLabel = 'ترابری کارخانه';
+                        } else if (u.role === 'SHIPPING_COMPANY') {
+                          roleColor = 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+                          roleLabel = 'اپراتور باربری همکار';
+                        }
+
+                        return (
+                          <tr key={u.id} className="border-b border-slate-100 hover:bg-slate-50 transition-all">
+                            <td className="p-3 font-bold text-slate-900 flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                              <span>{u.fullName}</span>
+                            </td>
+                            <td className="p-3 font-mono text-slate-600">{u.username}</td>
+                            <td className="p-3 font-mono text-slate-600 font-bold">{u.phoneNumber}</td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${roleColor}`}>
+                                {roleLabel}
+                              </span>
+                            </td>
+                            <td className="p-3 text-slate-500 font-bold">{matchDesc}</td>
+                            <td className="p-3 text-center">
+                              <button
+                                onClick={() => handleToggleUser(u.id)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-extrabold transition-colors cursor-pointer border ${
+                                  u.isEnabled
+                                    ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200'
+                                    : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200'
+                                }`}
+                              >
+                                {u.isEnabled ? '✅ مجاز به ورود' : '🔒 مسدود شده'}
+                              </button>
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  onClick={() => handleStartEditUser(u)}
+                                  className="p-1 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded transition-all cursor-pointer"
+                                  title="ویرایش کاربر"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteUser(u.id)}
+                                  className="p-1 hover:bg-rose-50 text-rose-500 hover:text-rose-700 rounded transition-all cursor-pointer"
+                                  title="حذف کاربر"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {users.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="p-8 text-center text-slate-400">
+                            هیچ کاربری در حال حاضر وجود ندارد.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
 
-            {/* Left block: Create Company Form (1/3 width) */}
-            <div className="space-y-4">
+            {/* Left block: Add/Edit User form (4 columns) */}
+            <div className="lg:col-span-4 space-y-4 font-sans">
               <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-                <h3 
-                  onClick={() => {
-                    const form = document.getElementById('shipping-registration-form') as HTMLFormElement;
-                    if (form) form.requestSubmit();
-                  }}
-                  className="text-xs font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-4 flex items-center justify-end gap-1.5 cursor-pointer select-none hover:text-emerald-700 transition-colors"
-                  title="برای ارسال فرم کلیک کنید"
-                >
-                  <span>تعریف آژانس حمل و نقل همکار جدید</span>
+                <h3 className="text-xs font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-4 flex items-center justify-end gap-1.5 font-sans">
+                  <span>{editingUserId ? 'ویرایش مشخصات حساب کاربر' : 'تعریف و ثبت نام کاربر جدید'}</span>
                   <PlusCircle className="w-4 h-4 text-emerald-600" />
                 </h3>
 
-                <form id="shipping-registration-form" onSubmit={handleShippingCompanySubmit} className="space-y-4 text-right">
+                <form onSubmit={handleAddUser} className="space-y-4 text-right">
                   <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">نام شرکت حمل و نقل: <span className="text-rose-500">*</span></label>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">نام و نام خانوادگی مسئول: <span className="text-rose-500">*</span></label>
                     <input
                       type="text"
-                      placeholder="مثال: ترابری جهان گستر شمال"
-                      value={newSCName}
-                      onChange={(e) => setNewSCName(e.target.value)}
+                      placeholder="مثال: سهراب امیری"
+                      value={newUserFullName}
+                      onChange={(e) => setNewUserFullName(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
+                      required
                     />
                   </div>
 
                   <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">کد یکتا ترابری (به انگلیسی): <span className="text-rose-500">*</span></label>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">شماره تلفن همراه (جهت احراز هویت پیامکی): <span className="text-rose-500">*</span></label>
                     <input
                       type="text"
-                      placeholder="مثال: TRANS-NORTH"
-                      value={newSCCode}
-                      onChange={(e) => setNewSCCode(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-855 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">نام مدیر عامل / مسئول ترابری:</label>
-                    <input
-                      type="text"
-                      placeholder="مثال: جناب آقای مهندس موسوی"
-                      value={newSCManagerName}
-                      onChange={(e) => setNewSCManagerName(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">تلفن پشتیبانی و هماهنگی: <span className="text-rose-500">*</span></label>
-                    <input
-                      type="text"
-                      placeholder="مثال: 01133224422"
-                      value={newSCPhone}
-                      onChange={(e) => setNewSCPhone(e.target.value)}
+                      placeholder="مثال: 09123456789"
+                      value={newUserPhone}
+                      onChange={(e) => setNewUserPhone(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      required
+                    />
+                    <p className="text-[9px] text-slate-400 mt-0.5 font-sans">کد تایید پیامکی شبیه‌سازی شده هنگام ورود به این شماره ارسال خواهد شد.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">نام کاربری سیستمی: <span className="text-rose-500">*</span></label>
+                    <input
+                      type="text"
+                      placeholder="مثال: sohrab_shiraz"
+                      value={newUsername}
+                      onChange={(e) => setNewUsername(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      required
                     />
                   </div>
 
-                  <button
-                    type="submit"
-                    id="shipping-submit-btn"
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>تعریف و افزودن آژانس حمل و نقل جدید</span>
-                  </button>
+                  <div>
+                    <label className="block text-slate-600 text-[10px] mb-1 font-bold">نقش و مسئولیت سازمان: <span className="text-rose-500">*</span></label>
+                    <select
+                      value={newUserRole}
+                      onChange={(e) => {
+                        setNewUserRole(e.target.value as UserRole);
+                        setNewUserAgentCode('');
+                        setNewUserSCId('');
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-2 text-xs py-1.5 text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
+                    >
+                      <option value="REPRESENTATIVE">📱 نماینده فروش (دارنده نمایندگی رسمی)</option>
+                      <option value="SALES_MANAGER">👔 مدیر مالی و بازرگانی تهران</option>
+                      <option value="FACTORY_TRANSPORT">🏭 ترابری و خروج متمرکز کارخانه</option>
+                      <option value="SHIPPING_COMPANY">🚚 باربری و اتوبار همکار طبرستان (پیمانکار)</option>
+                    </select>
+                  </div>
+
+                  {/* Representative Link Field */}
+                  {newUserRole === 'REPRESENTATIVE' && (
+                    <div className="bg-blue-50/50 p-2.5 rounded-lg border border-blue-100 animate-fadeIn font-sans">
+                      <label className="block text-slate-600 text-[10px] mb-1 font-bold">منتسب به کدام نمایندگی؟: <span className="text-rose-500">*</span></label>
+                      <select
+                        value={newUserAgentCode}
+                        onChange={(e) => setNewUserAgentCode(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
+                        required
+                      >
+                        <option value="">-- لطفاً نمایندگی را انتخاب کنید --</option>
+                        {agents.map(ag => (
+                          <option key={ag.id} value={ag.agentCode}>{ag.alias} (کد {ag.agentCode})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Shipping Company Link Field */}
+                  {newUserRole === 'SHIPPING_COMPANY' && (
+                    <div className="bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100 animate-fadeIn font-sans">
+                      <label className="block text-slate-600 text-[10px] mb-1 font-bold font-sans">شغل اپراتوری کدام شرکت باربری؟: <span className="text-rose-500">*</span></label>
+                      <select
+                        value={newUserSCId}
+                        onChange={(e) => setNewUserSCId(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
+                        required
+                      >
+                        <option value="">-- لطفاً شرکت باربری را انتخاب کنید --</option>
+                        {shippingCompanies.map(sc => (
+                          <option key={sc.id} value={sc.id}>{sc.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="submit"
+                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow font-sans"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>{editingUserId ? 'ذخیره تغییرات کاربر' : 'ثبت نام قطعی کاربر'}</span>
+                    </button>
+                    {editingUserId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingUserId(null);
+                          setNewUsername('');
+                          setNewUserFullName('');
+                          setNewUserPhone('');
+                          setNewUserRole('REPRESENTATIVE');
+                          setNewUserAgentCode('');
+                          setNewUserSCId('');
+                        }}
+                        className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-3 rounded-lg text-xs transition-colors cursor-pointer font-sans"
+                      >
+                        انصراف
+                      </button>
+                    )}
+                  </div>
                 </form>
               </div>
             </div>

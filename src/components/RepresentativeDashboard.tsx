@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Order, Product, OrderStatus, Agent } from '../types';
+import { Order, Product, OrderStatus, Agent, AppUser } from '../types';
 import { 
   PlusCircle, 
   Clock, 
@@ -33,6 +33,7 @@ interface RepresentativeDashboardProps {
   setSelectedAgent: (agent: string) => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
+  currentUser?: AppUser | null;
 }
 
 export default function RepresentativeDashboard({
@@ -46,6 +47,7 @@ export default function RepresentativeDashboard({
   setSelectedAgent,
   showToast,
   askConfirm,
+  currentUser,
 }: RepresentativeDashboardProps) {
   const currentAgentObj = agents.find(a => a.alias === selectedAgent) || agents[0] || {
     id: 'unknown',
@@ -244,22 +246,34 @@ export default function RepresentativeDashboard({
       <div className="lg:col-span-5 order-2 lg:order-1" id="rep-column-form">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sticky top-6" id="order-form-container">
           
-          {/* Agent Switcher Simulator */}
-          <div className="mb-6 p-4 bg-emerald-50/50 rounded-xl border border-emerald-100" id="agent-selector-box">
-            <label className="block text-xs font-bold text-emerald-800 mb-2 font-sans">📲 شبیه‌ساز ورود به عنوان نمایندگی فروش:</label>
-            <select
-              value={selectedAgent}
-              onChange={(e) => setSelectedAgent(e.target.value)}
-              className="w-full bg-white border border-emerald-200 rounded-lg py-2 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans"
-              id="agent-dropdown"
-            >
-              {agents.map((agent) => (
-                <option key={agent.id} value={agent.alias} disabled={!agent.isEnabled}>
-                  {agent.alias} (کد: {agent.agentCode}) {!agent.isEnabled ? '🛑 (غیرفعال شده)' : ''}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Agent Switcher Simulator (Only editable by SALES_MANAGER, locked to actual agency for logged in REPRESENTATIVEs) */}
+          {currentUser?.role === 'SALES_MANAGER' ? (
+            <div className="mb-6 p-4 bg-emerald-50/50 rounded-xl border border-emerald-100 animate-fade-in" id="agent-selector-box">
+              <label className="block text-xs font-bold text-emerald-800 mb-2 font-sans">📲 شبیه‌ساز ورود به عنوان نمایندگی فروش (مدیر بازرگانی):</label>
+              <select
+                value={selectedAgent}
+                onChange={(e) => setSelectedAgent(e.target.value)}
+                className="w-full bg-white border border-emerald-200 rounded-lg py-2 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans cursor-pointer"
+                id="agent-dropdown"
+              >
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.alias} disabled={!agent.isEnabled}>
+                    {agent.alias} (کد: {agent.agentCode}) {!agent.isEnabled ? '🛑 (غیرفعال شده)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="mb-6 p-4 bg-slate-50 rounded-xl border border-slate-200" id="agent-locked-info-box">
+              <div className="flex items-center gap-2 justify-end mb-1">
+                <span className="text-xs font-extrabold text-slate-700">{currentAgentObj?.fullName || 'نامشخص'}</span>
+                <span className="text-[10px] bg-emerald-500/10 text-emerald-700 py-0.5 px-2 rounded-full font-sans font-bold">📲 نمایندگی امن فعال</span>
+              </div>
+              <p className="text-[10px] text-slate-500 font-sans">
+                کد نمایندگی: <strong className="font-mono text-slate-705">{currentAgentObj?.agentCode || 'کد خطا'}</strong> • منطقه جغرافیایی: {currentAgentObj?.area || 'سراسر کشور'}
+              </p>
+            </div>
+          )}
 
           <div className="flex items-center gap-2.5 mb-5 justify-end">
             <h3 className="text-lg font-bold text-slate-800">فرم ثبت سفارش جدید سفال</h3>

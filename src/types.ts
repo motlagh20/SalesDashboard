@@ -82,3 +82,14 @@ export interface ShippingCompany {
 }
 
 export type UserRole = 'REPRESENTATIVE' | 'SALES_MANAGER' | 'FACTORY_TRANSPORT' | 'SHIPPING_COMPANY';
+
+export interface AppUser {
+  id: string;
+  username: string;
+  fullName: string;
+  phoneNumber: string;
+  role: UserRole;
+  agentCode?: string | null;
+  shippingCompanyId?: string | null;
+  isEnabled: boolean;
+}

@@ -5,13 +5,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Order, OrderStatus, VehicleDetails, UserRole, Product, Agent, ShippingCompany } from './types';
+import { Order, OrderStatus, VehicleDetails, UserRole, Product, Agent, ShippingCompany, AppUser } from './types';
 import { PRESET_ORDERS, PRESET_PRODUCTS, PRESET_AGENTS, PRESET_SHIPPING_COMPANIES } from './data';
 import RepresentativeDashboard from './components/RepresentativeDashboard';
 import ManagerDashboard from './components/ManagerDashboard';
 import FactoryDashboard from './components/FactoryDashboard';
 import ShippingCompanyDashboard from './components/ShippingCompanyDashboard';
 import InfrastructureInfo from './components/InfrastructureInfo';
+import LoginGate from './components/LoginGate';
 import { 
   Building2, 
   Smartphone, 
@@ -32,6 +33,81 @@ export default function App() {
   const [shippingCompanies, setShippingCompanies] = useState<ShippingCompany[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<string>('نمایندگی تهران (احمدی)');
   const [activeRole, setActiveRole] = useState<UserRole | 'INFRASTRUCTURE'>('REPRESENTATIVE');
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
+
+  // Change Password Modal States
+  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isPasswordSubmitting, setIsPasswordSubmitting] = useState(false);
+
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) {
+      showToast('لطفا تمامی فیلدها را پر کنید.', 'error');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showToast('رمز عبور جدید و تکرار آن همخوانی ندارند.', 'error');
+      return;
+    }
+    if (!currentUser) return;
+
+    setIsPasswordSubmitting(true);
+    try {
+      const res = await fetch(`/api/users/${currentUser.id}/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+
+      if (res.ok) {
+        showToast('🔒 کلمه عبور شما با موفقیت تغییر یافت.', 'success');
+        setIsChangePasswordModalOpen(false);
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'خطا در تغییر کلمه عبور.', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('ارتباط با سرور برقرار نشد.', 'error');
+    } finally {
+      setIsPasswordSubmitting(false);
+    }
+  };
+
+  // Load user session from localStorage
+  useEffect(() => {
+    const savedUser = localStorage.getItem('tabarestan_user');
+    if (savedUser) {
+      try {
+        const parsed = JSON.parse(savedUser);
+        setCurrentUser(parsed);
+        setActiveRole(parsed.role);
+      } catch (e) {
+        console.error('Failed parsing tabarestan_user:', e);
+      }
+    }
+  }, []);
+
+  // Securely enforce roles and agent selection based on logged in user details
+  useEffect(() => {
+    if (currentUser) {
+      if (currentUser.role !== 'SALES_MANAGER') {
+        setActiveRole(currentUser.role);
+      }
+      if (currentUser.role === 'REPRESENTATIVE' && currentUser.agentCode && agents.length > 0) {
+        const ag = agents.find(a => a.agentCode === currentUser.agentCode);
+        if (ag) {
+          setSelectedAgent(ag.alias);
+        }
+      }
+    }
+  }, [currentUser, agents]);
 
   // Custom Toast Notification State
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -621,6 +697,46 @@ export default function App() {
     );
   };
 
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-right dir-rtl font-sans pb-16">
+        <LoginGate 
+          onLoginSuccess={(user) => {
+            localStorage.setItem('tabarestan_user', JSON.stringify(user));
+            setCurrentUser(user);
+            setActiveRole(user.role);
+          }} 
+          showToast={showToast} 
+        />
+        {/* Custom Toast Notification System */}
+        <AnimatePresence>
+          {toast && (
+            <motion.div
+              initial={{ opacity: 0, y: -50, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95, y: -20 }}
+              className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 max-w-sm w-[90%] md:w-full bg-white rounded-xl shadow-2xl border p-4 font-sans text-right dir-rtl flex items-start gap-3 ${
+                toast.type === 'success' ? 'border-emerald-250 shadow-emerald-100/40' :
+                toast.type === 'error' ? 'border-rose-250 shadow-rose-100/40' : 'border-indigo-250 shadow-indigo-100/40'
+              }`}
+            >
+              <div className={`p-2 rounded-lg shrink-0 ${
+                toast.type === 'success' ? 'bg-emerald-50 text-emerald-600' :
+                toast.type === 'error' ? 'bg-rose-50 text-rose-600' : 'bg-indigo-50 text-indigo-600'
+              }`}>
+                {toast.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> :
+                 toast.type === 'error' ? <ShieldAlert className="w-5 h-5" /> : <Info className="w-5 h-5" />}
+              </div>
+              <div className="flex-1 min-w-0 pr-1">
+                <p className="text-xs font-bold text-slate-800 leading-normal">{toast.message}</p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-right dir-rtl font-sans selection:bg-emerald-100 selection:text-emerald-800 pb-16" id="app-root-wrapper">
       
@@ -640,6 +756,34 @@ export default function App() {
               </div>
             </div>
 
+            {/* User Session Info / Exit */}
+            {currentUser && (
+              <div className="flex items-center gap-3 text-xs bg-slate-800 border border-slate-705/80 rounded-xl py-1.5 px-3">
+                <span className="text-slate-300 flex items-center gap-1">👋 کاربر جاری: <strong className="text-white font-extrabold">{currentUser.fullName}</strong> ({
+                  currentUser.role === 'SALES_MANAGER' ? 'مدیر بازرگانی' :
+                  currentUser.role === 'REPRESENTATIVE' ? 'نماینده فروش' :
+                  currentUser.role === 'FACTORY_TRANSPORT' ? 'ترابری کارخانه' : 'باربری همکار'
+                })</span>
+                <button
+                  type="button"
+                  onClick={() => setIsChangePasswordModalOpen(true)}
+                  className="mr-2 bg-amber-500/10 hover:bg-amber-500 hover:text-slate-900 border border-amber-500/30 text-amber-400 px-2 py-0.5 rounded transition-all cursor-pointer font-bold text-[10px] shrink-0"
+                >
+                  تغییر رمز
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.removeItem('tabarestan_user');
+                    setCurrentUser(null);
+                    showToast('🔒 با موفقیت از حساب کاربری خود خارج شدید.', 'info');
+                  }}
+                  className="mr-1 bg-rose-500/20 hover:bg-rose-500 hover:text-white text-rose-300 px-2 py-0.5 rounded transition-all cursor-pointer font-bold text-[10px] shrink-0"
+                >
+                  خروج
+                </button>
+              </div>
+            )}
+
             {/* Reset Button */}
             <button
               onClick={handleResetApp}
@@ -654,92 +798,94 @@ export default function App() {
         </div>
       </header>
 
-      {/* Role Play Tester Nav  */}
-      <div className="bg-slate-800 text-slate-200 py-3 border-b border-slate-700 shadow-inner" id="role-tester-bar">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-            <span className="text-[11px] text-slate-400 flex items-center justify-end gap-1.5 flex-row-reverse">
-              <Info className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-              <span>تست فرآیند خرید دوطرفه با شبیه‌سازی نقش‌ها:</span>
-            </span>
+      {/* Role Play Tester Nav only visible to SALES_MANAGER for dual testing/simulation */}
+      {currentUser?.role === 'SALES_MANAGER' && (
+        <div className="bg-slate-800 text-slate-200 py-3 border-b border-slate-700 shadow-inner" id="role-tester-bar">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <span className="text-[11px] text-slate-400 flex items-center justify-end gap-1.5 flex-row-reverse">
+                <Info className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                <span>دسترسی مدیر بازرگانی برای شبیه‌سازی همزمان سایر پنل‌ها:</span>
+              </span>
 
-            {/* Quick switches buttons */}
-            <div className="flex flex-wrap gap-2 justify-end animate-fade-in" id="role-buttons-grid">
-              
-              {/* Role 1: Agent */}
-              <button
-                onClick={() => setActiveRole('REPRESENTATIVE')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                  activeRole === 'REPRESENTATIVE'
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
-                }`}
-                id="role-btn-rep"
-              >
-                <Smartphone className="w-3.5 h-3.5" />
-                <span>۱. اپلیکیشن نمایندگی فروش</span>
-              </button>
+              {/* Quick switches buttons */}
+              <div className="flex flex-wrap gap-2 justify-end animate-fade-in" id="role-buttons-grid">
+                
+                {/* Role 1: Agent */}
+                <button
+                  onClick={() => setActiveRole('REPRESENTATIVE')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    activeRole === 'REPRESENTATIVE'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
+                  }`}
+                  id="role-btn-rep"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>۱. اپلیکیشن نمایندگی فروش</span>
+                </button>
 
-              {/* Role 2: Sales Manager */}
-              <button
-                onClick={() => setActiveRole('SALES_MANAGER')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                  activeRole === 'SALES_MANAGER'
-                    ? 'bg-amber-500 text-slate-900 shadow-sm'
-                    : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
-                }`}
-                id="role-btn-mgr"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>۲. مدیریت بازرگانی</span>
-              </button>
+                {/* Role 2: Sales Manager */}
+                <button
+                  onClick={() => setActiveRole('SALES_MANAGER')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    activeRole === 'SALES_MANAGER'
+                      ? 'bg-amber-500 text-slate-900 shadow-sm'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
+                  }`}
+                  id="role-btn-mgr"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>۲. مدیریت بازرگانی</span>
+                </button>
 
-              {/* Role 3: Factory Logistics */}
-              <button
-                onClick={() => setActiveRole('FACTORY_TRANSPORT')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                  activeRole === 'FACTORY_TRANSPORT'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
-                }`}
-                id="role-btn-factory"
-              >
-                <Truck className="w-3.5 h-3.5" />
-                <span>۳. کارتابل واحد فروش</span>
-              </button>
+                {/* Role 3: Factory Logistics */}
+                <button
+                  onClick={() => setActiveRole('FACTORY_TRANSPORT')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    activeRole === 'FACTORY_TRANSPORT'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
+                  }`}
+                  id="role-btn-factory"
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                  <span>۳. کارتابل واحد فروش</span>
+                </button>
 
-              {/* Role 4: Shipping Company */}
-              <button
-                onClick={() => setActiveRole('SHIPPING_COMPANY')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                  activeRole === 'SHIPPING_COMPANY'
-                    ? 'bg-rose-600 text-white shadow-sm'
-                    : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
-                }`}
-                id="role-btn-shipping"
-              >
-                <Truck className="w-3.5 h-3.5" />
-                <span>۴. پنل اختصاصی باربری‌ها</span>
-              </button>
+                {/* Role 4: Shipping Company */}
+                <button
+                  onClick={() => setActiveRole('SHIPPING_COMPANY')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    activeRole === 'SHIPPING_COMPANY'
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
+                  }`}
+                  id="role-btn-shipping"
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                  <span>۴. پنل اختصاصی باربری‌ها</span>
+                </button>
 
-              {/* View 5: Infrastructure Docs */}
-              <button
-                onClick={() => setActiveRole('INFRASTRUCTURE')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                  activeRole === 'INFRASTRUCTURE'
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
-                }`}
-                id="role-btn-infra"
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>⚙️ زیرساخت فنی مورد نیاز</span>
-              </button>
+                {/* View 5: Infrastructure Docs */}
+                <button
+                  onClick={() => setActiveRole('INFRASTRUCTURE')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    activeRole === 'INFRASTRUCTURE'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
+                  }`}
+                  id="role-btn-infra"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>⚙️ زیرساخت فنی مورد نیاز</span>
+                </button>
 
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Interactive Explanation Toast for the active role */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
@@ -789,6 +935,7 @@ export default function App() {
                 setSelectedAgent={setSelectedAgent}
                 showToast={showToast}
                 askConfirm={askConfirm}
+                currentUser={currentUser}
               />
             )}
 
@@ -841,6 +988,7 @@ export default function App() {
                 onAssignVehicle={handleAssignVehicle}
                 showToast={showToast}
                 askConfirm={askConfirm}
+                currentUser={currentUser}
               />
             )}
 
@@ -881,6 +1029,100 @@ export default function App() {
               <X className="w-4 h-4" />
             </button>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Change Password Modal */}
+      <AnimatePresence>
+        {isChangePasswordModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm" id="change-password-modal-overlay">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-slate-800 text-white rounded-2xl border border-slate-700 p-6 max-w-sm w-full shadow-2xl text-right dir-rtl space-y-4 font-sans"
+              id="change-password-modal-box"
+            >
+              <div className="flex items-center gap-2 border-b border-slate-700 pb-3 justify-end">
+                <h3 className="text-xs sm:text-sm font-black text-amber-500">تغییر کلمه عبور حساب کاربری</h3>
+                <Lock className="w-5 h-5 text-amber-500" />
+              </div>
+
+              <form onSubmit={handleChangePasswordSubmit} className="space-y-3.5 text-right font-sans">
+                <div>
+                  <label className="block text-slate-300 text-[10px] mb-1 font-bold">نام و نام خانوادگی:</label>
+                  <input
+                    type="text"
+                    value={currentUser?.fullName || ''}
+                    disabled
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-400 font-sans cursor-not-allowed"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 text-[10px] mb-1 font-bold">کلمه عبور فعلی: <span className="text-rose-500">*</span></label>
+                  <input
+                    type="password"
+                    placeholder="******"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    disabled={isPasswordSubmitting}
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 text-[10px] mb-1 font-bold">کلمه عبور جدید: <span className="text-rose-500">*</span></label>
+                  <input
+                    type="password"
+                    placeholder="******"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    disabled={isPasswordSubmitting}
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 text-[10px] mb-1 font-bold">تکرار کلمه عبور جدید: <span className="text-rose-500">*</span></label>
+                  <input
+                    type="password"
+                    placeholder="******"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    disabled={isPasswordSubmitting}
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    required
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-3 border-t border-slate-700">
+                  <button
+                    type="submit"
+                    disabled={isPasswordSubmitting}
+                    className="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-2 px-3 rounded text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow"
+                  >
+                    <span>{isPasswordSubmitting ? 'در حال ثبت...' : 'بروزرسانی کلمه عبور'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsChangePasswordModalOpen(false);
+                      setCurrentPassword('');
+                      setNewPassword('');
+                      setConfirmPassword('');
+                    }}
+                    disabled={isPasswordSubmitting}
+                    className="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-3 rounded text-xs transition-colors cursor-pointer"
+                  >
+                    انصراف
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

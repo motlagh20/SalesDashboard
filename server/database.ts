@@ -57,7 +57,8 @@ function loadJsonData(): any {
       agents: [],
       shipping_companies: [],
       orders: [],
-      order_history: []
+      order_history: [],
+      app_users: []
     };
     fs.mkdirSync(path.dirname(JSON_FILE_PATH), { recursive: true });
     fs.writeFileSync(JSON_FILE_PATH, JSON.stringify(initial, null, 2), "utf8");
@@ -65,7 +66,9 @@ function loadJsonData(): any {
   }
   try {
     const raw = fs.readFileSync(JSON_FILE_PATH, "utf8");
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!parsed.app_users) parsed.app_users = [];
+    return parsed;
   } catch (err) {
     console.error("Error reading fallback JSON database:", err);
     return {
@@ -73,7 +76,8 @@ function loadJsonData(): any {
       agents: [],
       shipping_companies: [],
       orders: [],
-      order_history: []
+      order_history: [],
+      app_users: []
     };
   }
 }
@@ -242,6 +246,20 @@ function seedJsonIfEmpty() {
     changed = true;
   }
 
+  if (!data.app_users || data.app_users.length === 0) {
+    console.log("🌱 [Mock Seed] Seeding default app users...");
+    data.app_users = [
+      { id: 'usr-1', username: 'manager', fullName: 'آقای احمدی (مدیر بازرگانی)', phoneNumber: '09121111111', role: 'SALES_MANAGER', agentCode: null, shippingCompanyId: null, isEnabled: 1 },
+      { id: 'usr-2', username: 'rep_tehran', fullName: 'آقای حمیدرضا احمدی', phoneNumber: '09120000001', role: 'REPRESENTATIVE', agentCode: 'AG-9081', shippingCompanyId: null, isEnabled: 1 },
+      { id: 'usr-3', username: 'rep_esfahan', fullName: 'آقای علیرضا رجایی', phoneNumber: '09130000002', role: 'REPRESENTATIVE', agentCode: 'AG-6055', shippingCompanyId: null, isEnabled: 1 },
+      { id: 'usr-4', username: 'rep_rasht', fullName: 'آقای سهراب پوربخش', phoneNumber: '09110000003', role: 'REPRESENTATIVE', agentCode: 'AG-2019', shippingCompanyId: null, isEnabled: 1 },
+      { id: 'usr-5', username: 'rep_shiraz', fullName: 'آقای کریم نمازی', phoneNumber: '09170000004', role: 'REPRESENTATIVE', agentCode: 'AG-7023', shippingCompanyId: null, isEnabled: 1 },
+      { id: 'usr-6', username: 'factory', fullName: 'مسئول ترابری کارخانه', phoneNumber: '09110000005', role: 'FACTORY_TRANSPORT', agentCode: null, shippingCompanyId: null, isEnabled: 1 },
+      { id: 'usr-7', username: 'shipping_transit', fullName: 'باربری ترانزیت طبرستان', phoneNumber: '09110000006', role: 'SHIPPING_COMPANY', agentCode: null, shippingCompanyId: 'sc-1', isEnabled: 1 }
+    ];
+    changed = true;
+  }
+
   if (changed) {
     saveJsonData(data);
   }
@@ -253,6 +271,121 @@ function executeQuery(sql: string, values: any[] = []): any {
 
   if (/SELECT\s+1/i.test(cleanSql)) {
     return [[{ 1: 1 }], []];
+  }
+
+  // APP_USERS CUSTOM MOCK QUERIES
+  if (/SELECT\s+\*\s+FROM\s+app_users/i.test(cleanSql)) {
+    let result = jsonData.app_users || [];
+    if (/WHERE\s+phoneNumber\s+=\s+\?/i.test(cleanSql)) {
+      const phone = values[0];
+      const matched = result.filter((u: any) => u.phoneNumber === phone);
+      return [matched, []];
+    }
+    if (/WHERE\s+username\s+=\s+\?/i.test(cleanSql)) {
+      const uname = values[0];
+      const matched = result.filter((u: any) => u.username === uname);
+      return [matched, []];
+    }
+    if (/WHERE\s+id\s+=\s+\?/i.test(cleanSql)) {
+      const uid = values[0];
+      const matched = result.filter((u: any) => u.id === uid);
+      return [matched, []];
+    }
+    return [result, []];
+  }
+
+  if (/INSERT\s+INTO\s+app_users/i.test(cleanSql)) {
+    let id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, password;
+    if (values.length === 9) {
+      [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, , password] = values;
+    } else {
+      [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, password] = values;
+    }
+    if (jsonData.app_users.some((u: any) => u.username === username || u.phoneNumber === phoneNumber)) {
+      const err: any = new Error("Duplicate entry to users");
+      err.code = "ER_DUP_ENTRY";
+      err.errno = 1062;
+      throw err;
+    }
+    jsonData.app_users.push({
+      id,
+      username,
+      fullName,
+      phoneNumber,
+      role,
+      agentCode: agentCode || null,
+      shippingCompanyId: shippingCompanyId || null,
+      isEnabled: 1,
+      password: password || "123456"
+    });
+    saveJsonData(jsonData);
+    return [{ affectedRows: 1 }];
+  }
+
+  if (/UPDATE\s+app_users\s+SET/i.test(cleanSql)) {
+    if (/isEnabled\s+=\s+NOT\s+isEnabled/i.test(cleanSql) || /isEnabled\s+=\s+\?/i.test(cleanSql)) {
+      const isEnabledValue = /isEnabled\s+=\s+\?/i.test(cleanSql) ? values[0] : null;
+      const id = /isEnabled\s+=\s+\?/i.test(cleanSql) ? (isEnabledValue !== null ? values[1] : values[0]) : values[0];
+      const usr = jsonData.app_users.find((u: any) => u.id === id);
+      if (usr) {
+        if (isEnabledValue !== null) {
+          usr.isEnabled = isEnabledValue ? 1 : 0;
+        } else {
+          usr.isEnabled = usr.isEnabled === 1 ? 0 : 1;
+        }
+        saveJsonData(jsonData);
+      }
+    } else if (/password\s+=\s+\?\s+WHERE\s+phoneNumber\s+=\s+\?/i.test(cleanSql)) {
+      const [newPassword, phoneNumber] = values;
+      const usr = jsonData.app_users.find((u: any) => u.phoneNumber === phoneNumber);
+      if (usr) {
+        usr.password = newPassword;
+        saveJsonData(jsonData);
+      }
+    } else if (/password\s+=\s+\?\s+WHERE\s+id\s+=\s+\?/i.test(cleanSql)) {
+      const [newPassword, id] = values;
+      const usr = jsonData.app_users.find((u: any) => u.id === id);
+      if (usr) {
+        usr.password = newPassword;
+        saveJsonData(jsonData);
+      }
+    } else {
+      const hasPassword = /password\s+=\s+\?/i.test(cleanSql);
+      if (hasPassword) {
+        const [username, fullName, phoneNumber, role, agentCode, shippingCompanyId, password, id] = values;
+        const usr = jsonData.app_users.find((u: any) => u.id === id);
+        if (usr) {
+          usr.username = username;
+          usr.fullName = fullName;
+          usr.phoneNumber = phoneNumber;
+          usr.role = role;
+          usr.agentCode = agentCode || null;
+          usr.shippingCompanyId = shippingCompanyId || null;
+          usr.password = password;
+          saveJsonData(jsonData);
+        }
+      } else {
+        const [username, fullName, phoneNumber, role, agentCode, shippingCompanyId, id] = values;
+        const usr = jsonData.app_users.find((u: any) => u.id === id);
+        if (usr) {
+          usr.username = username;
+          usr.fullName = fullName;
+          usr.phoneNumber = phoneNumber;
+          usr.role = role;
+          usr.agentCode = agentCode || null;
+          usr.shippingCompanyId = shippingCompanyId || null;
+          saveJsonData(jsonData);
+        }
+      }
+    }
+    return [{ affectedRows: 1 }];
+  }
+
+  if (/DELETE\s+FROM\s+app_users/i.test(cleanSql)) {
+    const id = values[0];
+    jsonData.app_users = jsonData.app_users.filter((u: any) => u.id !== id);
+    saveJsonData(jsonData);
+    return [{ affectedRows: 1 }];
   }
 
   // 1. SELECT * FROM products
@@ -708,6 +841,7 @@ export function getDbPool(): mysql.Pool {
       queueLimit: 0,
       enableKeepAlive: true,
       keepAliveInitialDelay: 10000,
+      connectTimeout: 2000,
     });
   }
   return pool;
@@ -925,6 +1059,20 @@ export async function bootstrapDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // 6. Create App Users Table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS app_users (
+        id VARCHAR(50) PRIMARY KEY,
+        username VARCHAR(100) NOT NULL UNIQUE,
+        fullName VARCHAR(150) NOT NULL,
+        phoneNumber VARCHAR(20) NOT NULL UNIQUE,
+        role VARCHAR(50) NOT NULL,
+        agentCode VARCHAR(50) NULL,
+        shippingCompanyId VARCHAR(100) NULL,
+        isEnabled TINYINT(1) DEFAULT 1
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
     // --- Automated Schema Migration / Repair Block ---
     console.log("🔄 [Bootstrap] Verifying table schemas and performing automatic migrations...");
     await ensureColumnExists(db, "products", "description", "TEXT");
@@ -939,6 +1087,15 @@ export async function bootstrapDatabase() {
 
     await ensureColumnExists(db, "shipping_companies", "managerName", "VARCHAR(150)");
     await ensureColumnExists(db, "shipping_companies", "isEnabled", "TINYINT(1) DEFAULT 1");
+
+    await ensureColumnExists(db, "app_users", "username", "VARCHAR(100) NOT NULL UNIQUE");
+    await ensureColumnExists(db, "app_users", "fullName", "VARCHAR(150) NOT NULL");
+    await ensureColumnExists(db, "app_users", "phoneNumber", "VARCHAR(20) NOT NULL UNIQUE");
+    await ensureColumnExists(db, "app_users", "role", "VARCHAR(50) NOT NULL");
+    await ensureColumnExists(db, "app_users", "agentCode", "VARCHAR(50) NULL");
+    await ensureColumnExists(db, "app_users", "shippingCompanyId", "VARCHAR(100) NULL");
+    await ensureColumnExists(db, "app_users", "isEnabled", "TINYINT(1) DEFAULT 1");
+    await ensureColumnExists(db, "app_users", "password", "VARCHAR(255) DEFAULT '123456'");
 
     await ensureColumnExists(db, "orders", "sentToFactoryAt", "VARCHAR(50) NULL");
     await ensureColumnExists(db, "orders", "priorityIndex", "INT DEFAULT 0");
