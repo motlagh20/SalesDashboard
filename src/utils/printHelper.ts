@@ -38,8 +38,14 @@ export function printOrders(orders: Order[], products: Product[], agents: Agent[
     // 1. Resolve Agent Code and Name
     const agent = agents.find(a => a.agentCode === order.agentCode || a.fullName === order.customerName);
     const agentLabel = agent 
-      ? `${agent.alias} (کد: ${agent.agentCode})` 
-      : `${order.customerName} (کد: ${order.agentCode || 'نامشخص'})`;
+      ? `
+        <div style="font-size: 11px; font-weight: bold; color: #1e3a8a; line-height: 1.3;">${agent.fullName}</div>
+        <div style="font-size: 10px; color: #475569; margin-top: 2.5px; font-weight: normal; font-family: 'Tahoma', sans-serif;">کد نمایندگی: ${agent.agentCode}</div>
+      `
+      : `
+        <div style="font-size: 11px; font-weight: bold; color: #1e3a8a; line-height: 1.3;">${order.customerName || 'نامشخص'}</div>
+        <div style="font-size: 10px; color: #475569; margin-top: 2.5px; font-weight: normal; font-family: 'Tahoma', sans-serif;">کد نمایندگی: ${order.agentCode || 'نامشخص'}</div>
+      `;
 
     // 2. Resolve Product details (showing items separately "به تفکیک")
     let productDetailsText = '';
@@ -91,7 +97,7 @@ export function printOrders(orders: Order[], products: Product[], agents: Agent[
       <tr style="border-bottom: 1px solid #cbd5e1; text-align: right; vertical-align: middle;">
         <td style="padding: 10px; font-weight: bold; text-align: center; border-left: 1px solid #e2e8f0; font-family: 'Tahoma', sans-serif;">${(index + 1).toLocaleString('fa-IR')}</td>
         <td style="padding: 10px; border-left: 1px solid #e2e8f0; font-family: monospace; font-size: 10px; color: #475569; text-align: center;">${order.orderNumber}</td>
-        <td style="padding: 10px; border-left: 1px solid #e2e8f0; font-weight: bold; color: #1e3a8a;">${agentLabel}</td>
+        <td style="padding: 10px; border-left: 1px solid #e2e8f0; vertical-align: middle;">${agentLabel}</td>
         <td style="padding: 10px; border-left: 1px solid #e2e8f0; line-height: 1.5; font-size: 11px;">
           ${productDetailsText}
         </td>
@@ -149,12 +155,9 @@ export function printOrders(orders: Order[], products: Product[], agents: Agent[
             <!-- RIGHT CELL: Company Logo and branding -->
             <td style="width: 35%; text-align: right; vertical-align: middle;">
               <div style="display: flex; align-items: center; gap: 8px;">
-                <!-- Minimal Corporate Hexagon/Kiln Identity Logo -->
-                <div style="width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; background-color: #1e3a8a; border-radius: 8px; padding: 4px;">
-                  <svg width="34" height="34" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 2L2 9L12 16L22 9L12 2Z" fill="#ffffff" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
-                    <path d="M2 14L12 21L22 14" stroke="#e2e8f0" stroke-width="1.5" stroke-linejoin="round"/>
-                  </svg>
+                <!-- Real Corporate Logo -->
+                <div style="width: 48px; height: 48px; display: inline-flex; align-items: center; justify-content: center; shrink-0; overflow: hidden;">
+                  <img src="${window.location.origin}/logo.png" alt="سفال طبرستان" style="max-width: 100%; max-height: 100%; object-fit: contain; display: block;" />
                 </div>
                 <div>
                   <div style="font-size: 13px; font-weight: bold; color: #1e3a8a; font-family: 'Tahoma', sans-serif;">سفال طبرستان</div>
@@ -194,11 +197,11 @@ export function printOrders(orders: Order[], products: Product[], agents: Agent[
         <table style="width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden;">
           <thead>
             <tr style="background-color: #1e3a8a; color: white; height: 35px; text-align: right;">
-              <th style="width: 6%; text-align: center; border-left: 1px solid rgba(255,255,255,0.2);">ردیف</th>
-              <th style="width: 14%; text-align: center; border-left: 1px solid rgba(255,255,255,0.2);">شماره سفارش</th>
-              <th style="width: 25%; padding-right: 10px; border-left: 1px solid rgba(255,255,255,0.2);">کد و نام نمایندگی</th>
-              <th style="width: 30%; padding-right: 10px; border-left: 1px solid rgba(255,255,255,0.2);">جزئیات محصول و مقدار</th>
-              <th style="width: 25%; padding-right: 10px;">آدرس دقیق مقصد (تخلیه کالا)</th>
+              <th style="width: 5%; text-align: center; border-left: 1px solid rgba(255,255,255,0.2);">ردیف</th>
+              <th style="width: 13%; text-align: center; border-left: 1px solid rgba(255,255,255,0.2);">شماره سفارش</th>
+              <th style="width: 18%; padding-right: 10px; border-left: 1px solid rgba(255,255,255,0.2);">نماینده مسئول و کد</th>
+              <th style="width: 31%; padding-right: 10px; border-left: 1px solid rgba(255,255,255,0.2);">جزئیات محصول و مقدار</th>
+              <th style="width: 33%; padding-right: 10px;">آدرس دقیق مقصد (تخلیه کالا)</th>
             </tr>
           </thead>
           <tbody>
