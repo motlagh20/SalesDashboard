@@ -925,6 +925,15 @@ export function getRedisClient(): any {
         password,
         lazyConnect: true,
         maxRetriesPerRequest: 3,
+        connectTimeout: 1000,
+        enableOfflineQueue: false,
+        retryStrategy(times) {
+          if (times > 3) {
+            console.warn("⚠️ [Redis] Max connect retries reached. Stopping reconnection attempts.");
+            return null;
+          }
+          return Math.min(times * 100, 500);
+        }
       });
 
       redis.on("connect", () => {
@@ -1125,8 +1134,15 @@ export async function bootstrapDatabase() {
     // Test Redis connectivity if configured
     const redisClient = getRedisClient();
     if (redisClient) {
-      await redisClient.ping();
-      console.log("✅ [Bootstrap] Redis connection verified successfully!");
+      try {
+        await Promise.race([
+          redisClient.ping(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 1500))
+        ]);
+        console.log("✅ [Bootstrap] Redis connection verified successfully!");
+      } catch (err: any) {
+        console.warn("⚠️ [Bootstrap] Redis connection test failed or timed out. Continuing without active Redis:", err.message);
+      }
     }
   } catch (error: any) {
     console.error("⚠️ [Bootstrap] Database connectivity is not ready yet because:", error.message);

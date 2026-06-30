@@ -178,21 +178,26 @@ export default function App() {
 
   // Load data from production Express API instead of localstorage mock
   const refreshAllData = async () => {
-    try {
-      const [resProd, resAgent, resShip, resOrder] = await Promise.all([
-        fetch('/api/products'),
-        fetch('/api/agents'),
-        fetch('/api/shipping-companies'),
-        fetch('/api/orders')
-      ]);
+    const fetchWithFallback = async (url: string, setter: (data: any) => void) => {
+      try {
+        const res = await fetch(url);
+        if (res.ok) {
+          const parsed = await safeParseResponse(res, []);
+          setter(parsed);
+        } else {
+          console.warn(`[API] Fetch failed for ${url} with status: ${res.status}`);
+        }
+      } catch (err) {
+        console.error(`[API] Network error fetching ${url}:`, err);
+      }
+    };
 
-      if (resProd.ok) setProducts(await safeParseResponse(resProd, []));
-      if (resAgent.ok) setAgents(await safeParseResponse(resAgent, []));
-      if (resShip.ok) setShippingCompanies(await safeParseResponse(resShip, []));
-      if (resOrder.ok) setOrders(await safeParseResponse(resOrder, []));
-    } catch (err) {
-      console.error('Error refreshing dashboard data:', err);
-    }
+    await Promise.all([
+      fetchWithFallback('/api/products', setProducts),
+      fetchWithFallback('/api/agents', setAgents),
+      fetchWithFallback('/api/shipping-companies', setShippingCompanies),
+      fetchWithFallback('/api/orders', setOrders)
+    ]);
   };
 
   useEffect(() => {
