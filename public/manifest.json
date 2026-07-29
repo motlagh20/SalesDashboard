@@ -1,0 +1,56 @@
+{
+  "name": "صنایع سفال طبرستان | سامانه نمایندگان و مشتریان",
+  "short_name": "سفال طبرستان",
+  "description": "سامانه ثبت و پیگیری سفارشات، تایید حواله و پیگیری ترابری صنایع سفال طبرستان",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "fa",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "/pwa-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "ثبت سفارش جدید",
+      "short_name": "ثبت سفارش",
+      "description": "ورود سریع به صفحه ثبت سفارش جدید نماینده",
+      "url": "/?shortcut=new-order",
+      "icons": [{ "src": "/pwa-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "پیگیری حواله",
+      "short_name": "پیگیری حواله",
+      "description": "استعلام وضعیت حواله بارگیری",
+      "url": "/?shortcut=track",
+      "icons": [{ "src": "/pwa-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
