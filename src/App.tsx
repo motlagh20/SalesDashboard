@@ -37,6 +37,7 @@ export default function App() {
   const [selectedAgent, setSelectedAgent] = useState<string>('نمایندگی تهران (احمدی)');
   const [activeRole, setActiveRole] = useState<UserRole | 'INFRASTRUCTURE'>('REPRESENTATIVE');
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
+  const [isIntroExpanded, setIsIntroExpanded] = useState<boolean>(false);
 
   // Sandbox shortcut visible state
   const [sandboxEnabled, setSandboxEnabled] = useState<boolean>(() => {
@@ -996,8 +997,6 @@ export default function App() {
       </div>
     );
   }
-
-  const [isIntroExpanded, setIsIntroExpanded] = useState<boolean>(false);
 
   return (
     <div className="min-h-screen bg-slate-50 text-right dir-rtl font-sans selection:bg-emerald-100 selection:text-emerald-800 pb-16" id="app-root-wrapper">
