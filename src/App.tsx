@@ -997,68 +997,94 @@ export default function App() {
     );
   }
 
+  const [isIntroExpanded, setIsIntroExpanded] = useState<boolean>(false);
+
   return (
     <div className="min-h-screen bg-slate-50 text-right dir-rtl font-sans selection:bg-emerald-100 selection:text-emerald-800 pb-16" id="app-root-wrapper">
       
       {/* Top Main Navigation Header */}
       <header className="bg-slate-900 text-white sticky top-0 z-50 shadow-md border-b border-slate-800" id="primary-header">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16 flex-wrap sm:flex-nowrap gap-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between min-h-16 py-2 sm:py-0 gap-2 sm:gap-4">
             
             {/* Header Brand */}
-            <div className="flex items-center gap-3">
-              <div className="shrink-0 flex items-center justify-center" id="app-logo">
-                <TabarestanLogo className="w-9 h-9 text-emerald-500" />
+            <div className="flex items-center justify-between sm:justify-start gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="shrink-0 flex items-center justify-center" id="app-logo">
+                  <TabarestanLogo className="w-8 h-8 sm:w-9 sm:h-9 text-emerald-500" />
+                </div>
+                <div>
+                  <h1 className="text-xs sm:text-base font-extrabold tracking-tight text-white">تولیدی صنایع سفال طبرستان</h1>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400">سامانه ثبت سفارشات و رهگیری</p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-sm sm:text-base font-extrabold tracking-tight">تولیدی صنایع سفال طبرستان</h1>
-                <p className="text-[10px] text-slate-400">سامانه ثبت سفارشات و رهگیری</p>
-              </div>
+
+              {/* Mobile Reset Button */}
+              <button
+                onClick={handleResetApp}
+                title="بازنشانی پایگاه داده شبیه‌ساز"
+                className="sm:hidden px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 border border-slate-700"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>بازنشانی</span>
+              </button>
             </div>
 
             {/* User Session Info / Exit */}
             {currentUser && (
-              <div className="flex items-center gap-2 text-xs bg-slate-800 border border-slate-705/80 rounded-xl py-1.5 px-3">
-                <span className="text-slate-300 flex items-center gap-1">👋 کاربر جاری: <strong className="text-white font-extrabold">{currentUser.fullName}</strong> ({
-                  currentUser.role === 'SYSTEM_ADMIN' ? 'ادمین ارشد سیستم' :
-                  currentUser.role === 'SALES_MANAGER' ? 'مدیر بازرگانی' :
-                  currentUser.role === 'REPRESENTATIVE' ? 'نماینده فروش' :
-                  currentUser.role === 'FACTORY_TRANSPORT' ? 'فروش کارخانه' : 'باربری همکار'
-                })</span>
-                <button
-                  type="button"
-                  onClick={() => handleOpenEditProfile()}
-                  className="mr-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-3 py-1 rounded-lg transition-all cursor-pointer font-black text-xs shrink-0 flex items-center gap-1.5 shadow-md border border-emerald-300"
-                  title="ویرایش شماره تلفن همراه و آدرس دفتر/انبار"
-                >
-                  <User className="w-4 h-4 text-slate-950" />
-                  <span>📱📍 ویرایش آدرس و همراه</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsChangePasswordModalOpen(true)}
-                  className="bg-amber-500/10 hover:bg-amber-500 hover:text-slate-900 border border-amber-500/30 text-amber-400 px-2 py-0.5 rounded transition-all cursor-pointer font-bold text-[10px] shrink-0"
-                >
-                  تغییر رمز
-                </button>
-                <button
-                  onClick={() => {
-                    localStorage.removeItem('tabarestan_user');
-                    setCurrentUser(null);
-                    showToast('🔒 با موفقیت از حساب کاربری خود خارج شدید.', 'info');
-                  }}
-                  className="mr-1 bg-rose-500/20 hover:bg-rose-500 hover:text-white text-rose-300 px-2 py-0.5 rounded transition-all cursor-pointer font-bold text-[10px] shrink-0"
-                >
-                  خروج
-                </button>
+              <div className="flex items-center justify-between sm:justify-start gap-2 text-xs bg-slate-800/90 border border-slate-700/80 rounded-xl py-1 px-2.5 sm:py-1.5 sm:px-3">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-slate-400 text-xs">👋</span>
+                  <span className="text-slate-300 flex items-center gap-1 truncate text-[11px] sm:text-xs">
+                    <strong className="text-white font-extrabold truncate max-w-[110px] xs:max-w-[160px] sm:max-w-none">{currentUser.fullName}</strong>
+                    <span className="text-emerald-400 font-bold text-[10px] sm:text-xs shrink-0">
+                      ({
+                        currentUser.role === 'SYSTEM_ADMIN' ? 'ادمین ارشد' :
+                        currentUser.role === 'SALES_MANAGER' ? 'مدیر بازرگانی' :
+                        currentUser.role === 'REPRESENTATIVE' ? 'نماینده فروش' :
+                        currentUser.role === 'FACTORY_TRANSPORT' ? 'فروش کارخانه' : 'باربری همکار'
+                      })
+                    </span>
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditProfile()}
+                    className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-2 py-1 sm:px-2.5 rounded-lg transition-all cursor-pointer font-extrabold text-[10px] sm:text-xs flex items-center gap-1 shadow-xs border border-emerald-300"
+                    title="ویرایش شماره تلفن همراه و آدرس دفتر/انبار"
+                  >
+                    <User className="w-3.5 h-3.5 text-slate-950" />
+                    <span className="hidden sm:inline">ویرایش آدرس و همراه</span>
+                    <span className="sm:hidden">ویرایش</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsChangePasswordModalOpen(true)}
+                    className="bg-amber-500/10 hover:bg-amber-500 hover:text-slate-900 border border-amber-500/30 text-amber-400 px-2 py-1 rounded text-[10px] font-bold"
+                  >
+                    رمز
+                  </button>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('tabarestan_user');
+                      setCurrentUser(null);
+                      showToast('🔒 با موفقیت از حساب کاربری خود خارج شدید.', 'info');
+                    }}
+                    className="bg-rose-500/20 hover:bg-rose-500 hover:text-white text-rose-300 px-2 py-1 rounded text-[10px] font-bold"
+                  >
+                    خروج
+                  </button>
+                </div>
               </div>
             )}
 
-            {/* Reset Button */}
+            {/* Desktop Reset Button */}
             <button
               onClick={handleResetApp}
               title="بازنشانی پایگاه داده شبیه‌ساز"
-              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 hover:text-rose-400 text-slate-400 rounded-lg text-[10px] transition-all flex items-center gap-1 cursor-pointer"
+              className="hidden sm:flex px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 hover:text-rose-400 text-slate-400 rounded-lg text-[10px] transition-all items-center gap-1 cursor-pointer shrink-0 border border-slate-700"
               id="reset-simulation-btn"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -1070,85 +1096,85 @@ export default function App() {
 
       {/* Role Play Tester Nav only visible to SALES_MANAGER & SYSTEM_ADMIN for testing/simulation */}
       {(currentUser?.role === 'SALES_MANAGER' || currentUser?.role === 'SYSTEM_ADMIN') && (
-        <div className="bg-slate-800 text-slate-200 py-3 border-b border-slate-700 shadow-inner" id="role-tester-bar">
+        <div className="bg-slate-800 text-slate-200 py-2 sm:py-2.5 border-b border-slate-700 shadow-inner" id="role-tester-bar">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-              <span className="text-[11px] text-slate-400 flex items-center justify-end gap-1.5 flex-row-reverse">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <span className="text-[10px] sm:text-[11px] text-slate-400 flex items-center justify-start sm:justify-end gap-1.5">
                 <Info className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-                <span>دسترسی مدیر بازرگانی برای شبیه‌سازی همزمان سایر پنل‌ها:</span>
+                <span>شبیه‌سازی نقش‌های مختلف:</span>
               </span>
 
-              {/* Quick switches buttons */}
-              <div className="flex flex-wrap gap-2 justify-end animate-fade-in" id="role-buttons-grid">
+              {/* Quick switches buttons - horizontal scrollable on mobile */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 max-w-full no-scrollbar justify-start sm:justify-end shrink-0" id="role-buttons-grid">
                 
                 {/* Role 1: Agent */}
                 <button
                   onClick={() => setActiveRole('REPRESENTATIVE')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
                     activeRole === 'REPRESENTATIVE'
                       ? 'bg-emerald-600 text-white shadow-sm'
                       : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
                   }`}
                   id="role-btn-rep"
                 >
-                  <Smartphone className="w-3.5 h-3.5" />
-                  <span>۱. اپلیکیشن نمایندگی فروش</span>
+                  <Smartphone className="w-3 h-3" />
+                  <span>۱. نمایندگی فروش</span>
                 </button>
 
                 {/* Role 2: Sales Manager */}
                 <button
                   onClick={() => setActiveRole('SALES_MANAGER')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
                     activeRole === 'SALES_MANAGER'
                       ? 'bg-amber-500 text-slate-900 shadow-sm'
                       : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
                   }`}
                   id="role-btn-mgr"
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <CheckCircle2 className="w-3 h-3" />
                   <span>۲. مدیریت بازرگانی</span>
                 </button>
 
                 {/* Role 3: Factory Logistics */}
                 <button
                   onClick={() => setActiveRole('FACTORY_TRANSPORT')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
                     activeRole === 'FACTORY_TRANSPORT'
                       ? 'bg-blue-600 text-white shadow-sm'
                       : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
                   }`}
                   id="role-btn-factory"
                 >
-                  <Truck className="w-3.5 h-3.5" />
-                  <span>۳. کارتابل واحد فروش</span>
+                  <Truck className="w-3 h-3" />
+                  <span>۳. واحد فروش</span>
                 </button>
 
                 {/* Role 4: Shipping Company */}
                 <button
                   onClick={() => setActiveRole('SHIPPING_COMPANY')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
                     activeRole === 'SHIPPING_COMPANY'
                       ? 'bg-rose-600 text-white shadow-sm'
                       : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
                   }`}
                   id="role-btn-shipping"
                 >
-                  <Truck className="w-3.5 h-3.5" />
-                  <span>۴. پنل اختصاصی باربری‌ها</span>
+                  <Truck className="w-3 h-3" />
+                  <span>۴. پنل باربری‌ها</span>
                 </button>
 
                 {/* View 5: Infrastructure Docs */}
                 <button
                   onClick={() => setActiveRole('INFRASTRUCTURE')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
                     activeRole === 'INFRASTRUCTURE'
                       ? 'bg-indigo-600 text-white shadow-sm'
                       : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
                   }`}
                   id="role-btn-infra"
                 >
-                  <Layers className="w-3.5 h-3.5" />
-                  <span>⚙️ زیرساخت فنی مورد نیاز</span>
+                  <Layers className="w-3 h-3" />
+                  <span>⚙️ زیرساخت</span>
                 </button>
 
               </div>
@@ -1158,10 +1184,17 @@ export default function App() {
       )}
 
       {/* Interactive Explanation Toast for the active role */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
-        <div className="bg-white border-r-4 border-emerald-500 p-4 rounded-xl shadow-sm text-xs text-slate-600 flex items-start gap-3 justify-end" id="workflow-intro-card">
-          <div className="flex-1 text-right">
-            <h4 className="font-bold text-slate-800 mb-1 flex items-center justify-end gap-1.5">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-3 sm:mt-6">
+        <div className="bg-white border-r-4 border-emerald-500 p-3 sm:p-4 rounded-xl shadow-xs text-xs text-slate-600" id="workflow-intro-card">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-100/80 pb-2 mb-2">
+            <button
+              type="button"
+              onClick={() => setIsIntroExpanded(!isIntroExpanded)}
+              className="text-[10px] text-slate-500 hover:text-slate-800 font-bold bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded transition-colors cursor-pointer"
+            >
+              {isIntroExpanded ? 'بستن راهنما ▲' : 'راهنمای این پنل ▼'}
+            </button>
+            <h4 className="font-extrabold text-slate-800 flex items-center gap-1.5 text-xs sm:text-sm">
               <span>
                 {activeRole === 'REPRESENTATIVE' && '📱 کانال اپلیکیشن تحت وب نمایندگی‌ها (آیفون / اندروید)'}
                 {activeRole === 'SALES_MANAGER' && '👔 کارتابل مدیریت بازرگانی و تایید مالی'}
@@ -1169,16 +1202,17 @@ export default function App() {
                 {activeRole === 'SHIPPING_COMPANY' && '🚚 پنل اختصاصی باربری‌ها و اتوبارهای همکار طبرستان'}
                 {activeRole === 'INFRASTRUCTURE' && '⚙️ نیازمندی‌های توسعه زیرساخت نرم‌افزاری در فاز تولید'}
               </span>
-              <Info className="w-4 h-4 text-emerald-600" />
+              <Info className="w-4 h-4 text-emerald-600 shrink-0" />
             </h4>
-            <p className="text-slate-500 leading-relaxed text-justify">
-              {activeRole === 'REPRESENTATIVE' && 'سفارشات جدید را در فرم زیر ثبت کنید و فاکتور نهایی را برآورد کنید. با ثبت سفارش، اطلاعات بلافاصله در پنل مدیریت بازرگانی رویت خواهد شد. پیگیری وضعیت فاکتور و کامیون اختصاص داده شده با پلاک، راننده و شماره تلفن در همین بخش قابل رویت است.'}
-              {activeRole === 'SALES_MANAGER' && 'سفارشات جدید ثبت شده توسط نمایندگان سراسر کشور با تمام فاکتورها در این کارتابل مدیریت بازرگانی ظاهر می‌شود. واحد بازرگانی می‌تواند با تایید سفارش آن را به خط کارخانه بفرستد یا در صورت عدم کفایت اعتباری با درج علت آن را لغو کند. همچنین قابلیت تعریف نمایندگان، محصولات و شرکت‌های حمل و نقل در این پنل تعبیه شده است.'}
-              {activeRole === 'FACTORY_TRANSPORT' && 'سفارشات تایید شده بازرگانی در صف کارخانه قرار می‌گیرند. مدیر فروش کارخانه به جای پر کردن فرم‌های طولانی، به راحتی سفارش را با مشخص کردن باربری و نوع نیاز خودرو به باربری مربوطه ارسال می‌کند تا کمترین درگیری ثبتی را تجربه کند.'}
-              {activeRole === 'SHIPPING_COMPANY' && 'باربری‌ها وقتی ارجاع حمل را از واحد فروش کارخانه طبرستان دریافت می‌کنند، درخواست مربوطه به همراه مقدار سفال سقف یا آجر در صف آنها ظاهر می‌شود. آنها با دکمه درج سریع نام راننده و پلاک را با حداقل وقت تلف شده پر کرده و شماره بارنامه صادرشده در برنامه اختصاصی خود را نوشته و سفارش را به نوبت بارگیری تایید می‌کنند.'}
-              {activeRole === 'INFRASTRUCTURE' && 'در این لایه فناوری‌ها، زیرساخت پایگاه داده رابطه‌ای، شیوه احراز هویت پیامکی کاربران و نحوه استقرار برنامه جهت دسترسی دائم تمامی گوشی‌های اندروید و آیفون تبیین شده است.'}
-            </p>
           </div>
+
+          <p className={`text-slate-500 leading-relaxed text-justify transition-all ${isIntroExpanded ? 'block' : 'hidden sm:block text-[11px] sm:text-xs'}`}>
+            {activeRole === 'REPRESENTATIVE' && 'سفارشات جدید را در فرم زیر ثبت کنید و فاکتور نهایی را برآورد کنید. با ثبت سفارش، اطلاعات بلافاصله در پنل مدیریت بازرگانی رویت خواهد شد. پیگیری وضعیت فاکتور و کامیون اختصاص داده شده با پلاک، راننده و شماره تلفن در همین بخش قابل رویت است.'}
+            {activeRole === 'SALES_MANAGER' && 'سفارشات جدید ثبت شده توسط نمایندگان سراسر کشور با تمام فاکتورها در این کارتابل مدیریت بازرگانی ظاهر می‌شود. واحد بازرگانی می‌تواند با تایید سفارش آن را به خط کارخانه بفرستد یا در صورت عدم کفایت اعتباری با درج علت آن را لغو کند. همچنین قابلیت تعریف نمایندگان، محصولات و شرکت‌های حمل و نقل در این پنل تعبیه شده است.'}
+            {activeRole === 'FACTORY_TRANSPORT' && 'سفارشات تایید شده بازرگانی در صف کارخانه قرار می‌گیرند. مدیر فروش کارخانه به جای پر کردن فرم‌های طولانی، به راحتی سفارش را با مشخص کردن باربری و نوع نیاز خودرو به باربری مربوطه ارسال می‌کند تا کمترین درگیری ثبتی را تجربه کند.'}
+            {activeRole === 'SHIPPING_COMPANY' && 'باربری‌ها وقتی ارجاع حمل را از واحد فروش کارخانه طبرستان دریافت می‌کنند، درخواست مربوطه به همراه مقدار سفال سقف یا آجر در صف آنها ظاهر می‌شود. آنها با دکمه درج سریع نام راننده و پلاک را با حداقل وقت تلف شده پر کرده و شماره بارنامه صادرشده در برنامه اختصاصی خود را نوشته و سفارش را به نوبت بارگیری تایید می‌کنند.'}
+            {activeRole === 'INFRASTRUCTURE' && 'در این لایه فناوری‌ها، زیرساخت پایگاه داده رابطه‌ای، شیوه احراز هویت پیامکی کاربران و نحوه استقرار برنامه جهت دسترسی دائم تمامی گوشی‌های اندروید و آیفون تبیین شده است.'}
+          </p>
         </div>
       </div>
 

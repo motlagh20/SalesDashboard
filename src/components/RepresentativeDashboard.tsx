@@ -383,54 +383,54 @@ export default function RepresentativeDashboard({
     <div className="space-y-6 text-right dir-rtl font-sans" id="rep-dashboard">
       
       {/* Top Header: Agent Switcher Simulator (for SALES_MANAGER) or Agency Details Card */}
-      <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-3" id="agent-info-card-header">
+      <div className="p-3 sm:p-4 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-3" id="agent-info-card-header">
         {currentUser?.role === 'SALES_MANAGER' && (
-          <div className="bg-emerald-50/70 rounded-xl border border-emerald-100 p-3 mb-2" id="agent-selector-box">
-            <label className="block text-xs font-bold text-emerald-800 mb-1.5 font-sans">📲 شبیه‌ساز ورود به عنوان نمایندگی فروش (مدیر بازرگانی):</label>
+          <div className="bg-emerald-50/70 rounded-xl border border-emerald-100 p-2.5 sm:p-3 mb-2" id="agent-selector-box">
+            <label className="block text-xs font-bold text-emerald-800 mb-1 font-sans">📲 شبیه‌ساز ورود به عنوان نمایندگی فروش (مدیر بازرگانی):</label>
             <select
               value={selectedAgent}
               onChange={(e) => setSelectedAgent(e.target.value)}
-              className="w-full bg-white border border-emerald-200 rounded-xl py-2 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans cursor-pointer shadow-xs"
+              className="w-full bg-white border border-emerald-200 rounded-xl py-1.5 px-2.5 sm:py-2 sm:px-3 text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans cursor-pointer shadow-xs"
               id="agent-dropdown"
             >
               {agents.map((agent) => (
                 <option key={agent.id} value={agent.alias} disabled={!agent.isEnabled}>
-                  {agent.alias} (کد: {agent.agentCode}) {!agent.isEnabled ? '🛑 (غیرفعال شده)' : ''}
+                  {agent.alias} (کد: {agent.agentCode}) {!agent.isEnabled ? '🛑 (غیرفعال)' : ''}
                 </option>
               ))}
             </select>
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 py-1.5 px-3 rounded-full font-sans font-bold flex items-center gap-1.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-center justify-between sm:justify-start gap-2">
+            <span className="text-[11px] sm:text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 py-1 px-2.5 sm:py-1.5 sm:px-3 rounded-full font-sans font-bold flex items-center gap-1.5 shrink-0">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              📲 پنل نمایندگی رسمی
+              📲 پنل نمایندگی
             </span>
             {onOpenEditProfile && (
               <button
                 type="button"
                 onClick={() => onOpenEditProfile(currentAgentObj.id)}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-102"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-black transition-all flex items-center gap-1 cursor-pointer shadow-xs shrink-0"
                 title="ویرایش شماره همراه و آدرس دقیق دفتر/انبار نمایندگی"
               >
-                <User className="w-4 h-4 text-emerald-100" />
+                <User className="w-3.5 h-3.5 text-emerald-100" />
                 <span>✏️ ویرایش آدرس و همراه</span>
               </button>
             )}
           </div>
           <div className="text-right">
-            <div className="flex items-center gap-2 justify-end">
+            <div className="flex items-center gap-1.5 justify-start sm:justify-end flex-wrap">
               <span className="text-sm sm:text-base font-extrabold text-slate-900">{currentAgentObj?.alias || currentAgentObj?.fullName || 'نامشخص'}</span>
-              <span className="text-xs text-slate-500">
-                (کد تفصیلی: <strong className="font-mono text-slate-800 font-bold">{currentAgentObj?.agentCode || 'کد خطا'}</strong> • {currentAgentObj?.area || 'سراسر کشور'})
+              <span className="text-[11px] sm:text-xs text-slate-500">
+                (کد: <strong className="font-mono text-slate-800 font-bold">{currentAgentObj?.agentCode || 'کد خطا'}</strong> • {currentAgentObj?.area || 'سراسر کشور'})
               </span>
             </div>
-            <div className="text-xs text-slate-600 mt-1.5 flex flex-wrap items-center justify-end gap-3 bg-slate-50 p-2 rounded-xl border border-slate-150">
-              <span>📞 همراه هماهنگی: <strong className="font-mono text-slate-800 dir-ltr inline-block">{currentAgentObj?.phoneNumber || currentUser?.phoneNumber || 'ثبت‌نشده'}</strong></span>
-              <span className="text-slate-300">|</span>
-              <span>📍 آدرس دقیق انبار/دفتر: <strong className="text-slate-800">{currentAgentObj?.address || 'ثبت‌نشده'}</strong></span>
+            <div className="text-[11px] sm:text-xs text-slate-600 mt-1 flex flex-col sm:flex-row items-start sm:items-center justify-start sm:justify-end gap-1 sm:gap-3 bg-slate-50 p-2 rounded-xl border border-slate-150">
+              <span className="truncate max-w-full">📞 همراه: <strong className="font-mono text-slate-800 dir-ltr inline-block">{currentAgentObj?.phoneNumber || currentUser?.phoneNumber || 'ثبت‌نشده'}</strong></span>
+              <span className="text-slate-300 hidden sm:inline">|</span>
+              <span className="truncate max-w-full">📍 آدرس: <strong className="text-slate-800">{currentAgentObj?.address || 'ثبت‌نشده'}</strong></span>
             </div>
           </div>
         </div>
