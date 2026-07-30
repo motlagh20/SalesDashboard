@@ -39,7 +39,7 @@ interface RepresentativeDashboardProps {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
   currentUser?: AppUser | null;
-  onOpenEditProfile?: () => void;
+  onOpenEditProfile?: (targetAgentId?: string, targetShippingId?: string) => void;
 }
 
 export default function RepresentativeDashboard({
@@ -56,7 +56,7 @@ export default function RepresentativeDashboard({
   currentUser,
   onOpenEditProfile,
 }: RepresentativeDashboardProps) {
-  const currentAgentObj = agents.find(a => a.alias === selectedAgent) || PRESET_AGENTS.find(a => a.alias === selectedAgent) || agents[0] || PRESET_AGENTS[0] || {
+  const currentAgentObj = agents.find(a => a.alias === selectedAgent || a.agentCode === selectedAgent || a.id === selectedAgent || a.fullName === selectedAgent) || agents[0] || PRESET_AGENTS.find(a => a.alias === selectedAgent) || PRESET_AGENTS[0] || {
     id: 'unknown',
     fullName: 'نامشخص',
     alias: selectedAgent,
@@ -387,7 +387,7 @@ export default function RepresentativeDashboard({
             {onOpenEditProfile && (
               <button
                 type="button"
-                onClick={onOpenEditProfile}
+                onClick={() => onOpenEditProfile(currentAgentObj.id)}
                 className="bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-102"
                 title="ویرایش شماره همراه و آدرس دقیق دفتر/انبار نمایندگی"
               >

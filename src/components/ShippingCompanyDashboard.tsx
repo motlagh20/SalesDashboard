@@ -33,7 +33,7 @@ interface ShippingCompanyDashboardProps {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
   currentUser?: AppUser | null;
-  onOpenEditProfile?: () => void;
+  onOpenEditProfile?: (targetAgentId?: string, targetShippingId?: string) => void;
 }
 
 // Preset frequent drivers for quick instant filling (to save high-value company time)
@@ -277,7 +277,7 @@ export default function ShippingCompanyDashboard({
               {onOpenEditProfile && (
                 <button
                   type="button"
-                  onClick={onOpenEditProfile}
+                  onClick={() => onOpenEditProfile(undefined, currentCompany?.id)}
                   className="bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-102"
                   title="ویرایش شماره همراه و آدرس شرکت باربری"
                 >

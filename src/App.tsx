@@ -107,9 +107,12 @@ export default function App() {
   const [profileAddress, setProfileAddress] = useState('');
   const [isProfileSubmitting, setIsProfileSubmitting] = useState(false);
 
-  const handleOpenEditProfile = (targetAgentId?: string, targetShippingId?: string) => {
-    if (targetAgentId) {
-      const ag = agents.find(a => a.id === targetAgentId || a.agentCode === targetAgentId);
+  const handleOpenEditProfile = (targetAgentId?: string | any, targetShippingId?: string) => {
+    const cleanAgentId = typeof targetAgentId === 'string' ? targetAgentId : undefined;
+    const cleanShippingId = typeof targetShippingId === 'string' ? targetShippingId : undefined;
+
+    if (cleanAgentId) {
+      const ag = agents.find(a => a.id === cleanAgentId || a.agentCode === cleanAgentId || a.alias === cleanAgentId);
       if (ag) {
         setProfileTargetCategory('AGENT');
         setSelectedAgentForProfile(ag.id);
@@ -120,13 +123,41 @@ export default function App() {
       }
     }
 
-    if (targetShippingId) {
-      const sc = shippingCompanies.find(s => s.id === targetShippingId);
+    if (cleanShippingId) {
+      const sc = shippingCompanies.find(s => s.id === cleanShippingId || s.code === cleanShippingId);
       if (sc) {
         setProfileTargetCategory('SHIPPING');
         setSelectedShippingForProfile(sc.id);
         setProfilePhone(sc.phoneNumber || '');
         setProfileAddress(sc.address || '');
+        setIsEditProfileModalOpen(true);
+        return;
+      }
+    }
+
+    if (activeRole === 'REPRESENTATIVE' && selectedAgent) {
+      const ag = agents.find(a => a.alias === selectedAgent || a.agentCode === selectedAgent || a.id === selectedAgent);
+      if (ag) {
+        setProfileTargetCategory('AGENT');
+        setSelectedAgentForProfile(ag.id);
+        setProfilePhone(ag.phoneNumber || '');
+        setProfileAddress(ag.address || '');
+        setIsEditProfileModalOpen(true);
+        return;
+      }
+    }
+
+    if (activeRole === 'SHIPPING_COMPANY') {
+      let targetSc = shippingCompanies[0];
+      if (currentUser?.shippingCompanyId) {
+        const sc = shippingCompanies.find(s => s.id === currentUser.shippingCompanyId);
+        if (sc) targetSc = sc;
+      }
+      if (targetSc) {
+        setProfileTargetCategory('SHIPPING');
+        setSelectedShippingForProfile(targetSc.id);
+        setProfilePhone(targetSc.phoneNumber || '');
+        setProfileAddress(targetSc.address || '');
         setIsEditProfileModalOpen(true);
         return;
       }

@@ -368,11 +368,27 @@ function executeQuery(sql: string, values: any[] = []): any {
         usr.password = newPassword;
         saveJsonData(jsonData);
       }
-    } else if (/phoneNumber\s+=\s+\?\s+WHERE\s+id\s+=\s+\?/i.test(cleanSql)) {
-      const [newPhoneNumber, id] = values;
-      const usr = jsonData.app_users.find((u: any) => u.id === id);
+    } else if (/phoneNumber\s+=\s+\?\s+WHERE/i.test(cleanSql)) {
+      const [newPhoneNumber, idOrCode] = values;
+      const usr = jsonData.app_users.find((u: any) => u.id === idOrCode || u.agentCode === idOrCode || u.shippingCompanyId === idOrCode);
       if (usr) {
         usr.phoneNumber = newPhoneNumber;
+        saveJsonData(jsonData);
+      }
+    } else if (/WHERE\s+agentCode\s+=\s+\?/i.test(cleanSql)) {
+      const targetAgentCode = values[values.length - 1];
+      const usr = jsonData.app_users.find((u: any) => u.agentCode === targetAgentCode);
+      if (usr) {
+        usr.fullName = values[0] || usr.fullName;
+        usr.phoneNumber = values[1] || usr.phoneNumber;
+        saveJsonData(jsonData);
+      }
+    } else if (/WHERE\s+shippingCompanyId\s+=\s+\?/i.test(cleanSql)) {
+      const targetScId = values[values.length - 1];
+      const usr = jsonData.app_users.find((u: any) => u.shippingCompanyId === targetScId);
+      if (usr) {
+        usr.fullName = values[0] || usr.fullName;
+        usr.phoneNumber = values[1] || usr.phoneNumber;
         saveJsonData(jsonData);
       }
     } else {
@@ -589,18 +605,30 @@ function executeQuery(sql: string, values: any[] = []): any {
   // 16. UPDATE shipping_companies
   if (/UPDATE\s+shipping_companies\s+SET/i.test(cleanSql) && !/isEnabled\s+=\s+NOT/i.test(cleanSql)) {
     if (/phoneNumber\s+=\s+\?,\s+address\s+=\s+\?/i.test(cleanSql)) {
-      const [phoneNumber, address, id] = values;
-      const sc = jsonData.shipping_companies.find((s: any) => s.id === id);
+      const [phoneNumber, address, scId] = values;
+      const sc = jsonData.shipping_companies.find((s: any) => s.id === scId || s.code === scId);
       if (sc) {
         sc.phoneNumber = phoneNumber;
         sc.address = address;
+        saveJsonData(jsonData);
+      }
+    } else if (values.length >= 7) {
+      const [name, code, phoneNumber, managerName, address, isEnabled, id] = values;
+      const sc = jsonData.shipping_companies.find((s: any) => s.id === id);
+      if (sc) {
+        sc.name = name;
+        sc.code = code;
+        sc.phoneNumber = phoneNumber;
+        sc.managerName = managerName;
+        sc.address = address;
+        sc.isEnabled = Number(isEnabled) === 1 || isEnabled === true;
         saveJsonData(jsonData);
       }
     } else {
       const id = values[values.length - 1];
       const sc = jsonData.shipping_companies.find((s: any) => s.id === id);
       if (sc) {
-        sc.phoneNumber = values[2] || sc.phoneNumber;
+        if (values.length >= 3) sc.phoneNumber = values[2] || sc.phoneNumber;
         saveJsonData(jsonData);
       }
     }
