@@ -1427,66 +1427,79 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Target Entity Selector (for Managers/Admins or multi-role users) */}
-              <div className="bg-slate-800/90 p-1.5 rounded-xl border border-slate-700 flex items-center gap-1 text-xs">
-                {currentUser && (
+              {/* Target Entity Selector (ONLY for Sales Managers) */}
+              {(currentUser?.role === 'SALES_MANAGER' || activeRole === 'SALES_MANAGER') && (
+                <div className="bg-slate-800/90 p-1.5 rounded-xl border border-slate-700 flex items-center gap-1 text-xs">
+                  {currentUser && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileTargetCategory('USER');
+                        setProfilePhone(currentUser.phoneNumber || '');
+                        if (currentUser.role === 'REPRESENTATIVE' && currentUser.agentCode) {
+                          const ag = agents.find(a => a.agentCode === currentUser.agentCode);
+                          setProfileAddress(ag?.address || '');
+                        } else if (currentUser.role === 'SHIPPING_COMPANY' && currentUser.shippingCompanyId) {
+                          const sc = shippingCompanies.find(s => s.id === currentUser.shippingCompanyId);
+                          setProfileAddress(sc?.address || '');
+                        } else {
+                          setProfileAddress('');
+                        }
+                      }}
+                      className={`flex-1 py-1.5 px-2 rounded-lg font-bold transition-all text-center cursor-pointer ${
+                        profileTargetCategory === 'USER' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      👤 حساب کاربر فعلی
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
-                      setProfileTargetCategory('USER');
-                      setProfilePhone(currentUser.phoneNumber || '');
-                      if (currentUser.role === 'REPRESENTATIVE' && currentUser.agentCode) {
-                        const ag = agents.find(a => a.agentCode === currentUser.agentCode);
-                        setProfileAddress(ag?.address || '');
-                      } else if (currentUser.role === 'SHIPPING_COMPANY' && currentUser.shippingCompanyId) {
-                        const sc = shippingCompanies.find(s => s.id === currentUser.shippingCompanyId);
-                        setProfileAddress(sc?.address || '');
-                      } else {
-                        setProfileAddress('');
+                      setProfileTargetCategory('AGENT');
+                      if (agents.length > 0) {
+                        const firstAg = agents.find(a => a.id === selectedAgentForProfile) || agents[0];
+                        setSelectedAgentForProfile(firstAg.id);
+                        setProfilePhone(firstAg.phoneNumber || '');
+                        setProfileAddress(firstAg.address || '');
                       }
                     }}
                     className={`flex-1 py-1.5 px-2 rounded-lg font-bold transition-all text-center cursor-pointer ${
-                      profileTargetCategory === 'USER' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                      profileTargetCategory === 'AGENT' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    👤 حساب کاربر فعلی
+                    🏢 نمایندگی فروش
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProfileTargetCategory('AGENT');
-                    if (agents.length > 0) {
-                      const firstAg = agents.find(a => a.id === selectedAgentForProfile) || agents[0];
-                      setSelectedAgentForProfile(firstAg.id);
-                      setProfilePhone(firstAg.phoneNumber || '');
-                      setProfileAddress(firstAg.address || '');
-                    }
-                  }}
-                  className={`flex-1 py-1.5 px-2 rounded-lg font-bold transition-all text-center cursor-pointer ${
-                    profileTargetCategory === 'AGENT' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  🏢 نمایندگی فروش
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProfileTargetCategory('SHIPPING');
-                    if (shippingCompanies.length > 0) {
-                      const firstSc = shippingCompanies.find(s => s.id === selectedShippingForProfile) || shippingCompanies[0];
-                      setSelectedShippingForProfile(firstSc.id);
-                      setProfilePhone(firstSc.phoneNumber || '');
-                      setProfileAddress(firstSc.address || '');
-                    }
-                  }}
-                  className={`flex-1 py-1.5 px-2 rounded-lg font-bold transition-all text-center cursor-pointer ${
-                    profileTargetCategory === 'SHIPPING' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  🚛 شرکت باربری
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileTargetCategory('SHIPPING');
+                      if (shippingCompanies.length > 0) {
+                        const firstSc = shippingCompanies.find(s => s.id === selectedShippingForProfile) || shippingCompanies[0];
+                        setSelectedShippingForProfile(firstSc.id);
+                        setProfilePhone(firstSc.phoneNumber || '');
+                        setProfileAddress(firstSc.address || '');
+                      }
+                    }}
+                    className={`flex-1 py-1.5 px-2 rounded-lg font-bold transition-all text-center cursor-pointer ${
+                      profileTargetCategory === 'SHIPPING' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    🚛 شرکت باربری
+                  </button>
+                </div>
+              )}
+
+              {/* Read-only Role Banner for standard users */}
+              {currentUser?.role !== 'SALES_MANAGER' && activeRole !== 'SALES_MANAGER' && (
+                <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/70 text-[11px] text-slate-300 text-right">
+                  <span>نقش حساب کاربری شما: <strong className="text-white">
+                    {currentUser?.role === 'REPRESENTATIVE' || profileTargetCategory === 'AGENT' ? '🏢 نمایندگی رسمی فروش' :
+                     currentUser?.role === 'SHIPPING_COMPANY' || profileTargetCategory === 'SHIPPING' ? '🚛 شرکت حمل و نقل همکار' :
+                     currentUser?.role === 'FACTORY_TRANSPORT' ? '🏭 فروش کارخانه' : '👤 کاربر سیستم'}
+                  </strong></span>
+                </div>
+              )}
 
               <form onSubmit={handleUpdateProfileSubmit} className="space-y-3.5 text-right font-sans">
                 {/* USER MODE DETAILS */}
@@ -1518,8 +1531,8 @@ export default function App() {
                   </div>
                 )}
 
-                {/* AGENT SELECTOR DROPDOWN */}
-                {profileTargetCategory === 'AGENT' && (
+                {/* AGENT SELECTOR DROPDOWN (ONLY FOR SALES MANAGERS) */}
+                {profileTargetCategory === 'AGENT' && (currentUser?.role === 'SALES_MANAGER' || activeRole === 'SALES_MANAGER') && (
                   <div>
                     <label className="block text-slate-300 text-xs mb-1 font-bold">انتخاب نمایندگی جهت ویرایش آدرس و همراه:</label>
                     <select
@@ -1544,8 +1557,8 @@ export default function App() {
                   </div>
                 )}
 
-                {/* SHIPPING COMPANY SELECTOR DROPDOWN */}
-                {profileTargetCategory === 'SHIPPING' && (
+                {/* SHIPPING COMPANY SELECTOR DROPDOWN (ONLY FOR SALES MANAGERS) */}
+                {profileTargetCategory === 'SHIPPING' && (currentUser?.role === 'SALES_MANAGER' || activeRole === 'SALES_MANAGER') && (
                   <div>
                     <label className="block text-slate-300 text-xs mb-1 font-bold">انتخاب شرکت باربری جهت ویرایش آدرس و همراه:</label>
                     <select
