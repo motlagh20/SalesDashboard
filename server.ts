@@ -73,10 +73,10 @@ async function startServer() {
   app.post("/api/products", async (req, res) => {
     try {
       const db = getDbPool();
-      const { id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, defaultQuantity } = req.body;
+      const { id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, imageUrl } = req.body;
       await db.query(
-        "INSERT INTO products (id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
-        [id, name, category, pricePerUnit, unit, description || null, weight || null, dimensions || null, coverageInfo || null, primaryUnit || null, secondaryUnit || null, conversionRatio || null, defaultQuantity ? Number(defaultQuantity) : 330]
+        "INSERT INTO products (id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, isEnabled, imageUrl) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+        [id, name, category, pricePerUnit, unit, description || null, weight || null, dimensions || null, coverageInfo || null, primaryUnit || null, secondaryUnit || null, conversionRatio || null, defaultQuantity ? Number(defaultQuantity) : 330, imageUrl || null]
       );
       
       // Invalidate cache
@@ -117,15 +117,15 @@ async function startServer() {
     try {
       const db = getDbPool();
       const { id } = req.params;
-      const { name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, isEnabled } = req.body;
+      const { name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, isEnabled, imageUrl } = req.body;
       
       await db.query(`
         UPDATE products SET 
           name = ?, category = ?, pricePerUnit = ?, unit = ?, description = ?, 
           weight = ?, dimensions = ?, coverageInfo = ?, primaryUnit = ?, 
-          secondaryUnit = ?, conversionRatio = ?, defaultQuantity = ?, isEnabled = ? 
+          secondaryUnit = ?, conversionRatio = ?, defaultQuantity = ?, isEnabled = ?, imageUrl = ?
         WHERE id = ?
-      `, [name, category, pricePerUnit, unit, description || null, weight || null, dimensions || null, coverageInfo || null, primaryUnit || null, secondaryUnit || null, conversionRatio || null, defaultQuantity ? Number(defaultQuantity) : 330, isEnabled ? 1 : 0, id]);
+      `, [name, category, pricePerUnit, unit, description || null, weight || null, dimensions || null, coverageInfo || null, primaryUnit || null, secondaryUnit || null, conversionRatio || null, defaultQuantity ? Number(defaultQuantity) : 330, isEnabled ? 1 : 0, imageUrl || null, id]);
 
       const redis = getRedisClient();
       if (redis) await redis.del("products_list");

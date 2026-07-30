@@ -422,8 +422,8 @@ export default function ShippingCompanyDashboard({
                                 if (Array.isArray(parsed)) {
                                   return parsed.map((item: any, i: number) => (
                                     <div key={i} className="flex justify-between items-center text-[10.5px] text-slate-800">
-                                      <span className="font-mono text-indigo-700 bg-white px-1.5 py-0.5 rounded border border-indigo-100/50 font-bold">{item.quantity.toLocaleString('fa-IR')} {item.unit || order.unit}</span>
                                       <strong className="text-right text-indigo-950">{item.productName}</strong>
+                                      <span className="font-mono text-indigo-700 bg-white px-1.5 py-0.5 rounded border border-indigo-100/50 font-bold">{item.quantity.toLocaleString('fa-IR')} {item.unit || order.unit}</span>
                                     </div>
                                   ));
                                 }

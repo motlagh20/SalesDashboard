@@ -341,8 +341,8 @@ export default function FactoryDashboard({
                           if (Array.isArray(parsed)) {
                             return parsed.map((item: any, i: number) => (
                               <div key={i} className="flex justify-between text-[11px] text-slate-800 font-medium">
-                                <span className="font-mono text-slate-950 font-bold bg-white px-2 py-0.5 rounded border border-indigo-100">{item.quantity.toLocaleString()} {item.unit || order.unit}</span>
                                 <strong className="text-indigo-950">{item.productName}</strong>
+                                <span className="font-mono text-slate-950 font-bold bg-white px-2 py-0.5 rounded border border-indigo-100">{item.quantity.toLocaleString()} {item.unit || order.unit}</span>
                               </div>
                             ));
                           }

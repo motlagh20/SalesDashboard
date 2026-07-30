@@ -40,7 +40,9 @@ import {
   Square,
   ChevronUp,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Image as ImageIcon,
+  Upload
 } from 'lucide-react';
 
 import { printOrders } from '../utils/printHelper';
@@ -308,6 +310,7 @@ export default function ManagerDashboard({
     setNewProdConversionRatio(ratioStr);
     setHasSecondaryUnit(!!prod.secondaryUnit || !!prod.coverageInfo);
     setNewProdDefaultQuantity(prod.defaultQuantity !== undefined && prod.defaultQuantity !== null ? String(prod.defaultQuantity) : '330');
+    setNewProdImageUrl(prod.imageUrl || '');
   };
 
   const cancelEditingProduct = () => {
@@ -322,6 +325,7 @@ export default function ManagerDashboard({
     setNewProdConversionRatio('14');
     setHasSecondaryUnit(true);
     setNewProdDefaultQuantity('330');
+    setNewProdImageUrl('');
   };
 
   // Auto-generate agent code on mount or when the agents list updates
@@ -354,6 +358,32 @@ export default function ManagerDashboard({
   const [newProdSecondaryUnit, setNewProdSecondaryUnit] = useState('مترمربع');
   const [newProdConversionRatio, setNewProdConversionRatio] = useState('14');
   const [newProdDefaultQuantity, setNewProdDefaultQuantity] = useState('330');
+  const [newProdImageUrl, setNewProdImageUrl] = useState('');
+
+  const PRESET_PRODUCT_IMAGES = [
+    { label: 'سفال سقف', url: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=150&auto=format&fit=crop&q=80' },
+    { label: 'آجر ۱۰ سانتی', url: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=150&auto=format&fit=crop&q=80' },
+    { label: 'آجر ۱۵ سانتی', url: 'https://images.unsplash.com/photo-1590069261209-f8e9b8642343?w=150&auto=format&fit=crop&q=80' },
+    { label: 'آجر نما', url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=150&auto=format&fit=crop&q=80' },
+    { label: 'بلوک سقفی', url: 'https://images.unsplash.com/photo-1541888946425-d0fbb186a5b2?w=150&auto=format&fit=crop&q=80' },
+  ];
+
+  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      showToast('حجم تصویر نباید بیشتر از ۲ مگابایت باشد.', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      if (uploadEvent.target?.result) {
+        setNewProdImageUrl(uploadEvent.target.result as string);
+        showToast('تصویر محصول انتخاب شد.', 'info');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Form: Create Shipping Company state
   const [newSCName, setNewSCName] = useState('');
@@ -692,6 +722,7 @@ export default function ManagerDashboard({
         secondaryUnit: sUnit,
         conversionRatio: ratioVal,
         defaultQuantity: finalDefaultQuantity,
+        imageUrl: newProdImageUrl.trim() || undefined,
       };
       const success = await onUpdateProduct(updatedProduct);
       if (success) {
@@ -713,6 +744,7 @@ export default function ManagerDashboard({
         secondaryUnit: sUnit,
         conversionRatio: ratioVal,
         defaultQuantity: finalDefaultQuantity,
+        imageUrl: newProdImageUrl.trim() || undefined,
       };
 
       const success = await onAddProduct(newProductObject);
@@ -2539,8 +2571,25 @@ export default function ManagerDashboard({
                           <span className="text-[9px] bg-rose-100 text-rose-700 py-0.5 px-1.5 rounded-full font-bold">غیرفعال</span>
                         )}
                       </div>
-                      <strong className="text-slate-800 text-sm block">{prod.name}</strong>
-                      <p className="text-[11px] text-slate-500 leading-relaxed text-justify h-16 overflow-y-auto pr-1">
+                      <div className="flex items-start gap-2.5">
+                        {prod.imageUrl ? (
+                          <img 
+                            src={prod.imageUrl} 
+                            alt={prod.name} 
+                            className="w-10 h-10 object-cover rounded-lg border border-slate-200 shrink-0 shadow-xs" 
+                            referrerPolicy="no-referrer" 
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-lg bg-amber-50 border border-amber-200/60 flex items-center justify-center shrink-0 text-amber-700 font-bold text-[10px] shadow-xs">
+                            سفال
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <strong className="text-slate-800 text-sm block truncate">{prod.name}</strong>
+                          <span className="text-[9px] text-slate-400 font-sans block">{prod.category}</span>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-relaxed text-justify h-14 overflow-y-auto pr-1">
                         {prod.description}
                       </p>
                       
@@ -2751,6 +2800,69 @@ export default function ManagerDashboard({
                       onChange={(e) => setNewProdDefaultQuantity(toEnglishDigits(e.target.value))}
                       className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-center font-bold"
                     />
+                  </div>
+                </div>
+
+                {/* Compact Product Image Selector */}
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-slate-700 text-[10px] font-bold">
+                      🖼️ تصویر یا عکس کالا (اختیاری - فشرده):
+                    </label>
+                    {newProdImageUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setNewProdImageUrl('')}
+                        className="text-[9px] text-rose-600 hover:text-rose-800 font-bold cursor-pointer"
+                      >
+                        حذف تصویر
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="w-10 h-10 rounded-lg border border-slate-200 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-xs">
+                      {newProdImageUrl ? (
+                        <img src={newProdImageUrl} alt="پیش‌نمایش" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        <ImageIcon className="w-4 h-4 text-slate-300" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 space-y-1.5 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          placeholder="آدرس URL تصویر..."
+                          value={newProdImageUrl}
+                          onChange={(e) => setNewProdImageUrl(e.target.value)}
+                          className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-[10px] text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                        />
+                        <label className="bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-[9px] px-2 py-1 rounded cursor-pointer font-bold shrink-0 flex items-center gap-1 transition-colors">
+                          <Upload className="w-3 h-3 text-emerald-600" />
+                          <span>آپلود عکس</span>
+                          <input type="file" accept="image/*" className="hidden" onChange={handleImageFileUpload} />
+                        </label>
+                      </div>
+
+                      <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
+                        <span className="text-[9px] text-slate-400 shrink-0 font-bold">انتخاب سریع:</span>
+                        {PRESET_PRODUCT_IMAGES.map((preset) => (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => setNewProdImageUrl(preset.url)}
+                            className={`text-[9px] px-1.5 py-0.5 rounded border whitespace-nowrap cursor-pointer transition-colors ${
+                              newProdImageUrl === preset.url 
+                                ? 'bg-emerald-100 border-emerald-400 text-emerald-800 font-bold' 
+                                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
 

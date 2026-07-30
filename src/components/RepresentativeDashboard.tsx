@@ -148,6 +148,7 @@ export default function RepresentativeDashboard({
     quantity: number;
     unit: string;
     pricePerUnit: number;
+    imageUrl?: string;
   }
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
   const [paymentTrackingCode, setPaymentTrackingCode] = useState('');
@@ -176,7 +177,8 @@ export default function RepresentativeDashboard({
         productName: prodObj.name,
         quantity: quantity,
         unit: prodObj.unit,
-        pricePerUnit: prodObj.pricePerUnit
+        pricePerUnit: prodObj.pricePerUnit,
+        imageUrl: prodObj.imageUrl
       }]);
     }
     showToast('محصول به لیست فاکتور افزوده شد.', 'success');
@@ -525,11 +527,25 @@ export default function RepresentativeDashboard({
                     </optgroup>
                   )}
                 </select>
-                <div className="mt-2 text-[11px] text-slate-500 bg-slate-50 p-2.5 rounded border border-slate-100 space-y-1">
-                  <p>🧱 <strong>توضیحات:</strong> {selectedProduct.description}</p>
-                  {selectedProduct.weight && <p>⚖️ <strong>وزن واحد:</strong> {selectedProduct.weight}</p>}
-                  {selectedProduct.dimensions && <p>📐 <strong>ابعاد محصول:</strong> {selectedProduct.dimensions}</p>}
-                  {selectedProduct.coverageInfo && <p>📊 <strong>تعداد در متراژ:</strong> {selectedProduct.coverageInfo}</p>}
+                <div className="mt-2 text-[11px] text-slate-500 bg-slate-50 p-2.5 rounded-lg border border-slate-150 flex items-start gap-2.5">
+                  {selectedProduct.imageUrl ? (
+                    <img 
+                      src={selectedProduct.imageUrl} 
+                      alt={selectedProduct.name} 
+                      className="w-10 h-10 object-cover rounded border border-slate-200 shrink-0 shadow-xs"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded bg-amber-50 border border-amber-200/60 flex items-center justify-center shrink-0 text-amber-700 font-bold text-[9px] shadow-xs">
+                      سفال
+                    </div>
+                  )}
+                  <div className="flex-1 space-y-0.5 min-w-0">
+                    <p>🧱 <strong>توضیحات:</strong> {selectedProduct.description}</p>
+                    {selectedProduct.weight && <p>⚖️ <strong>وزن واحد:</strong> {selectedProduct.weight}</p>}
+                    {selectedProduct.dimensions && <p>📐 <strong>ابعاد محصول:</strong> {selectedProduct.dimensions}</p>}
+                    {selectedProduct.coverageInfo && <p>📊 <strong>تعداد در متراژ:</strong> {selectedProduct.coverageInfo}</p>}
+                  </div>
                 </div>
               </div>
 
@@ -569,10 +585,10 @@ export default function RepresentativeDashboard({
                   if (ratio) {
                     return (
                       <div className="bg-emerald-50/70 text-emerald-950 px-3 py-2 rounded-lg border border-emerald-100 text-[11px] flex justify-between items-center">
+                        <span className="text-slate-600 font-bold">تعداد نهایی محصول برای بخش‌های تولید کارخانه:</span>
                         <span className="font-mono font-bold text-emerald-700">
                           {(quantity * ratio).toLocaleString()} {pUnit}
                         </span>
-                        <span className="text-slate-600">تعداد نهایی محصول برای بخش‌های تولید کارخانه:</span>
                       </div>
                     );
                   }
@@ -595,39 +611,47 @@ export default function RepresentativeDashboard({
                   <span className="text-[10px] text-slate-500 font-bold block">اقلام فاکتور ثبت شده در سفارش جاری:</span>
                   <div className="space-y-1.5">
                     {invoiceItems.map((item, index) => (
-                      <div key={item.id} className="flex justify-between items-center text-[10px] bg-white border border-slate-100 px-3 py-2 rounded shadow-sm">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setInvoiceItems(invoiceItems.filter((_, i) => i !== index));
-                          }}
-                          className="text-rose-500 hover:text-rose-700 font-bold cursor-pointer"
-                          title="حذف این الگو"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                        <span className="text-slate-600 font-mono">
-                          {item.quantity.toLocaleString()} {item.unit} × {item.pricePerUnit.toLocaleString()} تومان
-                        </span>
-                        <strong className="text-slate-800">{item.productName}</strong>
+                      <div key={item.id} className="flex justify-between items-center text-[10px] bg-white border border-slate-100 px-3 py-1.5 rounded shadow-sm gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {item.imageUrl && (
+                            <img src={item.imageUrl} alt={item.productName} className="w-6 h-6 object-cover rounded border border-slate-200 shrink-0" referrerPolicy="no-referrer" />
+                          )}
+                          <strong className="text-slate-800 truncate">{item.productName}</strong>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-slate-600 font-mono">
+                            {item.quantity.toLocaleString()} {item.unit} × {item.pricePerUnit.toLocaleString()} تومان
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInvoiceItems(invoiceItems.filter((_, i) => i !== index));
+                            }}
+                            className="text-rose-500 hover:text-rose-700 font-bold cursor-pointer p-0.5"
+                            title="حذف این الگو"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
-                  <div className="text-left text-[11px] font-bold text-emerald-800 bg-emerald-50/50 p-1.5 rounded">
-                    جمع کل پیش‌فاکتور چندمحصولی: {invoiceItems.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0).toLocaleString()} تومان
+                  <div className="flex justify-between items-center text-[11px] font-bold text-emerald-800 bg-emerald-50/50 p-2 rounded">
+                    <span>جمع کل پیش‌فاکتور چندمحصولی:</span>
+                    <span className="font-mono text-emerald-700">{invoiceItems.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0).toLocaleString()} تومان</span>
                   </div>
                 </div>
               )}
 
               {/* Simulated Live Cost Calculation */}
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-150 flex justify-between items-center text-xs">
-                <span className="text-emerald-700 font-bold font-mono">
+                <span className="text-slate-600 font-bold">مجموع تقریبی پیش‌فاکتور خرید:</span>
+                <span className="text-emerald-700 font-black font-mono text-sm">
                   {invoiceItems.length > 0
                     ? invoiceItems.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0).toLocaleString()
                     : estimatedPrice.toLocaleString()
                   } تومان
                 </span>
-                <span className="text-slate-500">مجموع تقریبی پیش‌فاکتور خرید:</span>
               </div>
 
               {/* Destination lookup / Inputs */}
@@ -1023,8 +1047,8 @@ export default function RepresentativeDashboard({
                                   if (Array.isArray(parsed)) {
                                     return parsed.map((item: any, i: number) => (
                                       <div key={i} className="flex justify-between text-[11px] text-slate-700">
-                                        <span>{item.quantity.toLocaleString()} {item.unit} × {item.pricePerUnit.toLocaleString()} تومان</span>
                                         <strong className="text-slate-800">{item.productName}</strong>
+                                        <span className="font-mono">{item.quantity.toLocaleString()} {item.unit} × {item.pricePerUnit.toLocaleString()} تومان</span>
                                       </div>
                                     ));
                                   }

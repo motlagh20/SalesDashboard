@@ -98,11 +98,11 @@ function seedJsonIfEmpty() {
   if (!data.products || data.products.length === 0) {
     console.log("🌱 [Mock Seed] Seeding default products...");
     data.products = [
-      { id: 'prod-1', name: 'سفال سقف طبرستان (طرح کلاسیک)', category: 'roofing', pricePerUnit: 145000, unit: 'عدد', description: 'مقاومت بسیار بالا در برابر تغییرات جوی و یخبندان، عایق حرارتی و رطوبتی فوق‌العاده با لعاب طبیعی.', weight: '۳.۱ کیلوگرم', dimensions: '۳۰ × ۴۲ سانتی‌متر', coverageInfo: '۱۴ عدد در هر مترمربع', isEnabled: 1 },
-      { id: 'prod-2', name: 'آجر سفال ۱۰ سانتی طبرستان (تیغه)', category: 'bricks', pricePerUnit: 3400, unit: 'قالب', description: 'جهت دیوارهای داخلی و فضاهای کم‌عرض، پخت با کوره تمام اتوماتیک هافمن و ابعاد کاملاً گونیا.', weight: '۲.۲ کیلوگرم', dimensions: '۱۰ × ۲۰ × ۲۰ سانتی‌متر', coverageInfo: '۲۵ قالب در هر مترمربع تیغه', isEnabled: 1 },
-      { id: 'prod-3', name: 'آجر سفال ۱۵ سانتی درجه یک طبرستان', category: 'bricks', pricePerUnit: 4800, unit: 'قالب', description: 'بهترین گزینه برای دیوارهای خارجی باغ، ویلا و آپارتمان جهت عایق‌بندی صوتی و حرارتی پیشرفته.', weight: '۳.۳ کیلوگرم', dimensions: '۱۵ × ۲۰ × ۲۰ سانتی‌متر', coverageInfo: '۲۵ قالب در هر مترمربع دیوار', isEnabled: 1 },
-      { id: 'prod-4', name: 'آجر نما نسوز سموتی طبرستان', category: 'facade', pricePerUnit: 12500, unit: 'قالب', description: 'مقاومت حرارتی بیش از ۱۲۰۰ درجه سانتی‌گراد، رنگ ثابت و مقاوم در برابر باران‌های اسیدی و شوره‌زدگی.', weight: '۰.۸ کیلوگرم', dimensions: '۵.۵ × ۲.۵ × ۲۶ سانتی‌متر', coverageInfo: '۴۰ قالب در هر مترمربع با بندکشی', isEnabled: 1 },
-      { id: 'prod-5', name: 'تیغه سفال سقفی ۲۵ طبرستان (بلوک سقفی)', category: 'bricks', pricePerUnit: 9500, unit: 'قالب', description: 'تولید شده با رس مرغوب شسته شده، مقاومت فشاری بالا و ایده آل برای سقف‌های تیرچه بلوک صنعتی.', weight: '۷.۵ کیلوگرم', dimensions: '۲۵ × ۲۰ × ۴۰ سانتی‌متر', coverageInfo: '۱۰ قالب در هر مترمربع سقف', isEnabled: 1 }
+      { id: 'prod-1', name: 'سفال سقف طبرستان (طرح کلاسیک)', category: 'roofing', pricePerUnit: 145000, unit: 'عدد', description: 'مقاومت بسیار بالا در برابر تغییرات جوی و یخبندان، عایق حرارتی و رطوبتی فوق‌العاده با لعاب طبیعی.', weight: '۳.۱ کیلوگرم', dimensions: '۳۰ × ۴۲ سانتی‌متر', coverageInfo: '۱۴ عدد در هر مترمربع', isEnabled: 1, imageUrl: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=150&auto=format&fit=crop&q=80' },
+      { id: 'prod-2', name: 'آجر سفال ۱۰ سانتی طبرستان (تیغه)', category: 'bricks', pricePerUnit: 3400, unit: 'قالب', description: 'جهت دیوارهای داخلی و فضاهای کم‌عرض، پخت با کوره تمام اتوماتیک هافمن و ابعاد کاملاً گونیا.', weight: '۲.۲ کیلوگرم', dimensions: '۱۰ × ۲۰ × ۲۰ سانتی‌متر', coverageInfo: '۲۵ قالب در هر مترمربع تیغه', isEnabled: 1, imageUrl: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=150&auto=format&fit=crop&q=80' },
+      { id: 'prod-3', name: 'آجر سفال ۱۵ سانتی درجه یک طبرستان', category: 'bricks', pricePerUnit: 4800, unit: 'قالب', description: 'بهترین گزینه برای دیوارهای خارجی باغ، ویلا و آپارتمان جهت عایق‌بندی صوتی و حرارتی پیشرفته.', weight: '۳.۳ کیلوگرم', dimensions: '۱۵ × ۲۰ × ۲۰ سانتی‌متر', coverageInfo: '۲۵ قالب در هر مترمربع دیوار', isEnabled: 1, imageUrl: 'https://images.unsplash.com/photo-1590069261209-f8e9b8642343?w=150&auto=format&fit=crop&q=80' },
+      { id: 'prod-4', name: 'آجر نما نسوز سموتی طبرستان', category: 'facade', pricePerUnit: 12500, unit: 'قالب', description: 'مقاومت حرارتی بیش از ۱۲۰۰ درجه سانتی‌گراد، رنگ ثابت و مقاوم در برابر باران‌های اسیدی و شوره‌زدگی.', weight: '۰.۸ کیلوگرم', dimensions: '۵.۵ × ۲.۵ × ۲۶ سانتی‌متر', coverageInfo: '۴۰ قالب در هر مترمربع با بندکشی', isEnabled: 1, imageUrl: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=150&auto=format&fit=crop&q=80' },
+      { id: 'prod-5', name: 'تیغه سفال سقفی ۲۵ طبرستان (بلوک سقفی)', category: 'bricks', pricePerUnit: 9500, unit: 'قالب', description: 'تولید شده با رس مرغوب شسته شده، مقاومت فشاری بالا و ایده آل برای سقف‌های تیرچه بلوک صنعتی.', weight: '۷.۵ کیلوگرم', dimensions: '۲۵ × ۲۰ × ۴۰ سانتی‌متر', coverageInfo: '۱۰ قالب در هر مترمربع سقف', isEnabled: 1, imageUrl: 'https://images.unsplash.com/photo-1541888946425-d0fbb186a5b2?w=150&auto=format&fit=crop&q=80' }
     ];
     changed = true;
   }
@@ -486,7 +486,7 @@ function executeQuery(sql: string, values: any[] = []): any {
 
   // 9. INSERT INTO products
   if (/INSERT\s+INTO\s+products/i.test(cleanSql)) {
-    const [id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo] = values;
+    const [id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, imageUrl] = values;
     if (jsonData.products.some((p: any) => p.id === id)) {
       const err: any = new Error("Product duplicate error");
       err.code = "ER_DUP_ENTRY";
@@ -503,6 +503,11 @@ function executeQuery(sql: string, values: any[] = []): any {
       weight: weight || null,
       dimensions: dimensions || null,
       coverageInfo: coverageInfo || null,
+      primaryUnit: primaryUnit || null,
+      secondaryUnit: secondaryUnit || null,
+      conversionRatio: conversionRatio ? Number(conversionRatio) : null,
+      defaultQuantity: defaultQuantity ? Number(defaultQuantity) : 330,
+      imageUrl: imageUrl || null,
       isEnabled: 1
     });
     saveJsonData(jsonData);
@@ -815,7 +820,7 @@ function executeQuery(sql: string, values: any[] = []): any {
 
   // 20b. UPDATE products details in fallback SQL
   if (/UPDATE\s+products\s+SET/i.test(cleanSql) && !/isEnabled\s+=\s+NOT/i.test(cleanSql)) {
-    const [name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, isEnabled, id] = values;
+    const [name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, isEnabled, imageUrl, id] = values;
     const prod = jsonData.products.find((p: any) => p.id === id);
     if (prod) {
       prod.name = name;
@@ -829,7 +834,9 @@ function executeQuery(sql: string, values: any[] = []): any {
       prod.primaryUnit = primaryUnit || null;
       prod.secondaryUnit = secondaryUnit || null;
       prod.conversionRatio = conversionRatio ? Number(conversionRatio) : null;
+      prod.defaultQuantity = defaultQuantity ? Number(defaultQuantity) : 330;
       prod.isEnabled = Number(isEnabled) === 1 || isEnabled === true;
+      prod.imageUrl = imageUrl || null;
       saveJsonData(jsonData);
     }
     return [{ affectedRows: 1 }];
@@ -1237,11 +1244,12 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "orders", "isExportOrder", "TINYINT(1) DEFAULT 0");
     await ensureColumnExists(db, "orders", "destinationCountry", "VARCHAR(100) NULL");
 
-    // products primaryUnit, secondaryUnit, conversionRatio, defaultQuantity
+    // products primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, imageUrl
     await ensureColumnExists(db, "products", "primaryUnit", "VARCHAR(50) NULL");
     await ensureColumnExists(db, "products", "secondaryUnit", "VARCHAR(50) NULL");
     await ensureColumnExists(db, "products", "conversionRatio", "DECIMAL(10, 2) NULL");
     await ensureColumnExists(db, "products", "defaultQuantity", "INT NULL DEFAULT 330");
+    await ensureColumnExists(db, "products", "imageUrl", "TEXT NULL");
 
     console.log("✅ [Bootstrap] MariaDB tables checked and synchronized successfully!");
 

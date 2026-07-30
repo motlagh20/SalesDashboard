@@ -62,6 +62,7 @@ export interface Product {
   secondaryUnit?: string;    // واحد فرعی / واحد فروش (مثال: مترمربع)
   conversionRatio?: number;  // هر ۱ واحد فروش معادل چند واحد تولید است (مثال: ۱۴)
   defaultQuantity?: number;  // مقدار پیش‌فرض سفارش پیشنهادی مدیر بازرگانی (مثال: ۳۳۰)
+  imageUrl?: string;         // تصویر محصول (آدرس URL یا بیس۶۴)
 }
 
 export interface TerritoryAssignment {
