@@ -37,7 +37,10 @@ import {
   Globe,
   Check,
   CheckSquare,
-  Square
+  Square,
+  ChevronUp,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 
 import { printOrders } from '../utils/printHelper';
@@ -115,6 +118,26 @@ export default function ManagerDashboard({
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Collapsible accordion state for order cards
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
+
+  const toggleExpandOrder = (orderId: string) => {
+    setExpandedOrderIds(prev => ({
+      ...prev,
+      [orderId]: !prev[orderId]
+    }));
+  };
+
+  const expandAllOrders = (ordersList: Order[]) => {
+    const next: Record<string, boolean> = {};
+    ordersList.forEach(o => { next[o.id] = true; });
+    setExpandedOrderIds(next);
+  };
+
+  const collapseAllOrders = () => {
+    setExpandedOrderIds({});
+  };
   
   // Rejection input controls
   const [rejectionInputId, setRejectionInputId] = useState<string | null>(null);
@@ -3091,64 +3114,90 @@ export default function ManagerDashboard({
                 </div>
               </div>
 
-              {/* Status Tabs */}
-              <div className="flex flex-wrap gap-1.5 justify-end">
-                <span className="text-[10px] text-slate-400 font-bold self-center ml-2">📍 گام‌های اجرا:</span>
-                <button
-                  type="button"
-                  onClick={() => setArchiveStatusFilter('ALL')}
-                  className={`py-1 px-3 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                    archiveStatusFilter === 'ALL'
-                      ? 'bg-slate-800 text-white shadow-sm'
-                      : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-                  }`}
-                >
-                  همه موارد ({orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setArchiveStatusFilter('SENT_TO_FACTORY')}
-                  className={`py-1 px-3 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                    archiveStatusFilter === 'SENT_TO_FACTORY'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-                  }`}
-                >
-                  ۱. در صف کارخانه ({orders.filter(o => o.status === 'SENT_TO_FACTORY').length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setArchiveStatusFilter('VEHICLE_ASSIGNED')}
-                  className={`py-1 px-3 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                    archiveStatusFilter === 'VEHICLE_ASSIGNED'
-                      ? 'bg-amber-500 text-slate-950 shadow-sm'
-                      : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-                  }`}
-                >
-                  ۲. تخصیص کامیون ({orders.filter(o => o.status === 'VEHICLE_ASSIGNED').length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setArchiveStatusFilter('LOADED_AND_DISPATCHED')}
-                  className={`py-1 px-3 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                    archiveStatusFilter === 'LOADED_AND_DISPATCHED'
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-                  }`}
-                >
-                  ۳. ترخیص و در حرکت ({orders.filter(o => o.status === 'LOADED_AND_DISPATCHED').length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setArchiveStatusFilter('REJECTED')}
-                  className={`py-1 px-3 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                    archiveStatusFilter === 'REJECTED'
-                      ? 'bg-rose-600 text-white shadow-sm'
-                      : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-                  }`}
-                >
-                  ابطال / لغو شده ({orders.filter(o => o.status === 'REJECTED').length})
-                </button>
+              {/* Status Tabs and Accordion Expand/Collapse Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => expandAllOrders(visibleOrders)}
+                    className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 py-1 px-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                    title="باز کردن تمامی کارت‌های سفارش جهت مشاهده کامل جزئیات"
+                  >
+                    <Maximize2 className="w-3 h-3 text-indigo-600" />
+                    <span>باز کردن همه</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={collapseAllOrders}
+                    className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 py-1 px-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                    title="جمع کردن تمام کارت‌ها به حالت خلاصه و فشرده"
+                  >
+                    <Minimize2 className="w-3 h-3 text-slate-500" />
+                    <span>بستن همه</span>
+                  </button>
+                  <span className="text-[10px] bg-slate-200/80 text-slate-700 font-bold py-1 px-2 rounded-lg font-mono">
+                    {visibleOrders.length} مورد
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 justify-end">
+                  <span className="text-[10px] text-slate-400 font-bold self-center ml-1">📍 گام اجرا:</span>
+                  <button
+                    type="button"
+                    onClick={() => setArchiveStatusFilter('ALL')}
+                    className={`py-1 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                      archiveStatusFilter === 'ALL'
+                        ? 'bg-slate-800 text-white shadow-sm'
+                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
+                    }`}
+                  >
+                    همه ({orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setArchiveStatusFilter('SENT_TO_FACTORY')}
+                    className={`py-1 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                      archiveStatusFilter === 'SENT_TO_FACTORY'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
+                    }`}
+                  >
+                    ۱. در صف کارخانه ({orders.filter(o => o.status === 'SENT_TO_FACTORY').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setArchiveStatusFilter('VEHICLE_ASSIGNED')}
+                    className={`py-1 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                      archiveStatusFilter === 'VEHICLE_ASSIGNED'
+                        ? 'bg-amber-500 text-slate-950 shadow-sm'
+                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
+                    }`}
+                  >
+                    ۲. تخصیص کامیون ({orders.filter(o => o.status === 'VEHICLE_ASSIGNED').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setArchiveStatusFilter('LOADED_AND_DISPATCHED')}
+                    className={`py-1 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                      archiveStatusFilter === 'LOADED_AND_DISPATCHED'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
+                    }`}
+                  >
+                    ۳. ترخیص و در حرکت ({orders.filter(o => o.status === 'LOADED_AND_DISPATCHED').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setArchiveStatusFilter('REJECTED')}
+                    className={`py-1 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                      archiveStatusFilter === 'REJECTED'
+                        ? 'bg-rose-600 text-white shadow-sm'
+                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
+                    }`}
+                  >
+                    ابطال / لغو ({orders.filter(o => o.status === 'REJECTED').length})
+                  </button>
+                </div>
               </div>
 
             </div>
@@ -3158,160 +3207,216 @@ export default function ManagerDashboard({
                 <p className="text-slate-400 text-xs font-bold">هیچ سفارشی مطابق فیلترهای رهگیری جاری یافت نشد.</p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {visibleOrders.map((order) => {
                   const historyCount = order.statusHistory ? order.statusHistory.length : 0;
+                  const isExpanded = !!expandedOrderIds[order.id];
+
+                  // Product summary string
+                  let productSummaryText = `${order.productName} (${order.quantity.toLocaleString()} ${order.unit})`;
+                  if (order.itemsJson) {
+                    try {
+                      const parsed = JSON.parse(order.itemsJson);
+                      if (Array.isArray(parsed) && parsed.length > 0) {
+                        productSummaryText = parsed.map((item: any) => `${item.productName}: ${item.quantity?.toLocaleString()} ${item.unit || order.unit}`).join(' | ');
+                      }
+                    } catch (e) {}
+                  }
 
                   return (
-                    <div key={order.id} className="border border-slate-200 bg-white rounded-2xl p-4 md:p-5 space-y-4 shadow-sm hover:border-slate-300 transition-all">
-                      
-                      {/* Card Top Header */}
-                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <strong className="text-slate-900 text-sm">{order.customerName}</strong>
-                          <span className="text-[11px] bg-slate-100 text-slate-700 font-mono py-0.5 px-2 rounded-lg font-bold border border-slate-200/60">
-                            کد سفارش: {order.orderNumber}
+                    <div 
+                      key={order.id} 
+                      className={`border rounded-2xl transition-all bg-white shadow-2xs overflow-hidden ${
+                        isExpanded ? 'border-slate-300 ring-2 ring-slate-100 p-4 md:p-5 space-y-4' : 'border-slate-200/90 hover:border-slate-300 hover:bg-slate-50/50 p-3 md:p-3.5'
+                      }`}
+                    >
+                      {/* Compact Header Summary Row (Always visible & clickable) */}
+                      <div 
+                        onClick={() => toggleExpandOrder(order.id)}
+                        className="flex flex-wrap items-center justify-between gap-2.5 cursor-pointer select-none text-right"
+                      >
+                        {/* Right Group: Customer, Order #, Agent, Destination */}
+                        <div className="flex flex-wrap items-center gap-2 min-w-0">
+                          <span className="font-mono bg-slate-900 text-amber-400 text-xs font-bold py-0.5 px-2.5 rounded-lg shadow-xs">
+                            #{order.orderNumber}
                           </span>
-                          <span className="text-[10px] bg-slate-100 text-slate-500 font-mono py-0.5 px-2 rounded">
-                            نمایندگی: {order.agentCode}
-                          </span>
+                          <strong className="text-slate-900 text-xs md:text-sm truncate max-w-[180px] md:max-w-[260px]">
+                            {order.customerName}
+                          </strong>
                           {order.buyerName && (
-                            <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 py-0.5 px-2 rounded-full">
+                            <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 py-0.5 px-2 rounded-full hidden sm:inline-block">
                               خریدار: {order.buyerName}
                             </span>
                           )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] font-extrabold py-1 px-3 rounded-full ${statusTags[order.status]?.css}`}>
-                            {statusTags[order.status]?.text}
+                          <span className="text-[10px] bg-slate-100 text-slate-600 font-mono py-0.5 px-2 rounded">
+                            کد {order.agentCode}
+                          </span>
+                          <span className="text-[11px] text-slate-500 font-bold bg-slate-100/80 px-2 py-0.5 rounded-md flex items-center gap-0.5">
+                            📍 {order.destinationCity}
                           </span>
                         </div>
+
+                        {/* Middle Group: Main Product Summary (Hidden on tiny screens if space limited, visible on sm+) */}
+                        <div className="hidden lg:flex items-center text-[11px] text-slate-600 font-medium truncate max-w-[280px]">
+                          <span className="truncate">📦 {productSummaryText}</span>
+                        </div>
+
+                        {/* Left Group: Driver Badge, Status Badge & Expand Toggle */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {order.vehicleDetails ? (
+                            <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold border border-emerald-200/80 py-0.5 px-2 rounded-full hidden md:inline-flex items-center gap-1">
+                              🚚 {order.vehicleDetails.driverName} ({order.vehicleDetails.vehicleType})
+                            </span>
+                          ) : null}
+
+                          <span className={`text-[10px] font-extrabold py-0.5 px-2.5 rounded-full ${statusTags[order.status]?.css}`}>
+                            {statusTags[order.status]?.text}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpandOrder(order.id);
+                            }}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold px-2 py-1 rounded-lg border border-slate-200/80 flex items-center gap-1 transition-all cursor-pointer ml-1"
+                          >
+                            <span>{isExpanded ? 'بستن' : 'جزئیات'}</span>
+                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-slate-600" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-600" />}
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Card Content Grid */}
-                      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center text-right">
-                        
-                        {/* Column 1: Order Items & Delivery Info (7 cols) */}
-                        <div className="md:col-span-7 space-y-2">
-                          <div className="text-xs text-slate-700">
-                            {(() => {
-                              if (order.itemsJson) {
-                                try {
-                                  const parsed = JSON.parse(order.itemsJson);
-                                  if (Array.isArray(parsed) && parsed.length > 0) {
-                                    return (
-                                      <div className="flex flex-wrap gap-1.5">
-                                        <span className="font-bold text-slate-500">📦 اقلام سبد سفارش:</span>
-                                        {parsed.map((item: any, i: number) => (
-                                          <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-800 py-0.5 px-2 rounded-lg font-bold text-[11px]">
-                                            {item.productName}: <strong className="font-mono text-indigo-700">{item.quantity?.toLocaleString()} {item.unit || order.unit}</strong>
-                                          </span>
-                                        ))}
-                                      </div>
-                                    );
+                      {/* Expanded Details Body */}
+                      {isExpanded && (
+                        <div className="pt-3 border-t border-slate-100 space-y-4 animate-fade-in">
+                          
+                          {/* Card Content Grid */}
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center text-right">
+                            
+                            {/* Column 1: Order Items & Delivery Info (7 cols) */}
+                            <div className="md:col-span-7 space-y-2">
+                              <div className="text-xs text-slate-700">
+                                {(() => {
+                                  if (order.itemsJson) {
+                                    try {
+                                      const parsed = JSON.parse(order.itemsJson);
+                                      if (Array.isArray(parsed) && parsed.length > 0) {
+                                        return (
+                                          <div className="flex flex-wrap gap-1.5">
+                                            <span className="font-bold text-slate-500">📦 اقلام سبد سفارش:</span>
+                                            {parsed.map((item: any, i: number) => (
+                                              <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-800 py-0.5 px-2 rounded-lg font-bold text-[11px]">
+                                                {item.productName}: <strong className="font-mono text-indigo-700">{item.quantity?.toLocaleString()} {item.unit || order.unit}</strong>
+                                              </span>
+                                            ))}
+                                          </div>
+                                        );
+                                      }
+                                    } catch (e) {}
                                   }
-                                } catch (e) {}
-                              }
-                              return (
-                                <p className="text-xs text-slate-700">
-                                  📦 محصول اصلی: <strong>{order.productName}</strong> ({order.quantity.toLocaleString()} {order.unit})
+                                  return (
+                                    <p className="text-xs text-slate-700">
+                                      📦 محصول اصلی: <strong>{order.productName}</strong> ({order.quantity.toLocaleString()} {order.unit})
+                                    </p>
+                                  );
+                                })()}
+                              </div>
+
+                              <p className="text-[11px] text-slate-500">
+                                📍 مقصد ارسال: <strong>{order.destinationCity}</strong> {order.exactAddress ? '(' + order.exactAddress + ')' : ''} • ثبت: <span className="font-mono">{new Date(order.createdAt).toLocaleString('fa-IR')}</span>
+                              </p>
+
+                              {order.paymentTrackingCode && (
+                                <p className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-100 py-0.5 px-2 rounded-md inline-block font-mono font-bold">
+                                  💳 کد پیگیری واریز: {order.paymentTrackingCode}
                                 </p>
-                              );
-                            })()}
+                              )}
+                            </div>
+
+                            {/* Column 2: Transport Passport / Driver Details (5 cols) */}
+                            <div className="md:col-span-5 flex flex-col justify-center space-y-2">
+                              {order.vehicleDetails ? (
+                                <div className="bg-emerald-50/70 rounded-xl p-2.5 border border-emerald-200/80 text-[11px] text-slate-700 space-y-0.5">
+                                  <p className="font-extrabold text-emerald-900 flex items-center justify-between">
+                                    <span>🚒 ناوگان حمل تخصیص‌یافته:</span>
+                                    <span className="font-mono text-[10px] text-emerald-700">{order.vehicleDetails.shippingAgency}</span>
+                                  </p>
+                                  <p>🚚 {order.vehicleDetails.vehicleType} • راننده: <strong>{order.vehicleDetails.driverName}</strong></p>
+                                  <p className="flex items-center gap-3 font-mono text-[10px]">
+                                    <span>📞 <a href={'tel:' + order.vehicleDetails.driverPhone} className="hover:underline font-bold text-emerald-800">{order.vehicleDetails.driverPhone}</a></span>
+                                    <span>🏷️ پلاک: {order.vehicleDetails.licensePlate}</span>
+                                  </p>
+                                </div>
+                              ) : order.status === 'REJECTED' ? (
+                                <div className="bg-rose-50 rounded-xl p-2.5 border border-rose-200 text-[11px] text-rose-800 text-right">
+                                  <strong>❌ علت رد/لغو سفارش:</strong> {order.rejectionReason || 'توسط مدیر لغو گردید.'}
+                                </div>
+                              ) : (
+                                <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200 text-[11px] text-slate-500 text-center">
+                                  ⏳ در انتظار اعلام راننده و تخصیص خودرو از سوی باربری
+                                </div>
+                              )}
+                            </div>
+
                           </div>
 
-                          <p className="text-[11px] text-slate-500">
-                            📍 مقصد ارسال: <strong>{order.destinationCity}</strong> {order.exactAddress ? '(' + order.exactAddress + ')' : ''} • ثبت: <span className="font-mono">{new Date(order.createdAt).toLocaleString('fa-IR')}</span>
-                          </p>
-
-                          {order.paymentTrackingCode && (
-                            <p className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-100 py-0.5 px-2 rounded-md inline-block font-mono font-bold">
-                              💳 کد پیگیری واریز: {order.paymentTrackingCode}
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Column 2: Transport Passport / Driver Details (5 cols) */}
-                        <div className="md:col-span-5 flex flex-col justify-center space-y-2">
-                          {order.vehicleDetails ? (
-                            <div className="bg-emerald-50/70 rounded-xl p-2.5 border border-emerald-200/80 text-[11px] text-slate-700 space-y-0.5">
-                              <p className="font-extrabold text-emerald-900 flex items-center justify-between">
-                                <span>🚒 ناوگان حمل تخصیص‌یافته:</span>
-                                <span className="font-mono text-[10px] text-emerald-700">{order.vehicleDetails.shippingAgency}</span>
-                              </p>
-                              <p>🚚 {order.vehicleDetails.vehicleType} • راننده: <strong>{order.vehicleDetails.driverName}</strong></p>
-                              <p className="flex items-center gap-3 font-mono text-[10px]">
-                                <span>📞 <a href={'tel:' + order.vehicleDetails.driverPhone} className="hover:underline font-bold text-emerald-800">{order.vehicleDetails.driverPhone}</a></span>
-                                <span>🏷️ پلاک: {order.vehicleDetails.licensePlate}</span>
-                              </p>
+                          {/* Card Lifecycle Progress Dots */}
+                          <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between gap-2 overflow-x-auto text-[10px] text-slate-600 font-bold">
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                              <span>۱. ثبت اولیه</span>
                             </div>
-                          ) : order.status === 'REJECTED' ? (
-                            <div className="bg-rose-50 rounded-xl p-2.5 border border-rose-200 text-[11px] text-rose-800 text-right">
-                              <strong>❌ علت رد/لغو سفارش:</strong> {order.rejectionReason || 'توسط مدیر لغو گردید.'}
+                            <span className="text-slate-300">←</span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className={`w-2.5 h-2.5 rounded-full ${order.status !== 'PENDING_APPROVAL' && order.status !== 'REJECTED' ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
+                              <span>۲. تایید بازرگانی</span>
                             </div>
-                          ) : (
-                            <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200 text-[11px] text-slate-500 text-center">
-                              ⏳ در انتظار اعلام راننده و تخصیص خودرو از سوی باربری
+                            <span className="text-slate-300">←</span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className={`w-2.5 h-2.5 rounded-full ${order.status === 'SENT_TO_FACTORY' || order.status === 'VEHICLE_ASSIGNED' || order.status === 'LOADED_AND_DISPATCHED' ? 'bg-blue-500' : 'bg-slate-300'}`}></span>
+                              <span>۳. خط تولید کارخانه</span>
                             </div>
-                          )}
-                        </div>
+                            <span className="text-slate-300">←</span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className={`w-2.5 h-2.5 rounded-full ${order.status === 'VEHICLE_ASSIGNED' || order.status === 'LOADED_AND_DISPATCHED' ? 'bg-amber-500' : 'bg-slate-300'}`}></span>
+                              <span>۴. تخصیص ناوگان باربری</span>
+                            </div>
+                            <span className="text-slate-300">←</span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className={`w-2.5 h-2.5 rounded-full ${order.status === 'LOADED_AND_DISPATCHED' ? 'bg-emerald-600' : 'bg-slate-300'}`}></span>
+                              <span>۵. بارگیری و حرکت</span>
+                            </div>
+                          </div>
 
-                      </div>
+                          {/* Card Action Buttons */}
+                          <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedOrderForHistory(order)}
+                              className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
+                              title="نمایش تاریخچه دقیق تغییرات و شناسنامه کامل"
+                            >
+                              <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>مشاهده شناسنامه و سوابق کامل ({historyCount} تغییر)</span>
+                            </button>
 
-                      {/* Card Lifecycle Progress Dots */}
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between gap-2 overflow-x-auto text-[10px] text-slate-600 font-bold">
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                          <span>۱. ثبت اولیه</span>
-                        </div>
-                        <span className="text-slate-300">←</span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className={`w-2.5 h-2.5 rounded-full ${order.status !== 'PENDING_APPROVAL' && order.status !== 'REJECTED' ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
-                          <span>۲. تایید بازرگانی</span>
-                        </div>
-                        <span className="text-slate-300">←</span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className={`w-2.5 h-2.5 rounded-full ${order.status === 'SENT_TO_FACTORY' || order.status === 'VEHICLE_ASSIGNED' || order.status === 'LOADED_AND_DISPATCHED' ? 'bg-blue-500' : 'bg-slate-300'}`}></span>
-                          <span>۳. خط تولید کارخانه</span>
-                        </div>
-                        <span className="text-slate-300">←</span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className={`w-2.5 h-2.5 rounded-full ${order.status === 'VEHICLE_ASSIGNED' || order.status === 'LOADED_AND_DISPATCHED' ? 'bg-amber-500' : 'bg-slate-300'}`}></span>
-                          <span>۴. تخصیص ناوگان باربری</span>
-                        </div>
-                        <span className="text-slate-300">←</span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className={`w-2.5 h-2.5 rounded-full ${order.status === 'LOADED_AND_DISPATCHED' ? 'bg-emerald-600' : 'bg-slate-300'}`}></span>
-                          <span>۵. بارگیری و حرکت</span>
-                        </div>
-                      </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                printOrders([order], products, agents);
+                                showToast('📥 پیش‌نمایش سفارش آرشیوی جهت پرینت مجدد و ذخیره PDF بارگذاری شد.', 'success');
+                              }}
+                              className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition-all"
+                              title="چاپ مجدد سفارش خروج رسمی"
+                            >
+                              <Printer className="w-3.5 h-3.5 text-slate-500" />
+                              <span>چاپ فاکتور خروج</span>
+                            </button>
+                          </div>
 
-                      {/* Card Action Buttons */}
-                      <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedOrderForHistory(order)}
-                          className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
-                          title="نمایش تاریخچه دقیق تغییرات و شناسنامه کامل"
-                        >
-                          <Clock className="w-3.5 h-3.5 text-indigo-600" />
-                          <span>مشاهده شناسنامه و سوابق کامل ({historyCount} تغییر)</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            printOrders([order], products, agents);
-                            showToast('📥 پیش‌نمایش سفارش آرشیوی جهت پرینت مجدد و ذخیره PDF بارگذاری شد.', 'success');
-                          }}
-                          className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition-all"
-                          title="چاپ مجدد سفارش خروج رسمی"
-                        >
-                          <Printer className="w-3.5 h-3.5 text-slate-500" />
-                          <span>چاپ فاکتور خروج</span>
-                        </button>
-                      </div>
+                        </div>
+                      )}
 
                     </div>
                   );
