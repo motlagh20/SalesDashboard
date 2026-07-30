@@ -24,7 +24,11 @@ import {
   Trash2,
   Coins,
   Globe,
-  User
+  User,
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 
 interface RepresentativeDashboardProps {
@@ -115,6 +119,26 @@ export default function RepresentativeDashboard({
   
   // Tab State: 'CREATE' for order form, 'TRACKING' for tracking existing orders
   const [activeTab, setActiveTab] = useState<'CREATE' | 'TRACKING'>('CREATE');
+
+  // Collapsible accordion state for order cards
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
+
+  const toggleExpandOrder = (orderId: string) => {
+    setExpandedOrderIds(prev => ({
+      ...prev,
+      [orderId]: !prev[orderId]
+    }));
+  };
+
+  const expandAllOrders = (ordersList: Order[]) => {
+    const next: Record<string, boolean> = {};
+    ordersList.forEach(o => { next[o.id] = true; });
+    setExpandedOrderIds(next);
+  };
+
+  const collapseAllOrders = () => {
+    setExpandedOrderIds({});
+  };
 
   // Multi-item invoice builder states
   interface InvoiceItem {
@@ -813,10 +837,32 @@ export default function RepresentativeDashboard({
       {activeTab === 'TRACKING' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6" id="agent-orders-card">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 mb-5 gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs bg-slate-100 text-slate-600 border border-slate-200 py-1 px-2.5 rounded-full font-mono font-bold">
-                تعداد سفارشات: {agentOrders.length} مورد
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs bg-slate-100 text-slate-700 border border-slate-200 py-1 px-2.5 rounded-full font-mono font-bold">
+                {agentOrders.length} سفارش
               </span>
+              {agentOrders.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => expandAllOrders(agentOrders)}
+                    className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 py-1 px-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                    title="باز کردن تمامی کارت‌های سفارش جهت مشاهده کامل جزئیات"
+                  >
+                    <Maximize2 className="w-3 h-3 text-indigo-600" />
+                    <span>باز کردن همه</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={collapseAllOrders}
+                    className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 py-1 px-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                    title="جمع کردن تمام کارت‌ها به حالت خلاصه و فشرده"
+                  >
+                    <Minimize2 className="w-3 h-3 text-slate-500" />
+                    <span>بستن همه</span>
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => setActiveTab('CREATE')}
@@ -847,294 +893,372 @@ export default function RepresentativeDashboard({
               </button>
             </div>
           ) : (
-            <div className="space-y-6" id="agent-orders-sequence">
+            <div className="space-y-3" id="agent-orders-sequence">
               {agentOrders.map((order) => {
                 const statusDetails = getStatusLabelAndColor(order.status);
+                const isExpanded = !!expandedOrderIds[order.id];
+
+                // Product summary string
+                let productSummaryText = `${order.productName} (${order.quantity.toLocaleString()} ${order.unit})`;
+                if (order.itemsJson) {
+                  try {
+                    const parsed = JSON.parse(order.itemsJson);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                      productSummaryText = parsed.map((item: any) => `${item.productName}: ${item.quantity?.toLocaleString()} ${item.unit || order.unit}`).join(' | ');
+                    }
+                  } catch (e) {}
+                }
+
                 return (
                   <div 
                     key={order.id} 
-                    className="border border-slate-200/80 rounded-xl p-5 hover:border-slate-300 transition-all bg-white"
+                    className={`border rounded-2xl transition-all bg-white shadow-2xs overflow-hidden ${
+                      isExpanded ? 'border-slate-300 ring-2 ring-emerald-100/80 p-4 md:p-5 space-y-4' : 'border-slate-200/90 hover:border-slate-300 hover:bg-slate-50/50 p-3 md:p-3.5'
+                    }`}
                     id={`order-card-${order.id}`}
                   >
-                    {/* Header line of the item */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 mb-4">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-[11px] font-bold border py-1 px-2.5 rounded-full ${statusDetails.badge}`}>
-                          {statusDetails.text}
+                    {/* Compact Header Summary Row (Always visible & clickable) */}
+                    <div 
+                      onClick={() => toggleExpandOrder(order.id)}
+                      className="flex flex-wrap items-center justify-between gap-2.5 cursor-pointer select-none text-right"
+                    >
+                      {/* Right Group: Order #, Customer/Buyer, Destination */}
+                      <div className="flex flex-wrap items-center gap-2 min-w-0">
+                        <span className="font-mono bg-slate-900 text-amber-400 text-xs font-bold py-0.5 px-2.5 rounded-lg shadow-xs">
+                          #{order.orderNumber}
                         </span>
-                        {order.isExportOrder && (
-                          <span className="text-[10px] bg-sky-100 text-sky-900 font-bold border border-sky-200/80 py-1 px-2.5 rounded-full flex items-center gap-1">
-                            <Globe className="w-3 h-3 text-sky-600" />
-                            سفارش صادراتی ({order.destinationCountry || 'خارجی'})
+                        <strong className="text-slate-900 text-xs md:text-sm truncate max-w-[180px] md:max-w-[260px]">
+                          {order.customerName}
+                        </strong>
+                        {order.buyerName && (
+                          <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 py-0.5 px-2 rounded-full hidden sm:inline-block">
+                            خریدار: {order.buyerName}
                           </span>
                         )}
-                        {['PENDING_APPROVAL', 'APPROVED_BY_SALES'].includes(order.status) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              askConfirm(
-                                'کنسل کردن سفارش خرید',
-                                'آیا مایل هستید درخواست این سفارش را لغو و مسدود نمایید؟',
-                                () => {
-                                  onCancelOrder(order.id);
-                                }
-                              );
-                            }}
-                            className="bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] py-1 px-2.5 rounded font-bold transition-all border border-rose-100 cursor-pointer"
-                          >
-                            کنسل کردن سفارش
-                          </button>
+                        <span className="text-[11px] text-slate-500 font-bold bg-slate-100/80 px-2 py-0.5 rounded-md flex items-center gap-0.5">
+                          📍 {order.destinationCity}
+                        </span>
+                      </div>
+
+                      {/* Middle Group: Main Product Summary */}
+                      <div className="hidden lg:flex items-center text-[11px] text-slate-600 font-medium truncate max-w-[280px]">
+                        <span className="truncate">📦 {productSummaryText}</span>
+                      </div>
+
+                      {/* Left Group: Status Badge, Export Badge, Expand Button */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {order.isExportOrder && (
+                          <span className="text-[10px] bg-sky-100 text-sky-900 font-bold border border-sky-200/80 py-0.5 px-2 rounded-full hidden md:inline-flex items-center gap-1">
+                            <Globe className="w-3 h-3 text-sky-600" />
+                            صادرات ({order.destinationCountry || 'خارجی'})
+                          </span>
                         )}
-                      </div>
-                      <div className="text-right">
-                        <span className="text-xs font-mono font-bold text-slate-800">{order.orderNumber}</span>
-                        <span className="text-[10px] text-slate-400 mr-2 font-mono">({new Date(order.createdAt).toLocaleDateString('fa-IR')})</span>
-                      </div>
-                    </div>
 
-                    {/* Order details summary */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs mb-4" id={`details-grid-${order.id}`}>
-                      {order.itemsJson ? (
-                        <div className="md:col-span-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-right space-y-1">
-                          <span className="text-slate-400 font-bold block text-[9.5px] border-b border-slate-200 pb-1 mb-1">اقلام سبد خرید فاکتور چندمحصولی:</span>
-                          {(() => {
-                            try {
-                              const parsed = JSON.parse(order.itemsJson);
-                              if (Array.isArray(parsed)) {
-                                return parsed.map((item: any, i: number) => (
-                                  <div key={i} className="flex justify-between text-[11px] text-slate-700">
-                                    <span>{item.quantity.toLocaleString()} {item.unit} × {item.pricePerUnit.toLocaleString()} تومان</span>
-                                    <strong className="text-slate-800">{item.productName}</strong>
-                                  </div>
-                                ));
-                              }
-                            } catch(e) {}
-                            return <strong className="text-slate-800">{order.productName}</strong>;
-                          })()}
-                        </div>
-                      ) : (
-                        <div>
-                          <span className="text-slate-400 block mb-0.5">محصول سفارش داده شده:</span>
-                          <strong className="text-slate-800 block text-[11px]">{order.productName}</strong>
-                        </div>
-                      )}
+                        <span className={`text-[10px] font-bold border py-0.5 px-2.5 rounded-full ${statusDetails.badge}`}>
+                          {statusDetails.text}
+                        </span>
 
-                      {!order.itemsJson && (
-                        <div>
-                          <span className="text-slate-400 block mb-0.5">مقدار حواله خرید:</span>
-                          <strong className="text-slate-800 block font-mono text-[11px]">
-                            {order.quantity.toLocaleString()} {order.unit}
-                            {(() => {
-                              const prod = products.find(p => p.id === order.productId);
-                              if (prod) {
-                                const pUnit = prod.primaryUnit || 'قالب';
-                                if (order.unit !== pUnit) {
-                                  let ratio = prod.conversionRatio;
-                                  if (!ratio && prod.coverageInfo) {
-                                    const cleanCov = toEnglishDigits(prod.coverageInfo);
-                                    const parsedNum = cleanCov.match(/\d+(?:\.\d+)?/);
-                                    if (parsedNum) ratio = parseFloat(parsedNum[0]);
-                                  }
-                                  if (ratio) {
-                                    return (
-                                      <span className="text-[10px] text-emerald-600 block font-sans font-normal mt-0.5">
-                                        ({(order.quantity * ratio).toLocaleString()} {pUnit} تولید)
-                                      </span>
-                                    );
-                                  }
-                                }
-                              }
-                              return null;
-                            })()}
-                          </strong>
-                        </div>
-                      )}
-
-                      <div>
-                        <span className="text-slate-400 block mb-0.5">شهرستان مقصد:</span>
-                        <strong className="text-slate-800 block text-[11px]">{order.destinationCity}</strong>
-                      </div>
-
-                      {order.buyerName && (
-                        <div>
-                          <span className="text-slate-400 block mb-0.5">مشخصات خریدار:</span>
-                          <strong className="text-emerald-800 block text-[11px]">{order.buyerName}</strong>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Payment Tracking Code Integration */}
-                    <div className="mt-3 bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex items-center justify-between text-xs flex-wrap gap-2 text-right">
-                      <div className="flex items-center gap-1">
-                        <Coins className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="text-slate-500 text-[10px]">کد رهگیری واریز پیش‌پرداخت مالی:</span>
-                      </div>
-                      {order.paymentTrackingCode ? (
-                        <span className="font-mono bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded font-bold block">{order.paymentTrackingCode}</span>
-                      ) : (
-                        order.status !== 'REJECTED' ? (
-                          <div className="flex gap-1.5 items-center">
-                            <input
-                              type="text"
-                              id={`tracking-${order.id}`}
-                              placeholder="کد فیش واریز..."
-                              className="bg-white border border-slate-200 rounded px-2 py-1 text-[10px] font-mono text-center focus:outline-none focus:ring-1 focus:ring-emerald-500 w-32 font-bold"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const inp = document.getElementById(`tracking-${order.id}`) as HTMLInputElement;
-                                if (inp && inp.value.trim()) {
-                                  onUpdatePaymentTracking(order.id, inp.value.trim());
-                                  showToast('کد واریزی با موفقیت به حواله اضافه شد.', 'success');
-                                } else {
-                                  showToast('لطفا کد معتبر وارد فرمایید.', 'error');
-                                }
-                              }}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white text-[9.5px] px-2.5 py-1.5 rounded transition-colors cursor-pointer font-bold"
-                            >
-                              ثبت فیش
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-slate-400 text-[10px]">بدون اطلاعات واریزی</span>
-                        )
-                      )}
-                    </div>
-
-
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/50 mt-4" id={`stepper-${order.id}`}>
-                      <h4 className="text-xs font-bold text-slate-600 mb-4 flex items-center justify-end gap-1.5">
-                        <span>مراحل طی شده کارتابل مأموریت</span>
-                        <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      </h4>
-
-                      {/* Stepper visuals */}
-                      <div className="relative flex items-center justify-between px-2 pt-1 pb-2">
-                        {/* Connecting background bar */}
-                        <div className="absolute left-[8%] right-[8%] top-[20px] h-1 bg-slate-200 -z-0" />
-                        
-                        {/* Dynamic Progress indicator overlay */}
-                        <div 
-                          className="absolute left-[8%] top-[20px] h-1 bg-emerald-500 transition-all duration-500 -z-0" 
-                          style={{
-                            right: 
-                              order.status === 'PENDING_APPROVAL' ? '92%' :
-                              order.status === 'APPROVED_BY_SALES' ? '64%' :
-                              order.status === 'VEHICLE_ASSIGNED' ? '36%' : 
-                              order.status === 'LOADED_AND_DISPATCHED' ? '8%' : 
-                              '92%' // Rejected or pending
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleExpandOrder(order.id);
                           }}
-                        />
-
-                        {/* Step 1: PENDING_APPROVAL */}
-                        <div className="flex flex-col items-center relative z-10 text-center w-1/4">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
-                            order.status !== 'REJECTED' ? 'bg-emerald-50 border-emerald-500 text-emerald-600' : 'bg-slate-100 border-slate-300 text-slate-400'
-                          }`}>
-                            <FileText className="w-4 h-4" />
-                          </div>
-                          <span className="text-[10px] font-bold text-slate-700 mt-2">ثبت اولیه</span>
-                        </div>
-
-                        {/* Step 2: APPROVED_BY_SALES */}
-                        <div className="flex flex-col items-center relative z-10 text-center w-1/4">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
-                            ['APPROVED_BY_SALES', 'VEHICLE_ASSIGNED', 'LOADED_AND_DISPATCHED'].includes(order.status)
-                              ? 'bg-emerald-50 border-emerald-500 text-emerald-600'
-                              : 'bg-white border-slate-200 text-slate-400'
-                          }`}>
-                            <CheckCircle className="w-4 h-4" />
-                          </div>
-                          <span className="text-[10px] font-bold text-slate-600 mt-2">تایید فروش</span>
-                        </div>
-
-                        {/* Step 3: VEHICLE_ASSIGNED */}
-                        <div className="flex flex-col items-center relative z-10 text-center w-1/4">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
-                            ['VEHICLE_ASSIGNED', 'LOADED_AND_DISPATCHED'].includes(order.status)
-                              ? 'bg-emerald-50 border-emerald-500 text-emerald-600'
-                              : 'bg-white border-slate-200 text-slate-400'
-                          }`}>
-                            <Truck className="w-4 h-4" />
-                          </div>
-                          <span className="text-[10px] font-bold text-slate-600 mt-2">تخصیص ماشین</span>
-                        </div>
-
-                        {/* Step 4: LOADED_AND_DISPATCHED */}
-                        <div className="flex flex-col items-center relative z-10 text-center w-1/4">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
-                            order.status === 'LOADED_AND_DISPATCHED'
-                              ? 'bg-emerald-600 border-emerald-600 text-white'
-                              : 'bg-white border-slate-200 text-slate-400'
-                          }`}>
-                            <Navigation className="w-4 h-4" />
-                          </div>
-                          <span className="text-[10px] font-bold text-slate-600 mt-2">بارگیری و حرکت</span>
-                        </div>
-                      </div>
-
-                      {/* Display warning if rejected */}
-                      {order.status === 'REJECTED' && (
-                        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-center justify-end gap-2" id={`reject-msg-${order.id}`}>
-                          <span>علت رد سفارش: {order.rejectionReason || 'عدم هماهنگی مالی سقف اعتبار نمایندگی.'}</span>
-                          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                        </div>
-                      )}
-
-                      {/* Vehicle assignment information block */}
-                      {order.vehicleDetails && (
-                        <div 
-                          className="mt-4 p-4 bg-white border border-emerald-100 rounded-xl shadow-sm text-right flex flex-col justify-between gap-3 text-xs"
-                          id={`vehicle-card-${order.id}`}
+                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold px-2 py-1 rounded-lg border border-slate-200/80 flex items-center gap-1 transition-all cursor-pointer ml-1"
                         >
-                          <div className="border-b border-dashed border-slate-100 pb-2.5 flex items-center justify-between">
-                            <span className="bg-emerald-500 text-white text-[10px] py-0.5 px-2 rounded-full font-bold">ماشین بارگیری شد</span>
-                            <span className="font-bold text-slate-700 flex items-center gap-1">
-                              <span>مشخصات کامیون ارسالی کارخانه</span>
-                              <Truck className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>{isExpanded ? 'بستن' : 'جزئیات'}</span>
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-slate-600" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-600" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Expanded Details Body */}
+                    {isExpanded && (
+                      <div className="pt-3 border-t border-slate-100 space-y-4 animate-fade-in">
+                        
+                        {/* Header line inside expanded view with cancel button */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-[11px] font-bold border py-1 px-2.5 rounded-full ${statusDetails.badge}`}>
+                              {statusDetails.text}
                             </span>
+                            {order.isExportOrder && (
+                              <span className="text-[10px] bg-sky-100 text-sky-900 font-bold border border-sky-200/80 py-1 px-2.5 rounded-full flex items-center gap-1">
+                                <Globe className="w-3 h-3 text-sky-600" />
+                                سفارش صادراتی ({order.destinationCountry || 'خارجی'})
+                              </span>
+                            )}
+                            {['PENDING_APPROVAL', 'APPROVED_BY_SALES'].includes(order.status) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  askConfirm(
+                                    'کنسل کردن سفارش خرید',
+                                    'آیا مایل هستید درخواست این سفارش را لغو و مسدود نمایید؟',
+                                    () => {
+                                      onCancelOrder(order.id);
+                                    }
+                                  );
+                                }}
+                                className="bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] py-1 px-2.5 rounded font-bold transition-all border border-rose-100 cursor-pointer"
+                              >
+                                کنسل کردن سفارش
+                              </button>
+                            )}
                           </div>
-
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-slate-600">
-                            <div>
-                              <span className="text-slate-400 text-[10px] block">نوع وسیله نقلیه:</span>
-                              <span className="font-bold text-slate-800">{order.vehicleDetails.vehicleType}</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-400 text-[10px] block">باربری همکار:</span>
-                              <span className="font-bold text-slate-800">{order.vehicleDetails.shippingAgency}</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-400 text-[10px] block">نام راننده:</span>
-                              <span className="font-bold text-slate-800">{order.vehicleDetails.driverName}</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-400 text-[10px] block">تلفن راننده:</span>
-                              <a href={`tel:${order.vehicleDetails.driverPhone}`} className="text-emerald-600 font-mono font-bold hover:underline block">{order.vehicleDetails.driverPhone}</a>
-                            </div>
-                          </div>
-
-                          {/* License Plate Graphic Display */}
-                          <div className="mt-2.5 flex items-center sm:justify-start justify-end gap-3 flex-wrap">
-                            <div className="border-2 border-slate-800 rounded flex overflow-hidden font-bold h-9 items-center bg-white" id={`plate-${order.id}`}>
-                              <div className="bg-blue-800 text-white text-[10px] px-2.5 h-full flex flex-col items-center justify-center">
-                                <span className="text-[8px] leading-3 uppercase">I.R.</span>
-                                <span className="text-[7px] leading-3">IRAN</span>
-                              </div>
-                              <div className="px-3.5 text-sm tracking-widest text-slate-900 font-mono flex gap-1 h-full items-center">
-                                {(order.vehicleDetails.licensePlate || '').split(' ').map((term, index) => (
-                                  <span key={index}>{term}</span>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="text-right text-[11px] text-slate-500">
-                              🚚 پلاک راننده اختصاصی (همگام برخط) • تاریخ مقرر بارگیری: <strong>{order.vehicleDetails.estimatedArrival || new Date().toLocaleDateString('fa-IR')}</strong>
-                            </div>
+                          <div className="text-right">
+                            <span className="text-xs font-mono font-bold text-slate-800">شماره سفارش: {order.orderNumber}</span>
+                            <span className="text-[10px] text-slate-400 mr-2 font-mono">({new Date(order.createdAt).toLocaleDateString('fa-IR')})</span>
                           </div>
                         </div>
-                      )}
-                    </div>
+
+                        {/* Order details summary */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs" id={`details-grid-${order.id}`}>
+                          {order.itemsJson ? (
+                            <div className="md:col-span-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-right space-y-1">
+                              <span className="text-slate-400 font-bold block text-[9.5px] border-b border-slate-200 pb-1 mb-1">اقلام سبد خرید فاکتور چندمحصولی:</span>
+                              {(() => {
+                                try {
+                                  const parsed = JSON.parse(order.itemsJson);
+                                  if (Array.isArray(parsed)) {
+                                    return parsed.map((item: any, i: number) => (
+                                      <div key={i} className="flex justify-between text-[11px] text-slate-700">
+                                        <span>{item.quantity.toLocaleString()} {item.unit} × {item.pricePerUnit.toLocaleString()} تومان</span>
+                                        <strong className="text-slate-800">{item.productName}</strong>
+                                      </div>
+                                    ));
+                                  }
+                                } catch(e) {}
+                                return <strong className="text-slate-800">{order.productName}</strong>;
+                              })()}
+                            </div>
+                          ) : (
+                            <div>
+                              <span className="text-slate-400 block mb-0.5">محصول سفارش داده شده:</span>
+                              <strong className="text-slate-800 block text-[11px]">{order.productName}</strong>
+                            </div>
+                          )}
+
+                          {!order.itemsJson && (
+                            <div>
+                              <span className="text-slate-400 block mb-0.5">مقدار حواله خرید:</span>
+                              <strong className="text-slate-800 block font-mono text-[11px]">
+                                {order.quantity.toLocaleString()} {order.unit}
+                                {(() => {
+                                  const prod = products.find(p => p.id === order.productId);
+                                  if (prod) {
+                                    const pUnit = prod.primaryUnit || 'قالب';
+                                    if (order.unit !== pUnit) {
+                                      let ratio = prod.conversionRatio;
+                                      if (!ratio && prod.coverageInfo) {
+                                        const cleanCov = toEnglishDigits(prod.coverageInfo);
+                                        const parsedNum = cleanCov.match(/\d+(?:\.\d+)?/);
+                                        if (parsedNum) ratio = parseFloat(parsedNum[0]);
+                                      }
+                                      if (ratio) {
+                                        return (
+                                          <span className="text-[10px] text-emerald-600 block font-sans font-normal mt-0.5">
+                                            ({(order.quantity * ratio).toLocaleString()} {pUnit} تولید)
+                                          </span>
+                                        );
+                                      }
+                                    }
+                                  }
+                                  return null;
+                                })()}
+                              </strong>
+                            </div>
+                          )}
+
+                          <div>
+                            <span className="text-slate-400 block mb-0.5">شهرستان مقصد:</span>
+                            <strong className="text-slate-800 block text-[11px]">{order.destinationCity}</strong>
+                          </div>
+
+                          {order.buyerName && (
+                            <div>
+                              <span className="text-slate-400 block mb-0.5">مشخصات خریدار:</span>
+                              <strong className="text-emerald-800 block text-[11px]">{order.buyerName}</strong>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Payment Tracking Code Integration */}
+                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex items-center justify-between text-xs flex-wrap gap-2 text-right">
+                          <div className="flex items-center gap-1">
+                            <Coins className="w-3.5 h-3.5 text-slate-400" />
+                            <span className="text-slate-500 text-[10px]">کد رهگیری واریز پیش‌پرداخت مالی:</span>
+                          </div>
+                          {order.paymentTrackingCode ? (
+                            <span className="font-mono bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded font-bold block">{order.paymentTrackingCode}</span>
+                          ) : (
+                            order.status !== 'REJECTED' ? (
+                              <div className="flex gap-1.5 items-center">
+                                <input
+                                  type="text"
+                                  id={`tracking-${order.id}`}
+                                  placeholder="کد فیش واریز..."
+                                  className="bg-white border border-slate-200 rounded px-2 py-1 text-[10px] font-mono text-center focus:outline-none focus:ring-1 focus:ring-emerald-500 w-32 font-bold"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const inp = document.getElementById(`tracking-${order.id}`) as HTMLInputElement;
+                                    if (inp && inp.value.trim()) {
+                                      onUpdatePaymentTracking(order.id, inp.value.trim());
+                                      showToast('کد واریزی با موفقیت به حواله اضافه شد.', 'success');
+                                    } else {
+                                      showToast('لطفا کد معتبر وارد فرمایید.', 'error');
+                                    }
+                                  }}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-[9.5px] px-2.5 py-1.5 rounded transition-colors cursor-pointer font-bold"
+                                >
+                                  ثبت فیش
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 text-[10px]">بدون اطلاعات واریزی</span>
+                            )
+                          )}
+                        </div>
+
+
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/50" id={`stepper-${order.id}`}>
+                          <h4 className="text-xs font-bold text-slate-600 mb-4 flex items-center justify-end gap-1.5">
+                            <span>مراحل طی شده کارتابل مأموریت</span>
+                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                          </h4>
+
+                          {/* Stepper visuals */}
+                          <div className="relative flex items-center justify-between px-2 pt-1 pb-2">
+                            {/* Connecting background bar */}
+                            <div className="absolute left-[8%] right-[8%] top-[20px] h-1 bg-slate-200 -z-0" />
+                            
+                            {/* Dynamic Progress indicator overlay */}
+                            <div 
+                              className="absolute left-[8%] top-[20px] h-1 bg-emerald-500 transition-all duration-500 -z-0" 
+                              style={{
+                                right: 
+                                  order.status === 'PENDING_APPROVAL' ? '92%' :
+                                  order.status === 'APPROVED_BY_SALES' ? '64%' :
+                                  order.status === 'VEHICLE_ASSIGNED' ? '36%' : 
+                                  order.status === 'LOADED_AND_DISPATCHED' ? '8%' : 
+                                  '92%' // Rejected or pending
+                              }}
+                            />
+
+                            {/* Step 1: PENDING_APPROVAL */}
+                            <div className="flex flex-col items-center relative z-10 text-center w-1/4">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
+                                order.status !== 'REJECTED' ? 'bg-emerald-50 border-emerald-500 text-emerald-600' : 'bg-slate-100 border-slate-300 text-slate-400'
+                              }`}>
+                                <FileText className="w-4 h-4" />
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-700 mt-2">ثبت اولیه</span>
+                            </div>
+
+                            {/* Step 2: APPROVED_BY_SALES */}
+                            <div className="flex flex-col items-center relative z-10 text-center w-1/4">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
+                                ['APPROVED_BY_SALES', 'VEHICLE_ASSIGNED', 'LOADED_AND_DISPATCHED'].includes(order.status)
+                                  ? 'bg-emerald-50 border-emerald-500 text-emerald-600'
+                                  : 'bg-white border-slate-200 text-slate-400'
+                              }`}>
+                                <CheckCircle className="w-4 h-4" />
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-600 mt-2">تایید فروش</span>
+                            </div>
+
+                            {/* Step 3: VEHICLE_ASSIGNED */}
+                            <div className="flex flex-col items-center relative z-10 text-center w-1/4">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
+                                ['VEHICLE_ASSIGNED', 'LOADED_AND_DISPATCHED'].includes(order.status)
+                                  ? 'bg-emerald-50 border-emerald-500 text-emerald-600'
+                                  : 'bg-white border-slate-200 text-slate-400'
+                              }`}>
+                                <Truck className="w-4 h-4" />
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-600 mt-2">تخصیص ماشین</span>
+                            </div>
+
+                            {/* Step 4: LOADED_AND_DISPATCHED */}
+                            <div className="flex flex-col items-center relative z-10 text-center w-1/4">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
+                                order.status === 'LOADED_AND_DISPATCHED'
+                                  ? 'bg-emerald-600 border-emerald-600 text-white'
+                                  : 'bg-white border-slate-200 text-slate-400'
+                              }`}>
+                                <Navigation className="w-4 h-4" />
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-600 mt-2">بارگیری و حرکت</span>
+                            </div>
+                          </div>
+
+                          {/* Display warning if rejected */}
+                          {order.status === 'REJECTED' && (
+                            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-center justify-end gap-2" id={`reject-msg-${order.id}`}>
+                              <span>علت رد سفارش: {order.rejectionReason || 'عدم هماهنگی مالی سقف اعتبار نمایندگی.'}</span>
+                              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                            </div>
+                          )}
+
+                          {/* Vehicle assignment information block */}
+                          {order.vehicleDetails && (
+                            <div 
+                              className="mt-4 p-4 bg-white border border-emerald-100 rounded-xl shadow-sm text-right flex flex-col justify-between gap-3 text-xs"
+                              id={`vehicle-card-${order.id}`}
+                            >
+                              <div className="border-b border-dashed border-slate-100 pb-2.5 flex items-center justify-between">
+                                <span className="bg-emerald-500 text-white text-[10px] py-0.5 px-2 rounded-full font-bold">ماشین بارگیری شد</span>
+                                <span className="font-bold text-slate-700 flex items-center gap-1">
+                                  <span>مشخصات کامیون ارسالی کارخانه</span>
+                                  <Truck className="w-3.5 h-3.5 text-emerald-600" />
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-slate-600">
+                                <div>
+                                  <span className="text-slate-400 text-[10px] block">نوع وسیله نقلیه:</span>
+                                  <span className="font-bold text-slate-800">{order.vehicleDetails.vehicleType}</span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 text-[10px] block">باربری همکار:</span>
+                                  <span className="font-bold text-slate-800">{order.vehicleDetails.shippingAgency}</span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 text-[10px] block">نام راننده:</span>
+                                  <span className="font-bold text-slate-800">{order.vehicleDetails.driverName}</span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 text-[10px] block">تلفن راننده:</span>
+                                  <a href={`tel:${order.vehicleDetails.driverPhone}`} className="text-emerald-600 font-mono font-bold hover:underline block">{order.vehicleDetails.driverPhone}</a>
+                                </div>
+                              </div>
+
+                              {/* License Plate Graphic Display */}
+                              <div className="mt-2.5 flex items-center sm:justify-start justify-end gap-3 flex-wrap">
+                                <div className="border-2 border-slate-800 rounded flex overflow-hidden font-bold h-9 items-center bg-white" id={`plate-${order.id}`}>
+                                  <div className="bg-blue-800 text-white text-[10px] px-2.5 h-full flex flex-col items-center justify-center">
+                                    <span className="text-[8px] leading-3 uppercase">I.R.</span>
+                                    <span className="text-[7px] leading-3">IRAN</span>
+                                  </div>
+                                  <div className="px-3.5 text-sm tracking-widest text-slate-900 font-mono flex gap-1 h-full items-center">
+                                    {(order.vehicleDetails.licensePlate || '').split(' ').map((term, index) => (
+                                      <span key={index}>{term}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="text-right text-[11px] text-slate-500">
+                                  🚚 پلاک راننده اختصاصی (همگام برخط) • تاریخ مقرر بارگیری: <strong>{order.vehicleDetails.estimatedArrival || new Date().toLocaleDateString('fa-IR')}</strong>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                      </div>
+                    )}
+
                   </div>
                 );
               })}
