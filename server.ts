@@ -1071,6 +1071,24 @@ async function startServer() {
           VALUES (?, ?, ?, ?)
         `, [id, status, updatedAt, `تخصیص وسیله نقلیه ${vehicleType} متعلق به باربری ${shippingAgency} به رانندگی ${driverName}${billOfLadingNumber ? ` با شماره بارنامه ${billOfLadingNumber}` : ''}`]);
 
+        // Auto-register driver into permanent_drivers list if not already present
+        if (driverName && driverPhone) {
+          const [existingDrivers] = await connection.query(
+            "SELECT id FROM permanent_drivers WHERE driverPhone = ? OR (driverName = ? AND licensePlate = ?)",
+            [driverPhone, driverName, licensePlate]
+          ) as any[];
+
+          if (!existingDrivers || existingDrivers.length === 0) {
+            const newDriverId = `drv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+            await connection.query(
+              "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 1)",
+              [newDriverId, driverName, driverPhone, licensePlate, vehicleType || 'تریلی ۱۸ چرخ لبه‌دار', shippingAgency || null]
+            );
+            const redis = getRedisClient();
+            if (redis) await redis.del("permanent_drivers_list");
+          }
+        }
+
         await connection.commit();
         res.json({ success: true });
       } catch (txErr) {
