@@ -1058,22 +1058,6 @@ export default function ManagerDashboard({
               <span>شرکت‌های حمل و نقل ({shippingCompanies.length})</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('PARTNERS_MGMT');
-                setPartnerSubTab('DRIVERS');
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'PARTNERS_MGMT' && partnerSubTab === 'DRIVERS'
-                  ? 'bg-amber-600 text-white shadow-sm ring-2 ring-slate-300'
-                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-              }`}
-            >
-              <Truck className="w-3.5 h-3.5 text-amber-500" />
-              <span>رانندگان دائمی ({permanentDrivers.length})</span>
-            </button>
-
             {/* Tab 6: Archival & Factory Tracking */}
             <button
               onClick={() => setActiveTab('ARCHIVAL_ORDERS')}
@@ -1768,19 +1752,6 @@ export default function ManagerDashboard({
                  <Truck className="w-3.5 h-3.5 text-blue-500" />
                  <span>شرکت‌های حمل و نقل ({shippingCompanies.length})</span>
                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPartnerSubTab('DRIVERS')}
-                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
-                    partnerSubTab === 'DRIVERS'
-                      ? 'bg-slate-800 text-white shadow-sm font-bold'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  <Truck className="w-3.5 h-3.5 text-amber-500" />
-                  <span>رانندگان دائمی ({permanentDrivers.length})</span>
-                </button>
              </div>
 
             {partnerSubTab === 'AGENTS' && (
@@ -2451,22 +2422,6 @@ export default function ManagerDashboard({
           </div>
         )}
 
-          </div>
-        )}
-
-        {partnerSubTab === 'DRIVERS' && (
-          <div className="animate-fade-in font-sans pb-10">
-            <PermanentDriversManager
-              permanentDrivers={permanentDrivers}
-              shippingCompanies={shippingCompanies}
-              onAddDriver={onAddPermanentDriver || (async () => false)}
-              onBulkImport={onBulkImportPermanentDrivers || (async () => false)}
-              onUpdateDriver={onUpdatePermanentDriver || (async () => false)}
-              onToggleDriver={onTogglePermanentDriver || (() => {})}
-              onDeleteDriver={onDeletePermanentDriver || (() => {})}
-              showToast={showToast}
-              askConfirm={askConfirm}
-            />
           </div>
         )}
 

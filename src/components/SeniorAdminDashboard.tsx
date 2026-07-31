@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
+import { PermanentDriver, ShippingCompany } from '../types';
+import PermanentDriversManager from './PermanentDriversManager';
 import {
   Activity,
   Shield,
@@ -18,20 +20,36 @@ import {
   Trash2,
   Search,
   X,
-  Globe
+  Globe,
+  Truck
 } from 'lucide-react';
 
 interface SeniorAdminDashboardProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
   currentUser?: any;
+  permanentDrivers?: PermanentDriver[];
+  shippingCompanies?: ShippingCompany[];
+  onAddPermanentDriver?: (driver: Partial<PermanentDriver>) => Promise<boolean>;
+  onBulkImportPermanentDrivers?: (drivers: Partial<PermanentDriver>[]) => Promise<boolean>;
+  onUpdatePermanentDriver?: (driver: PermanentDriver) => Promise<boolean>;
+  onTogglePermanentDriver?: (driverId: string) => void;
+  onDeletePermanentDriver?: (driverId: string) => void;
 }
 
 export default function SeniorAdminDashboard({
   showToast,
   askConfirm,
-  currentUser
+  currentUser,
+  permanentDrivers = [],
+  shippingCompanies = [],
+  onAddPermanentDriver,
+  onBulkImportPermanentDrivers,
+  onUpdatePermanentDriver,
+  onTogglePermanentDriver,
+  onDeletePermanentDriver
 }: SeniorAdminDashboardProps) {
+  const [activeAdminTab, setActiveAdminTab] = useState<'SYSTEM_MONITOR' | 'PERMANENT_DRIVERS'>('SYSTEM_MONITOR');
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [systemMetrics, setSystemMetrics] = useState<any>(null);
   const [activitySearch, setActivitySearch] = useState<string>('');
@@ -243,8 +261,66 @@ export default function SeniorAdminDashboard({
         </div>
       </div>
 
-      {/* Top Summary Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="admin-kpi-cards">
+      {/* Sub-Tab Navigation Switcher */}
+      <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+        <button
+          type="button"
+          onClick={() => setActiveAdminTab('SYSTEM_MONITOR')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+            activeAdminTab === 'SYSTEM_MONITOR'
+              ? 'bg-purple-900 text-white shadow-md'
+              : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200/80'
+          }`}
+        >
+          <Activity className="w-4 h-4 text-purple-300" />
+          <span>پایش و مانیتورینگ لایو سیستم</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveAdminTab('PERMANENT_DRIVERS')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+            activeAdminTab === 'PERMANENT_DRIVERS'
+              ? 'bg-purple-900 text-white shadow-md'
+              : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200/80'
+          }`}
+        >
+          <Truck className="w-4 h-4 text-amber-400" />
+          <span>مدیریت و ثبت دائم رانندگان شرکت‌های حمل و نقل ({permanentDrivers.length})</span>
+          <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[10px] rounded-full font-bold">اختصاصی ادمین ارشد</span>
+        </button>
+      </div>
+
+      {activeAdminTab === 'PERMANENT_DRIVERS' && (
+        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm animate-fade-in space-y-4">
+          <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-amber-900 text-xs flex items-center gap-3">
+            <Truck className="w-6 h-6 text-amber-600 shrink-0" />
+            <div>
+              <strong className="font-extrabold text-sm block">پنل اختصاصی ثبت و مدیریت دائم رانندگان</strong>
+              <p className="text-amber-800 mt-0.5">
+                کلیه اختیارات ثبت، ویرایش، خروجی اکسل و فعال/غیرفعال‌سازی رانندگان ناوگان حمل و نقل به این بخش در پنل ادمین ارشد نرم‌افزار منتقل شده است.
+              </p>
+            </div>
+          </div>
+
+          <PermanentDriversManager
+            permanentDrivers={permanentDrivers}
+            shippingCompanies={shippingCompanies}
+            onAddDriver={onAddPermanentDriver || (async () => false)}
+            onBulkImport={onBulkImportPermanentDrivers || (async () => false)}
+            onUpdateDriver={onUpdatePermanentDriver || (async () => false)}
+            onToggleDriver={onTogglePermanentDriver || (() => {})}
+            onDeleteDriver={onDeletePermanentDriver || (() => {})}
+            showToast={showToast}
+            askConfirm={askConfirm}
+          />
+        </div>
+      )}
+
+      {activeAdminTab === 'SYSTEM_MONITOR' && (
+        <>
+          {/* Top Summary Stats Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="admin-kpi-cards">
         {/* KPI 1: User Activities Today */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md transition-all flex items-center justify-between">
           <div>
@@ -644,6 +720,8 @@ export default function SeniorAdminDashboard({
           <pre className="whitespace-pre-wrap break-all">{logsConsoleContent || 'No error logs recorded. Server running healthy.'}</pre>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

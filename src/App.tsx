@@ -1198,8 +1198,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* Role Play Tester Nav only visible to SALES_MANAGER & SYSTEM_ADMIN for testing/simulation */}
-      {(currentUser?.role === 'SALES_MANAGER' || currentUser?.role === 'SYSTEM_ADMIN') && (
+      {/* Role Play Tester Nav strictly visible ONLY to SYSTEM_ADMIN (Senior Software Admin) */}
+      {(currentUser?.role === 'SYSTEM_ADMIN' || !currentUser) && (
         <div className="bg-slate-800 text-slate-200 py-2 sm:py-2.5 border-b border-slate-700 shadow-inner" id="role-tester-bar">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
@@ -1435,6 +1435,13 @@ export default function App() {
                 showToast={showToast}
                 askConfirm={askConfirm}
                 currentUser={currentUser}
+                permanentDrivers={permanentDrivers}
+                shippingCompanies={shippingCompanies}
+                onAddPermanentDriver={handleAddPermanentDriver}
+                onBulkImportPermanentDrivers={handleBulkImportPermanentDrivers}
+                onUpdatePermanentDriver={handleUpdatePermanentDriver}
+                onTogglePermanentDriver={handleTogglePermanentDriver}
+                onDeletePermanentDriver={handleDeletePermanentDriver}
               />
             )}
 
