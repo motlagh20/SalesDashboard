@@ -1,12 +1,28 @@
+import * as XLSX from 'xlsx';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import React, { useState, useEffect } from 'react';
-import { Order, OrderStatus, Product, Agent, ShippingCompany, AppUser, UserRole, TerritoryAssignment } from '../types';
+import { Order, OrderStatus, Product, Agent, ShippingCompany, PermanentDriver, AppUser, UserRole, TerritoryAssignment } from '../types';
+import PermanentDriversManager from './PermanentDriversManager';
+import CommercialAnalyticsDashboard from './CommercialAnalyticsDashboard';
 import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary } from '../data/iranLocations';
 import { 
+  BarChart3,
+  Activity,
+  Shield,
+  RefreshCw,
+  UserCheck,
+  Zap,
+  Cpu,
+  FileSpreadsheet,
+  AlertTriangle,
+  Server,
+  Database,
+  Wifi,
+  Terminal,
   CheckCircle, 
   XCircle, 
   ChevronDown, 
@@ -53,6 +69,7 @@ interface ManagerDashboardProps {
   products: Product[];
   agents: Agent[];
   shippingCompanies: ShippingCompany[];
+  permanentDrivers?: PermanentDriver[];
   onApproveOrder: (orderId: string) => void;
   onRejectOrder: (orderId: string, reason: string) => void;
   onDispatchToFactory: (orderId: string, comment?: string) => void;
@@ -69,6 +86,11 @@ interface ManagerDashboardProps {
   onUpdateShippingCompany?: (companyData: ShippingCompany) => Promise<boolean>;
   onToggleShippingCompany: (companyId: string) => void;
   onDeleteShippingCompany: (companyId: string) => void;
+  onAddPermanentDriver?: (driver: Partial<PermanentDriver>) => Promise<boolean>;
+  onBulkImportPermanentDrivers?: (drivers: Partial<PermanentDriver>[]) => Promise<boolean>;
+  onUpdatePermanentDriver?: (driver: PermanentDriver) => Promise<boolean>;
+  onTogglePermanentDriver?: (driverId: string) => void;
+  onDeletePermanentDriver?: (driverId: string) => void;
   onApproveAllOrders?: (orderIds?: string[]) => void;
   onDispatchAllToFactory?: () => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -77,13 +99,14 @@ interface ManagerDashboardProps {
   onToggleSandbox?: () => void;
 }
 
-type PanelTab = 'APPROVED_PRIORITIES' | 'PENDING_APPROVAL' | 'AGENTS_MGMT' | 'PRODUCTS_MGMT' | 'SHIPPING_MGMT' | 'ARCHIVAL_ORDERS' | 'USERS_MGMT' | 'PARTNERS_MGMT';
+type PanelTab = 'COMMERCIAL_ANALYTICS' | 'APPROVED_PRIORITIES' | 'PENDING_APPROVAL' | 'AGENTS_MGMT' | 'PRODUCTS_MGMT' | 'SHIPPING_MGMT' | 'ARCHIVAL_ORDERS' | 'USERS_MGMT' | 'PARTNERS_MGMT';
 
 export default function ManagerDashboard({
   orders,
   products,
   agents,
   shippingCompanies = [],
+  permanentDrivers = [],
   onApproveOrder,
   onRejectOrder,
   onDispatchToFactory,
@@ -100,6 +123,11 @@ export default function ManagerDashboard({
   onUpdateShippingCompany,
   onToggleShippingCompany,
   onDeleteShippingCompany,
+  onAddPermanentDriver,
+  onBulkImportPermanentDrivers,
+  onUpdatePermanentDriver,
+  onTogglePermanentDriver,
+  onDeletePermanentDriver,
   onApproveAllOrders,
   onDispatchAllToFactory,
   showToast,
@@ -111,7 +139,7 @@ export default function ManagerDashboard({
   const [activeTab, setActiveTab] = useState<PanelTab>('PENDING_APPROVAL');
   
   // Sub-filter for combined Partners & Users view
-  const [partnerSubTab, setPartnerSubTab] = useState<'AGENTS' | 'SHIPPING' | 'USERS'>('USERS');
+  const [partnerSubTab, setPartnerSubTab] = useState<'AGENTS' | 'SHIPPING' | 'USERS' | 'DRIVERS'>('USERS');
   
   // Sub-filter state for archival logs
   const [archiveStatusFilter, setArchiveStatusFilter] = useState<string>('ALL');
@@ -422,12 +450,17 @@ export default function ManagerDashboard({
   const [newUserSCId, setNewUserSCId] = useState('');
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
 
-  const fetchUsers = async () => {
+    const fetchUsers = async () => {
     try {
       const res = await fetch('/api/users');
       if (res.ok) {
-        const data = await res.json();
-        setUsers(data);
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            setUsers(data);
+          }
+        }
       }
     } catch (err) {
       console.error('Error fetching users:', err);
@@ -478,8 +511,15 @@ export default function ManagerDashboard({
         setEditingUserId(null);
         fetchUsers();
       } else {
-        const errData = await res.json();
-        showToast(errData.error || 'خطایی در ثبت اطلاعات کاربر رخ داد.', 'error');
+        let errorMsg = 'خطایی در ثبت اطلاعات کاربر رخ داد.';
+        try {
+          const ct = res.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const errData = await res.json();
+            errorMsg = errData.error || errorMsg;
+          }
+        } catch {}
+        showToast(errorMsg, 'error');
       }
     } catch (err) {
       console.error(err);
@@ -933,6 +973,20 @@ export default function ManagerDashboard({
         {/* Workspace navigation */}
         <div className="flex flex-wrap items-center justify-between border-b border-slate-200 pb-4 mb-5 gap-3">
           <div className="flex flex-wrap gap-1.5" id="manager-panel-tabs">
+            {/* Tab 0: Commercial Analytics Dashboard */}
+            <button
+              onClick={() => setActiveTab('COMMERCIAL_ANALYTICS')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'COMMERCIAL_ANALYTICS'
+                  ? 'bg-amber-600 text-white shadow-sm ring-2 ring-amber-300'
+                  : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5 text-amber-700" />
+              <span>📊 آمار و تحلیل بازرگانی</span>
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+            </button>
+
             {/* Tab 1: Pending */}
             <button
               onClick={() => setActiveTab('PENDING_APPROVAL')}
@@ -1004,6 +1058,22 @@ export default function ManagerDashboard({
               <span>شرکت‌های حمل و نقل ({shippingCompanies.length})</span>
             </button>
 
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('PARTNERS_MGMT');
+                setPartnerSubTab('DRIVERS');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'PARTNERS_MGMT' && partnerSubTab === 'DRIVERS'
+                  ? 'bg-amber-600 text-white shadow-sm ring-2 ring-slate-300'
+                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+              }`}
+            >
+              <Truck className="w-3.5 h-3.5 text-amber-500" />
+              <span>رانندگان دائمی ({permanentDrivers.length})</span>
+            </button>
+
             {/* Tab 6: Archival & Factory Tracking */}
             <button
               onClick={() => setActiveTab('ARCHIVAL_ORDERS')}
@@ -1033,6 +1103,20 @@ export default function ManagerDashboard({
             </div>
           )}
         </div>
+
+        {/* RENDER SECTION 0: COMMERCIAL ANALYTICS DASHBOARD (داشبورد آمار و تحلیل بازرگانی) */}
+        {activeTab === 'COMMERCIAL_ANALYTICS' && (
+          <CommercialAnalyticsDashboard
+            orders={orders}
+            products={products}
+            agents={agents}
+            shippingCompanies={shippingCompanies}
+            onApproveOrder={onApproveOrder}
+            onDispatchToFactory={onDispatchToFactory}
+            showToast={showToast}
+            askConfirm={askConfirm}
+          />
+        )}
 
         {/* RENDER SECTION A: CARPARTY ORDERS WAITING FOR APPROVAL (تایید سفارش) */}
         {activeTab === 'PENDING_APPROVAL' && (
@@ -1684,6 +1768,19 @@ export default function ManagerDashboard({
                  <Truck className="w-3.5 h-3.5 text-blue-500" />
                  <span>شرکت‌های حمل و نقل ({shippingCompanies.length})</span>
                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPartnerSubTab('DRIVERS')}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
+                    partnerSubTab === 'DRIVERS'
+                      ? 'bg-slate-800 text-white shadow-sm font-bold'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Truck className="w-3.5 h-3.5 text-amber-500" />
+                  <span>رانندگان دائمی ({permanentDrivers.length})</span>
+                </button>
              </div>
 
             {partnerSubTab === 'AGENTS' && (
@@ -2354,6 +2451,22 @@ export default function ManagerDashboard({
           </div>
         )}
 
+          </div>
+        )}
+
+        {partnerSubTab === 'DRIVERS' && (
+          <div className="animate-fade-in font-sans pb-10">
+            <PermanentDriversManager
+              permanentDrivers={permanentDrivers}
+              shippingCompanies={shippingCompanies}
+              onAddDriver={onAddPermanentDriver || (async () => false)}
+              onBulkImport={onBulkImportPermanentDrivers || (async () => false)}
+              onUpdateDriver={onUpdatePermanentDriver || (async () => false)}
+              onToggleDriver={onTogglePermanentDriver || (() => {})}
+              onDeleteDriver={onDeletePermanentDriver || (() => {})}
+              showToast={showToast}
+              askConfirm={askConfirm}
+            />
           </div>
         )}
 
@@ -3539,6 +3652,7 @@ export default function ManagerDashboard({
         )}
 
       </div>
+
 
       {/* DETAILED ORDER HISTORY MODAL (شناسنامه و سوابق کامل سفارش) */}
       {selectedOrderForHistory && (

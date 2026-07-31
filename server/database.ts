@@ -68,6 +68,7 @@ function loadJsonData(): any {
     const raw = fs.readFileSync(JSON_FILE_PATH, "utf8");
     const parsed = JSON.parse(raw);
     if (!parsed.app_users) parsed.app_users = [];
+    if (!parsed.permanent_drivers) parsed.permanent_drivers = [];
     return parsed;
   } catch (err) {
     console.error("Error reading fallback JSON database:", err);
@@ -124,6 +125,17 @@ function seedJsonIfEmpty() {
       { id: 'sc-1', name: 'باربری ترانزیت طبرستان', code: 'SC-101', phoneNumber: '01133334444', managerName: 'آقای صالحی', address: 'ساری، کیلومتر ۳ جاده فیروزکوه، پایانه باربری ترانزیت', isEnabled: 1 },
       { id: 'sc-2', name: 'باربری زاینده‌رود طبرستان', code: 'SC-102', phoneNumber: '01133335555', managerName: 'آقای صادقی', address: 'اصفهان، شهرک صنعتی جی، خیابان چهارم، پایانه باربری زاینده‌رود', isEnabled: 1 },
       { id: 'sc-3', name: 'اتوبار کاسپین طبرستان', code: 'SC-103', phoneNumber: '01133336666', managerName: 'آقای احمدی', address: 'رشت، جاده انزلی، جنب پایانه حمل و نقل کاسپین', isEnabled: 1 }
+    ];
+    changed = true;
+  }
+
+  if (!data.permanent_drivers || data.permanent_drivers.length === 0) {
+    console.log("🌱 [Mock Seed] Seeding default permanent drivers...");
+    data.permanent_drivers = [
+      { id: 'drv-1', driverName: 'کریم قنبری', driverPhone: '09117772222', licensePlate: '۵۴ ع ۸۹۲ ایران ۷۲', vehicleType: 'تریلی ۱۸ چرخ لبه‌دار', shippingAgency: 'باربری ترانزیت شمال', nationalCode: '2081234567', smartCardNumber: '3849201', isEnabled: 1 },
+      { id: 'drv-2', driverName: 'غلامرضا صادقی', driverPhone: '09139998888', licensePlate: '۷۲ ب ۵۵۱ ایران ۵۳', vehicleType: 'کامیون جفت ۱۰ تن', shippingAgency: 'باربری زاینده‌رود', nationalCode: '1289876543', smartCardNumber: '4920183', isEnabled: 1 },
+      { id: 'drv-3', driverName: 'مرتضی حسینی', driverPhone: '09112223344', licensePlate: '۳۶ ج ۱۴۵ ایران ۶۲', vehicleType: 'خاور مسقف', shippingAgency: 'باربری کاسپین', nationalCode: '2093344556', smartCardNumber: '1092837', isEnabled: 1 },
+      { id: 'drv-4', driverName: 'جواد علوی', driverPhone: '09112523456', licensePlate: '۶۲ ع ۴۸۱ ایران ۷۲', vehicleType: 'تریلی ۱۸ چرخ لبه‌دار', shippingAgency: 'باربری ترانزیت طبرستان', nationalCode: '2089988771', smartCardNumber: '5544332', isEnabled: 1 }
     ];
     changed = true;
   }
@@ -445,6 +457,12 @@ function executeQuery(sql: string, values: any[] = []): any {
     return [jsonData.shipping_companies.map((s: any) => ({ ...s, isEnabled: s.isEnabled === 1 || s.isEnabled === true ? 1 : 0 })), []];
   }
 
+  // 3b. SELECT * FROM permanent_drivers
+  if (/SELECT\s+\*\s+FROM\s+permanent_drivers/i.test(cleanSql)) {
+    const list = (jsonData.permanent_drivers || []).map((d: any) => ({ ...d, isEnabled: d.isEnabled === 1 || d.isEnabled === true ? 1 : 0 }));
+    return [list, []];
+  }
+
   // 4. SELECT * FROM orders ORDER BY...
   if (/SELECT\s+\*\s+FROM\s+orders/i.test(cleanSql)) {
     const list = [...jsonData.orders].sort((a, b) => {
@@ -654,6 +672,59 @@ function executeQuery(sql: string, values: any[] = []): any {
   if (/DELETE\s+FROM\s+shipping_companies\s+WHERE\s+id/i.test(cleanSql)) {
     const id = values[0];
     jsonData.shipping_companies = jsonData.shipping_companies.filter((s: any) => s.id !== id);
+    saveJsonData(jsonData);
+    return [{ affectedRows: 1 }];
+  }
+
+  // 17b. PERMANENT DRIVERS CRUD IN FALLBACK SQL
+  if (/INSERT\s+INTO\s+permanent_drivers/i.test(cleanSql)) {
+    const [id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber] = values;
+    if (!jsonData.permanent_drivers) jsonData.permanent_drivers = [];
+    jsonData.permanent_drivers.push({
+      id,
+      driverName,
+      driverPhone,
+      licensePlate,
+      vehicleType,
+      shippingAgency: shippingAgency || null,
+      nationalCode: nationalCode || null,
+      smartCardNumber: smartCardNumber || null,
+      isEnabled: 1
+    });
+    saveJsonData(jsonData);
+    return [{ affectedRows: 1 }];
+  }
+
+  if (/UPDATE\s+permanent_drivers\s+SET\s+isEnabled\s+=\s+NOT\s+isEnabled\s+WHERE\s+id\s+=\s+\?/i.test(cleanSql)) {
+    const id = values[0];
+    const drv = (jsonData.permanent_drivers || []).find((d: any) => d.id === id);
+    if (drv) {
+      drv.isEnabled = (drv.isEnabled === 1 || drv.isEnabled === true) ? 0 : 1;
+      saveJsonData(jsonData);
+    }
+    return [{ affectedRows: 1 }];
+  }
+
+  if (/UPDATE\s+permanent_drivers\s+SET/i.test(cleanSql) && !/isEnabled\s+=\s+NOT/i.test(cleanSql)) {
+    const [driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled, id] = values;
+    const drv = (jsonData.permanent_drivers || []).find((d: any) => d.id === id);
+    if (drv) {
+      drv.driverName = driverName;
+      drv.driverPhone = driverPhone;
+      drv.licensePlate = licensePlate;
+      drv.vehicleType = vehicleType;
+      drv.shippingAgency = shippingAgency || null;
+      drv.nationalCode = nationalCode || null;
+      drv.smartCardNumber = smartCardNumber || null;
+      drv.isEnabled = Number(isEnabled) === 1 || isEnabled === true;
+      saveJsonData(jsonData);
+    }
+    return [{ affectedRows: 1 }];
+  }
+
+  if (/DELETE\s+FROM\s+permanent_drivers\s+WHERE\s+id/i.test(cleanSql)) {
+    const id = values[0];
+    jsonData.permanent_drivers = (jsonData.permanent_drivers || []).filter((d: any) => d.id !== id);
     saveJsonData(jsonData);
     return [{ affectedRows: 1 }];
   }
@@ -1144,6 +1215,21 @@ export async function bootstrapDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // 3b. Create Permanent Drivers Table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS permanent_drivers (
+        id VARCHAR(50) PRIMARY KEY,
+        driverName VARCHAR(150) NOT NULL,
+        driverPhone VARCHAR(20) NOT NULL,
+        licensePlate VARCHAR(50) NOT NULL,
+        vehicleType VARCHAR(100) NOT NULL,
+        shippingAgency VARCHAR(150) NULL,
+        nationalCode VARCHAR(20) NULL,
+        smartCardNumber VARCHAR(50) NULL,
+        isEnabled TINYINT(1) DEFAULT 1
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
     // 4. Create Orders Table
     await db.query(`
       CREATE TABLE IF NOT EXISTS orders (
@@ -1197,6 +1283,22 @@ export async function bootstrapDatabase() {
         agentCode VARCHAR(50) NULL,
         shippingCompanyId VARCHAR(100) NULL,
         isEnabled TINYINT(1) DEFAULT 1
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    // 7. Create User Activity Logs Table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS user_activity_logs (
+        id VARCHAR(50) PRIMARY KEY,
+        userId VARCHAR(50) NULL,
+        userName VARCHAR(150) NOT NULL,
+        userRole VARCHAR(50) NOT NULL,
+        action VARCHAR(100) NOT NULL,
+        details TEXT,
+        module VARCHAR(50) DEFAULT 'SYSTEM',
+        ipAddress VARCHAR(50) DEFAULT '127.0.0.1',
+        status VARCHAR(20) DEFAULT 'SUCCESS',
+        createdAt VARCHAR(50) NOT NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
@@ -1500,8 +1602,96 @@ async function seedDatabaseIfEmpty(db: mysql.Pool) {
         }
       }
 
+      // Seed initial activity logs
+      try {
+        const [actRows] = await db.query("SELECT COUNT(*) as count FROM user_activity_logs") as any[];
+        const actCount = (actRows && actRows[0]?.count !== undefined) ? actRows[0].count : 0;
+        if (actCount === 0) {
+          console.log("🌱 [Seed] Seeding default user activity logs...");
+          const now = Date.now();
+          const dummyActivityLogs = [
+            ['act-1', 'usr-0', 'ادمین ارشد نرم‌افزار', 'SYSTEM_ADMIN', 'ورود به سیستم', 'ورود موفقیت‌آمیز به پنل ادمین ارشد با احراز هویت دو مرحله‌ای', 'AUTH', '192.168.1.100', 'SUCCESS', new Date(now - 3 * 60 * 1000).toISOString()],
+            ['act-2', 'usr-1', 'آقای احمدی (مدیر بازرگانی)', 'SALES_MANAGER', 'تایید سفارش', 'تایید نهایی سفارش TCI-1402-01 و ارجاع به صف تولید کارخانه', 'ORDERS', '192.168.1.102', 'SUCCESS', new Date(now - 15 * 60 * 1000).toISOString()],
+            ['act-3', 'usr-5', 'آقای کریم نمازی', 'REPRESENTATIVE', 'ثبت سفارش جدید', 'ثبت سفارش پیش‌فاکتور TCI-1402-04 شامل ۸,۰۰۰ قالب آجر نسوز سموتی', 'REPRESENTATIVE', '2.180.45.12', 'SUCCESS', new Date(now - 45 * 60 * 1000).toISOString()],
+            ['act-4', 'usr-7', 'باربری ترانزیت طبرستان', 'SHIPPING_COMPANY', 'تخصیص ناوگان', 'تخصیص کامیون ۱۰ چرخ به رانندگی علی محمدی (ایران ۶۲ - ۴۵۶ ج ۸۸) برای سفارش TCI-1402-02', 'LOGISTICS', '5.160.120.88', 'SUCCESS', new Date(now - 90 * 60 * 1000).toISOString()],
+            ['act-5', 'usr-0', 'ادمین ارشد نرم‌افزار', 'SYSTEM_ADMIN', 'ویرایش کاتالوگ محصول', 'بروزرسانی مشخصات و قیمت محصول سفال ۲۰×۲۰ سانتی‌متر طبرستان', 'PRODUCTS', '192.168.1.100', 'SUCCESS', new Date(now - 120 * 60 * 1000).toISOString()],
+            ['act-6', 'usr-6', 'مسئول اول فروش کارخانه', 'FACTORY_TRANSPORT', 'بارگیری و خروج', 'تایید بارگیری و ثبت برگه خروج کامیون برای سفارش TCI-1402-03', 'FACTORY', '192.168.1.150', 'SUCCESS', new Date(now - 180 * 60 * 1000).toISOString()],
+            ['act-7', 'usr-0', 'ادمین ارشد نرم‌افزار', 'SYSTEM_ADMIN', 'پاکسازی کش سرور', 'پاکسازی حافظه کش Redis و به روزرسانی نمایه‌ها', 'SYSTEM', '192.168.1.100', 'SUCCESS', new Date(now - 300 * 60 * 1000).toISOString()],
+            ['act-8', 'usr-2', 'آقای حمیدرضا احمدی', 'REPRESENTATIVE', 'ویرایش پروفایل', 'به‌روزرسانی شماره تماس پشتیبانی نمایندگی تهران', 'USERS', '91.98.112.4', 'SUCCESS', new Date(now - 420 * 60 * 1000).toISOString()]
+          ];
+          for (const a of dummyActivityLogs) {
+            await db.query(
+              "INSERT INTO user_activity_logs (id, userId, userName, userRole, action, details, module, ipAddress, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              a
+            );
+          }
+        }
+      } catch (err: any) {
+        console.error("Error seeding activity logs:", err.message);
+      }
+
       console.log("🌱 [Seed] Database tables successfully synchronized and seeded!");
    } catch (err: any) {
      console.error("❌ [Seed] Error during seeding database:", err.message);
    }
  }
+
+
+// --- Activity Logging & Telemetry Helpers ---
+const inMemoryActivityLogs: any[] = [];
+
+export async function logUserActivity(log: {
+  userId?: string;
+  userName: string;
+  userRole: string;
+  action: string;
+  details?: string;
+  module?: string;
+  ipAddress?: string;
+  status?: 'SUCCESS' | 'WARNING' | 'ERROR';
+}) {
+  const logEntry = {
+    id: `act-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+    userId: log.userId || 'SYSTEM',
+    userName: log.userName || 'ناشناس',
+    userRole: log.userRole || 'USER',
+    action: log.action,
+    details: log.details || '',
+    module: log.module || 'GENERAL',
+    ipAddress: log.ipAddress || '127.0.0.1',
+    status: log.status || 'SUCCESS',
+    createdAt: new Date().toISOString()
+  };
+
+  inMemoryActivityLogs.unshift(logEntry);
+  if (inMemoryActivityLogs.length > 300) inMemoryActivityLogs.pop();
+
+  try {
+    const db = getDbPool();
+    await db.query(`
+      INSERT INTO user_activity_logs (id, userId, userName, userRole, action, details, module, ipAddress, status, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      logEntry.id, logEntry.userId, logEntry.userName, logEntry.userRole,
+      logEntry.action, logEntry.details, logEntry.module, logEntry.ipAddress,
+      logEntry.status, logEntry.createdAt
+    ]);
+  } catch (err: any) {
+    console.error("Could not write activity log to MySQL:", err.message);
+  }
+}
+
+export async function getUserActivityLogs(limit = 100): Promise<any[]> {
+  try {
+    const db = getDbPool();
+    const [rows] = await db.query(`
+      SELECT * FROM user_activity_logs ORDER BY createdAt DESC LIMIT ?
+    `, [limit]) as any[];
+    if (Array.isArray(rows) && rows.length > 0) {
+      return rows;
+    }
+  } catch (err: any) {
+    console.error("Error fetching activity logs from MySQL:", err.message);
+  }
+  return inMemoryActivityLogs.slice(0, limit);
+}

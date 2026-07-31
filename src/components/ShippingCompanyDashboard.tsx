@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Order, VehicleDetails, ShippingCompany, Product, AppUser } from '../types';
+import { Order, VehicleDetails, ShippingCompany, Product, AppUser, PermanentDriver } from '../types';
 import { 
   Truck, 
   MapPin, 
@@ -28,6 +28,7 @@ interface ShippingCompanyDashboardProps {
   orders: Order[];
   shippingCompanies: ShippingCompany[];
   products: Product[];
+  permanentDrivers?: PermanentDriver[];
   onAssignVehicle: (orderId: string, vehicle: VehicleDetails) => void;
   onReturnOrderToSales?: (orderId: string, reason: string) => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -65,6 +66,7 @@ export default function ShippingCompanyDashboard({
   orders,
   shippingCompanies = [],
   products = [],
+  permanentDrivers = [],
   onAssignVehicle,
   onReturnOrderToSales,
   showToast,

@@ -5,12 +5,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Order, OrderStatus, VehicleDetails, UserRole, Product, Agent, ShippingCompany, AppUser } from './types';
+import { Order, OrderStatus, VehicleDetails, UserRole, Product, Agent, ShippingCompany, PermanentDriver, AppUser } from './types';
 import { PRESET_ORDERS, PRESET_PRODUCTS, PRESET_AGENTS, PRESET_SHIPPING_COMPANIES } from './data';
 import RepresentativeDashboard from './components/RepresentativeDashboard';
 import ManagerDashboard from './components/ManagerDashboard';
 import FactoryDashboard from './components/FactoryDashboard';
 import ShippingCompanyDashboard from './components/ShippingCompanyDashboard';
+import SeniorAdminDashboard from './components/SeniorAdminDashboard';
 import InfrastructureInfo from './components/InfrastructureInfo';
 import LoginGate from './components/LoginGate';
 import TabarestanLogo from './components/TabarestanLogo';
@@ -34,6 +35,7 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [shippingCompanies, setShippingCompanies] = useState<ShippingCompany[]>([]);
+  const [permanentDrivers, setPermanentDrivers] = useState<PermanentDriver[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<string>('نمایندگی تهران (احمدی)');
   const [activeRole, setActiveRole] = useState<UserRole | 'INFRASTRUCTURE'>('REPRESENTATIVE');
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
@@ -398,6 +400,7 @@ export default function App() {
       fetchWithFallback('/api/products', setProducts),
       fetchWithFallback('/api/agents', setAgents),
       fetchWithFallback('/api/shipping-companies', setShippingCompanies),
+      fetchWithFallback('/api/permanent-drivers', setPermanentDrivers),
       fetchWithFallback('/api/orders', setOrders)
     ]);
   };
@@ -408,6 +411,108 @@ export default function App() {
     const interval = setInterval(refreshAllData, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // Permanent Drivers Management Handlers
+  const handleAddPermanentDriver = async (driverData: Partial<PermanentDriver>): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/permanent-drivers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(driverData)
+      });
+      if (response.ok) {
+        showToast(`🚗 مشخصات راننده «${driverData.driverName}» با موفقیت ثبت گردید.`, 'success');
+        refreshAllData();
+        return true;
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت راننده');
+        showToast(`خطا در ثبت راننده: ${errorMsg}`, 'error');
+        return false;
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+      return false;
+    }
+  };
+
+  const handleBulkImportPermanentDrivers = async (driversArray: Partial<PermanentDriver>[]): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/permanent-drivers/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ drivers: driversArray })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        showToast(`📂 تعداد ${data.count || driversArray.length} راننده با موفقیت از اکسل ایمپورت و ثبت گردیدند.`, 'success');
+        refreshAllData();
+        return true;
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ایمپورت گروهی رانندگان');
+        showToast(`خطا در ایمپورت رانندگان: ${errorMsg}`, 'error');
+        return false;
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+      return false;
+    }
+  };
+
+  const handleUpdatePermanentDriver = async (driverData: PermanentDriver): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/permanent-drivers/${driverData.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(driverData)
+      });
+      if (response.ok) {
+        showToast(`✏️ مشخصات راننده «${driverData.driverName}» با موفقیت به‌روزرسانی شد.`, 'success');
+        refreshAllData();
+        return true;
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ویرایش راننده');
+        showToast(`خطا در ویرایش راننده: ${errorMsg}`, 'error');
+        return false;
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+      return false;
+    }
+  };
+
+  const handleTogglePermanentDriver = async (driverId: string) => {
+    try {
+      const response = await fetch(`/api/permanent-drivers/${driverId}/toggle`, {
+        method: 'PATCH'
+      });
+      if (response.ok) {
+        showToast('وضعیت راننده با موفقیت تغییر کرد.', 'info');
+        refreshAllData();
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در تغییر وضعیت راننده');
+        showToast(errorMsg, 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
+  };
+
+  const handleDeletePermanentDriver = async (driverId: string) => {
+    try {
+      const response = await fetch(`/api/permanent-drivers/${driverId}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        showToast('اطلاعات راننده از سیستم حذف گردید.', 'success');
+        refreshAllData();
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در حذف راننده');
+        showToast(errorMsg, 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
+  };
 
   // 1. Create Order (Called by Representative)
   const handleCreateOrder = async (orderData: Partial<Order>) => {
@@ -1162,7 +1267,21 @@ export default function App() {
                   <span>۴. پنل باربری‌ها</span>
                 </button>
 
-                {/* View 5: Infrastructure Docs */}
+                {/* Role 5: Senior Software Admin */}
+                <button
+                  onClick={() => setActiveRole('SYSTEM_ADMIN')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
+                    activeRole === 'SYSTEM_ADMIN'
+                      ? 'bg-purple-600 text-white shadow-sm'
+                      : 'bg-purple-950/80 text-purple-200 border border-purple-800 hover:bg-purple-900'
+                  }`}
+                  id="role-btn-sysadmin"
+                >
+                  <ShieldAlert className="w-3 h-3 text-purple-300" />
+                  <span>۵. ادمین ارشد نرم‌افزار</span>
+                </button>
+
+                {/* View 6: Infrastructure Docs */}
                 <button
                   onClick={() => setActiveRole('INFRASTRUCTURE')}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
@@ -1173,7 +1292,7 @@ export default function App() {
                   id="role-btn-infra"
                 >
                   <Layers className="w-3 h-3" />
-                  <span>⚙️ زیرساخت</span>
+                  <span>۶. زیرساخت</span>
                 </button>
 
               </div>
@@ -1199,6 +1318,7 @@ export default function App() {
                 {activeRole === 'SALES_MANAGER' && '👔 کارتابل مدیریت بازرگانی و تایید مالی'}
                 {activeRole === 'FACTORY_TRANSPORT' && '🏭 کارتابل واحد فروش کارخانه'}
                 {activeRole === 'SHIPPING_COMPANY' && '🚚 پنل اختصاصی باربری‌ها و اتوبارهای همکار طبرستان'}
+                {activeRole === 'SYSTEM_ADMIN' && '🛡️ کارتابل اختصاصی ادمین ارشد نرم‌افزار (پایش و عیب‌یابی لایو)'}
                 {activeRole === 'INFRASTRUCTURE' && '⚙️ نیازمندی‌های توسعه زیرساخت نرم‌افزاری در فاز تولید'}
               </span>
               <Info className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -1210,6 +1330,7 @@ export default function App() {
             {activeRole === 'SALES_MANAGER' && 'سفارشات جدید ثبت شده توسط نمایندگان سراسر کشور با تمام فاکتورها در این کارتابل مدیریت بازرگانی ظاهر می‌شود. واحد بازرگانی می‌تواند با تایید سفارش آن را به خط کارخانه بفرستد یا در صورت عدم کفایت اعتباری با درج علت آن را لغو کند. همچنین قابلیت تعریف نمایندگان، محصولات و شرکت‌های حمل و نقل در این پنل تعبیه شده است.'}
             {activeRole === 'FACTORY_TRANSPORT' && 'سفارشات تایید شده بازرگانی در صف کارخانه قرار می‌گیرند. مدیر فروش کارخانه به جای پر کردن فرم‌های طولانی، به راحتی سفارش را با مشخص کردن باربری و نوع نیاز خودرو به باربری مربوطه ارسال می‌کند تا کمترین درگیری ثبتی را تجربه کند.'}
             {activeRole === 'SHIPPING_COMPANY' && 'باربری‌ها وقتی ارجاع حمل را از واحد فروش کارخانه طبرستان دریافت می‌کنند، درخواست مربوطه به همراه مقدار سفال سقف یا آجر در صف آنها ظاهر می‌شود. آنها با دکمه درج سریع نام راننده و پلاک را با حداقل وقت تلف شده پر کرده و شماره بارنامه صادرشده در برنامه اختصاصی خود را نوشته و سفارش را به نوبت بارگیری تایید می‌کنند.'}
+            {activeRole === 'SYSTEM_ADMIN' && 'در این کارتابل لایو، ادمین ارشد نرم‌افزار می‌تواند به صورت آنی تمام فعالیت‌های کاربران، وضعیت دیتابیس، حافظه رم و پردازنده سرور، لاگ‌های لایو شبکه و عیب‌یابی آنی سیستم را پایش و رصد نماید.'}
             {activeRole === 'INFRASTRUCTURE' && 'در این لایه فناوری‌ها، زیرساخت پایگاه داده رابطه‌ای، شیوه احراز هویت پیامکی کاربران و نحوه استقرار برنامه جهت دسترسی دائم تمامی گوشی‌های اندروید و آیفون تبیین شده است.'}
           </p>
         </div>
@@ -1249,6 +1370,7 @@ export default function App() {
                 products={products}
                 agents={agents}
                 shippingCompanies={shippingCompanies}
+                permanentDrivers={permanentDrivers}
                 onApproveOrder={handleApproveOrder}
                 onRejectOrder={handleRejectOrder}
                 onDispatchToFactory={handleDispatchToFactory}
@@ -1265,6 +1387,11 @@ export default function App() {
                 onUpdateShippingCompany={handleUpdateShippingCompany}
                 onToggleShippingCompany={handleToggleShippingCompanyStatus}
                 onDeleteShippingCompany={handleDeleteShippingCompany}
+                onAddPermanentDriver={handleAddPermanentDriver}
+                onBulkImportPermanentDrivers={handleBulkImportPermanentDrivers}
+                onUpdatePermanentDriver={handleUpdatePermanentDriver}
+                onTogglePermanentDriver={handleTogglePermanentDriver}
+                onDeletePermanentDriver={handleDeletePermanentDriver}
                 onApproveAllOrders={handleApproveAllOrders}
                 onDispatchAllToFactory={handleDispatchAllToFactory}
                 showToast={showToast}
@@ -1279,6 +1406,7 @@ export default function App() {
                 orders={orders}
                 shippingCompanies={shippingCompanies}
                 products={products}
+                permanentDrivers={permanentDrivers}
                 onAssignVehicle={handleAssignVehicle}
                 onRequestTransport={handleRequestTransport}
                 onDispatchOrder={handleDispatchOrder}
@@ -1292,12 +1420,21 @@ export default function App() {
                 orders={orders}
                 shippingCompanies={shippingCompanies}
                 products={products}
+                permanentDrivers={permanentDrivers}
                 onAssignVehicle={handleAssignVehicle}
                 onReturnOrderToSales={handleReturnOrderToSales}
                 showToast={showToast}
                 askConfirm={askConfirm}
                 currentUser={currentUser}
                 onOpenEditProfile={handleOpenEditProfile}
+              />
+            )}
+
+            {activeRole === 'SYSTEM_ADMIN' && (
+              <SeniorAdminDashboard
+                showToast={showToast}
+                askConfirm={askConfirm}
+                currentUser={currentUser}
               />
             )}
 

@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Order, VehicleDetails, OrderStatus, ShippingCompany, Product } from '../types';
+import { Order, VehicleDetails, OrderStatus, ShippingCompany, Product, PermanentDriver } from '../types';
 import { toEnglishDigits } from '../utils/numberUtils';
 import { 
   Truck, 
@@ -27,6 +27,7 @@ interface FactoryDashboardProps {
   orders: Order[];
   shippingCompanies: ShippingCompany[];
   products: Product[];
+  permanentDrivers?: PermanentDriver[];
   onAssignVehicle: (orderId: string, vehicle: VehicleDetails) => void;
   onRequestTransport?: (orderId: string, shippingCompanyId: string, shippingAgency: string) => void;
   onDispatchOrder: (orderId: string) => void;
@@ -38,6 +39,7 @@ export default function FactoryDashboard({
   orders,
   shippingCompanies = [],
   products = [],
+  permanentDrivers = [],
   onAssignVehicle,
   onRequestTransport,
   onDispatchOrder,

@@ -95,6 +95,18 @@ export interface ShippingCompany {
   password?: string;
 }
 
+export interface PermanentDriver {
+  id: string;
+  driverName: string;
+  driverPhone: string;
+  licensePlate: string;
+  vehicleType: string;
+  shippingAgency?: string;
+  nationalCode?: string;
+  smartCardNumber?: string;
+  isEnabled: boolean;
+}
+
 export type UserRole = 'SYSTEM_ADMIN' | 'REPRESENTATIVE' | 'SALES_MANAGER' | 'FACTORY_TRANSPORT' | 'SHIPPING_COMPANY';
 
 export interface AppUser {
