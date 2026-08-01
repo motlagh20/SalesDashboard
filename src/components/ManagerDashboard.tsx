@@ -2422,9 +2422,6 @@ export default function ManagerDashboard({
           </div>
         )}
 
-          </div>
-        )}
-
         {partnerSubTab === 'SHIPPING' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-right animate-fade-in font-sans pb-10" id="shipping-subtab-panel">
             {/* Right block: Companies List (8 columns) */}
@@ -2606,6 +2603,8 @@ export default function ManagerDashboard({
             </div>
           </div>
         )}
+      </div>
+    )}
 
         {/* RENDER SECTION D: FACTORY PRODUCTS MANAGEMENT (تعریف و مدیریت محصولات) */}
         {activeTab === 'PRODUCTS_MGMT' && (
