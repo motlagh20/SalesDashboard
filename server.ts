@@ -1352,6 +1352,22 @@ async function startServer() {
         return res.status(400).json({ error: "رمز عبور نادرست است." });
       }
 
+      // Record login activity in user_activity_logs
+      try {
+        await logUserActivity({
+          userId: user.id,
+          userName: user.fullName || user.username,
+          userRole: user.role,
+          action: "ورود به سیستم",
+          details: `ورود موفق کاربر (${user.fullName || user.username}) به پنل ${user.role}`,
+          module: "AUTH",
+          ipAddress: req.ip || "127.0.0.1",
+          status: "SUCCESS"
+        });
+      } catch (logErr) {
+        console.error("Error logging user login activity:", logErr);
+      }
+
       res.json({
         success: true,
         user: {

@@ -1083,6 +1083,31 @@ export default function App() {
     );
   };
 
+  const handleLogout = async () => {
+    if (currentUser) {
+      try {
+        await fetch('/api/system/activity-logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            userName: currentUser.fullName,
+            userRole: currentUser.role,
+            action: 'خروج از سیستم',
+            details: `خروج موفق کاربر (${currentUser.fullName}) از حساب کاربری`,
+            module: 'AUTH',
+            status: 'SUCCESS'
+          })
+        });
+      } catch (err) {
+        console.error('Logout log error:', err);
+      }
+    }
+    localStorage.removeItem('tabarestan_user');
+    setCurrentUser(null);
+    showToast('🔒 با موفقیت از حساب کاربری خود خارج شدید.', 'info');
+  };
+
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-slate-900 text-right dir-rtl font-sans pb-16">
@@ -1194,11 +1219,7 @@ export default function App() {
                     رمز
                   </button>
                   <button
-                    onClick={() => {
-                      localStorage.removeItem('tabarestan_user');
-                      setCurrentUser(null);
-                      showToast('🔒 با موفقیت از حساب کاربری خود خارج شدید.', 'info');
-                    }}
+                    onClick={handleLogout}
                     className="bg-rose-500/20 hover:bg-rose-500 hover:text-white text-rose-300 px-2 py-1 rounded text-[10px] font-bold"
                   >
                     خروج
