@@ -1181,11 +1181,12 @@ export async function bootstrapDatabase() {
         category VARCHAR(100) NOT NULL,
         pricePerUnit DECIMAL(15, 2) NOT NULL,
         unit VARCHAR(50) NOT NULL,
-        description TEXT,
+        description LONGTEXT,
         weight VARCHAR(50),
         dimensions VARCHAR(50),
         coverageInfo VARCHAR(150),
-        isEnabled TINYINT(1) DEFAULT 1
+        isEnabled TINYINT(1) DEFAULT 1,
+        imageUrl LONGTEXT
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
@@ -1351,7 +1352,15 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "products", "secondaryUnit", "VARCHAR(50) NULL");
     await ensureColumnExists(db, "products", "conversionRatio", "DECIMAL(10, 2) NULL");
     await ensureColumnExists(db, "products", "defaultQuantity", "INT NULL DEFAULT 330");
-    await ensureColumnExists(db, "products", "imageUrl", "TEXT NULL");
+    await ensureColumnExists(db, "products", "imageUrl", "LONGTEXT NULL");
+
+    // Upgrade existing columns to LONGTEXT if they were created with smaller types
+    try {
+      await db.query("ALTER TABLE products MODIFY COLUMN imageUrl LONGTEXT NULL");
+      await db.query("ALTER TABLE products MODIFY COLUMN description LONGTEXT NULL");
+    } catch (alterErr: any) {
+      console.log("ℹ️ [Migration Note] Modify products columns:", alterErr.message);
+    }
 
     console.log("✅ [Bootstrap] MariaDB tables checked and synchronized successfully!");
 
