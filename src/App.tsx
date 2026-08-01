@@ -1037,6 +1037,29 @@ export default function App() {
     }
   };
 
+  // Clear only transactions & orders (preserving user accounts, agents, products & shipping companies)
+  const handleClearTransactions = async (): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/system/clear-transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (response.ok) {
+        showToast('کلیه سفارشات، فاکتورها و لاگ‌های سیستم با موفقیت پاکسازی شدند.', 'success');
+        setOrders([]);
+        refreshAllData();
+        return true;
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در پاکسازی تراکنش‌ها');
+        showToast(`خطا در پاکسازی تراکنش‌ها: ${errorMsg}`, 'error');
+        return false;
+      }
+    } catch (err) {
+      showToast('خطای اتصال به سرور هنگام پاکسازی تراکنش‌ها', 'error');
+      return false;
+    }
+  };
+
   // Reset demo application to original factory state
   const handleResetApp = () => {
     askConfirm(
@@ -1442,6 +1465,7 @@ export default function App() {
                 onUpdatePermanentDriver={handleUpdatePermanentDriver}
                 onTogglePermanentDriver={handleTogglePermanentDriver}
                 onDeletePermanentDriver={handleDeletePermanentDriver}
+                onClearTransactions={handleClearTransactions}
               />
             )}
 

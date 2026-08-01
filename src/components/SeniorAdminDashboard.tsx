@@ -35,6 +35,7 @@ interface SeniorAdminDashboardProps {
   onUpdatePermanentDriver?: (driver: PermanentDriver) => Promise<boolean>;
   onTogglePermanentDriver?: (driverId: string) => void;
   onDeletePermanentDriver?: (driverId: string) => void;
+  onClearTransactions?: () => Promise<boolean>;
 }
 
 export default function SeniorAdminDashboard({
@@ -47,7 +48,8 @@ export default function SeniorAdminDashboard({
   onBulkImportPermanentDrivers,
   onUpdatePermanentDriver,
   onTogglePermanentDriver,
-  onDeletePermanentDriver
+  onDeletePermanentDriver,
+  onClearTransactions
 }: SeniorAdminDashboardProps) {
   const [activeAdminTab, setActiveAdminTab] = useState<'SYSTEM_MONITOR' | 'PERMANENT_DRIVERS'>('SYSTEM_MONITOR');
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
@@ -59,6 +61,35 @@ export default function SeniorAdminDashboard({
   const [logsConsoleContent, setLogsConsoleContent] = useState<string>('');
   const [isRefreshingMonitor, setIsRefreshingMonitor] = useState<boolean>(false);
   const [registeredUsersCount, setRegisteredUsersCount] = useState<number>(0);
+  const [isClearingTransactions, setIsClearingTransactions] = useState<boolean>(false);
+
+  const handleClearTransactionsClick = () => {
+    askConfirm(
+      '⚠️ پاکسازی کامل کلیه تراکنش‌ها و سفارشات',
+      'آیا از حذف کامل تمام سفارشات، فاکتورها، سوابق گردش کالا و لاگ‌های سیستم اطمینان دارید؟\n\nنکته مهم: اطلاعات پایه مانند حساب کاربران، نمایندگی‌ها، باربری‌ها و محصولات دست‌نخورده باقی می‌مانند.',
+      async () => {
+        setIsClearingTransactions(true);
+        try {
+          if (onClearTransactions) {
+            await onClearTransactions();
+          } else {
+            const res = await fetch('/api/system/clear-transactions', { method: 'POST' });
+            const d = await res.json();
+            if (d.success) {
+              showToast('کلیه تراکنش‌ها و سفارشات با موفقیت پاکسازی شدند.', 'success');
+            } else {
+              showToast(d.error || 'خطا در پاکسازی تراکنش‌ها', 'error');
+            }
+          }
+          fetchSystemLogsAndStats();
+        } catch (err) {
+          showToast('خطا در ارتباط با سرور جهت پاکسازی تراکنش‌ها', 'error');
+        } finally {
+          setIsClearingTransactions(false);
+        }
+      }
+    );
+  };
 
   const fetchSystemLogsAndStats = async () => {
     setIsRefreshingMonitor(true);
@@ -235,6 +266,17 @@ export default function SeniorAdminDashboard({
 
           {/* Action Controls */}
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleClearTransactionsClick}
+              disabled={isClearingTransactions}
+              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white border border-rose-400/40 rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-md cursor-pointer animate-pulse hover:animate-none"
+              title="پاکسازی کامل تمام سفارشات و فاکتورها (حفظ کامل حساب‌های کاربر، باربری‌ها و محصولات)"
+            >
+              <Trash2 className="w-4 h-4 text-rose-200" />
+              <span>{isClearingTransactions ? 'در حال پاکسازی...' : 'حذف کلیه تراکنش‌ها و سفارشات'}</span>
+            </button>
+
             <button
               type="button"
               onClick={fetchSystemLogsAndStats}
@@ -695,6 +737,16 @@ export default function SeniorAdminDashboard({
 
           {/* Action Controls */}
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleClearTransactionsClick}
+              disabled={isClearingTransactions}
+              className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-200" />
+              <span>پاکسازی تراکنش‌ها (حفظ داده‌های پایه)</span>
+            </button>
+
             <button
               type="button"
               onClick={handleFlushCache}

@@ -1742,6 +1742,41 @@ async function startServer() {
     }
   });
 
+  // CLEAR ALL TRANSACTIONS & ORDERS (PRESERVING MASTER USERS & DATA)
+  app.post("/api/system/clear-transactions", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+        await connection.query("DELETE FROM order_history");
+        await connection.query("DELETE FROM orders");
+        await connection.query("DELETE FROM user_activity_logs");
+        await connection.commit();
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+
+      // Clear order-related Redis caches
+      const redis = getRedisClient();
+      if (redis) {
+        await redis.del("orders_list");
+        await redis.del("activity_logs_list");
+      }
+
+      res.json({ 
+        success: true, 
+        message: "کلیه سفارشات، سوابق فاکتورها و لاگ‌های سیستم با موفقیت پاکسازی شدند. اطلاعات پایه کاربران، باربری‌ها و محصولات حفظ گردید." 
+      });
+    } catch (err: any) {
+      console.error("Error in POST /api/system/clear-transactions:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // 6. SYSTEM DIAGNOSTICS & SYSTEM ERROR LOGS
   app.get("/api/system/error-logs", (req, res) => {
     try {
