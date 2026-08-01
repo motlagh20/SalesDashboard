@@ -20,6 +20,46 @@ async function startServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  function extractActor(req: express.Request) {
+    let userId = (req.headers["x-user-id"] as string) || req.body?.actorUserId || "system";
+    let userName = "";
+    
+    const rawHeaderName = req.headers["x-user-name"] as string;
+    if (rawHeaderName) {
+      try {
+        userName = decodeURIComponent(rawHeaderName);
+      } catch {
+        userName = rawHeaderName;
+      }
+    }
+    
+    if (!userName) {
+      userName = req.body?.actorUserName || "مدیر / کاربر سیستم";
+    }
+
+    let userRole = (req.headers["x-user-role"] as string) || req.body?.actorUserRole || "SALES_MANAGER";
+    
+    return { userId, userName, userRole };
+  }
+
+  async function recordActivity(req: express.Request, action: string, details: string, module: string, status: "SUCCESS" | "WARNING" | "ERROR" = "SUCCESS") {
+    try {
+      const actor = extractActor(req);
+      await logUserActivity({
+        userId: actor.userId,
+        userName: actor.userName,
+        userRole: actor.userRole,
+        action,
+        details,
+        module,
+        ipAddress: (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || "127.0.0.1",
+        status
+      });
+    } catch (err) {
+      console.error("Error recording activity log:", err);
+    }
+  }
+
   // --- API Routes ---
 
   // Health check endpoint
@@ -83,6 +123,13 @@ async function startServer() {
       // Invalidate cache
       const redis = getRedisClient();
       if (redis) await redis.del("products_list");
+
+      await recordActivity(
+        req,
+        "افزودن محصول جدید",
+        `ثبت محصول جدید (${name}) با کد ${id} و قیمت ${Number(pricePerUnit || 0).toLocaleString('fa-IR')} ریال در کاتالوگ`,
+        "PRODUCTS"
+      );
       
       res.status(201).json({ success: true, id });
     } catch (err: any) {
@@ -106,6 +153,13 @@ async function startServer() {
       // Invalidate cache
       const redis = getRedisClient();
       if (redis) await redis.del("products_list");
+
+      await recordActivity(
+        req,
+        "تغییر وضعیت فعال‌سازی محصول",
+        `تغییر وضعیت فعال/غیرفعال بودن محصول کد ${id}`,
+        "PRODUCTS"
+      );
       
       res.json({ success: true });
     } catch (err: any) {
@@ -131,6 +185,13 @@ async function startServer() {
       const redis = getRedisClient();
       if (redis) await redis.del("products_list");
 
+      await recordActivity(
+        req,
+        "ویرایش اطلاعات محصول",
+        `بروزرسانی اطلاعات و مشخصات فنی محصول (${name}) با شناسه ${id}`,
+        "PRODUCTS"
+      );
+
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PUT /api/products/:id:", err);
@@ -147,6 +208,13 @@ async function startServer() {
       // Invalidate cache
       const redis = getRedisClient();
       if (redis) await redis.del("products_list");
+
+      await recordActivity(
+        req,
+        "حذف محصول",
+        `حذف کامل محصول با شناسه ${id} از کاتالوگ محصولات کارخانه`,
+        "PRODUCTS"
+      );
       
       res.json({ success: true });
     } catch (err: any) {
@@ -236,6 +304,13 @@ async function startServer() {
 
       const redis = getRedisClient();
       if (redis) await redis.del("agents_list");
+
+      await recordActivity(
+        req,
+        "ثبت نمایندگی جدید",
+        `افزودن نمایندگی جدید (${fullName || alias}) با کد نمایندگی ${agentCode} در شهر/منطقه ${area || 'نامشخص'}`,
+        "REPRESENTATIVE"
+      );
       
       res.status(201).json({ success: true, id });
     } catch (err: any) {
@@ -260,6 +335,13 @@ async function startServer() {
       
       const redis = getRedisClient();
       if (redis) await redis.del("agents_list");
+
+      await recordActivity(
+        req,
+        "تغییر وضعیت نمایندگی",
+        `تغییر وضعیت فعال/غیرفعال بودن نمایندگی کد ${id}`,
+        "REPRESENTATIVE"
+      );
       
       res.json({ success: true });
     } catch (err: any) {
@@ -295,6 +377,13 @@ async function startServer() {
       const redis = getRedisClient();
       if (redis) await redis.del("agents_list");
 
+      await recordActivity(
+        req,
+        "ویرایش اطلاعات نمایندگی",
+        `بروزرسانی مشخصات نمایندگی (${fullName || alias}) با کد ${agentCode}`,
+        "REPRESENTATIVE"
+      );
+
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PUT /api/agents/:id:", err);
@@ -320,6 +409,13 @@ async function startServer() {
       
       const redis = getRedisClient();
       if (redis) await redis.del("agents_list");
+
+      await recordActivity(
+        req,
+        "حذف نمایندگی",
+        `حذف کامل نمایندگی با شناسه ${id} از شبکه نمایندگان رسمی`,
+        "REPRESENTATIVE"
+      );
       
       res.json({ success: true });
     } catch (err: any) {
@@ -1646,6 +1742,13 @@ async function startServer() {
         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
       `, [id, username, fullName, phoneNumber, role, agentCode || null, shippingCompanyId || null, userPassword]);
 
+      await recordActivity(
+        req,
+        "تعریف کاربر جدید",
+        `ایجاد حساب کاربری جدید (${fullName}) نام کاربری: ${username} با نقش ${role}`,
+        "USERS"
+      );
+
       res.json({ success: true, user: { id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled: true, password: userPassword } });
     } catch (err: any) {
       console.error("Error in POST /api/users:", err);
@@ -1677,6 +1780,13 @@ async function startServer() {
         `, [username, fullName, phoneNumber, role, agentCode || null, shippingCompanyId || null, id]);
       }
 
+      await recordActivity(
+        req,
+        "ویرایش حساب کاربر",
+        `بروزرسانی مشخصات کاربر (${fullName}) نام کاربری: ${username} و نقش ${role}`,
+        "USERS"
+      );
+
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PUT /api/users/:id:", err);
@@ -1690,14 +1800,22 @@ async function startServer() {
       const { id } = req.params;
       const db = getDbPool();
 
-      const [rows] = await db.query("SELECT isEnabled FROM app_users WHERE id = ?", [id]);
+      const [rows] = await db.query("SELECT username, fullName, isEnabled FROM app_users WHERE id = ?", [id]);
       const found = rows as any[];
       if (found.length === 0) {
         return res.status(404).json({ error: "کاربر یافت نشد." });
       }
 
-      const newStatus = found[0].isEnabled ? 0 : 1;
+      const userObj = found[0];
+      const newStatus = userObj.isEnabled ? 0 : 1;
       await db.query("UPDATE app_users SET isEnabled = ? WHERE id = ?", [newStatus, id]);
+
+      await recordActivity(
+        req,
+        "تغییر وضعیت حساب کاربر",
+        `تغییر وضعیت حساب کاربری (${userObj.fullName || userObj.username}) به ${newStatus ? 'فعال' : 'غیرفعال'}`,
+        "USERS"
+      );
 
       res.json({ success: true, isEnabled: !!newStatus });
     } catch (err: any) {
@@ -1713,6 +1831,14 @@ async function startServer() {
       const db = getDbPool();
 
       await db.query("DELETE FROM app_users WHERE id = ?", [id]);
+
+      await recordActivity(
+        req,
+        "حذف حساب کاربر",
+        `حذف کامل حساب کاربری کد ${id} از دیتابیس`,
+        "USERS"
+      );
+
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in DELETE /api/users/:id:", err);
