@@ -29,10 +29,12 @@ import {
   ChevronUp,
   Maximize2,
   Minimize2,
-  Send
+  Send,
+  Map
 } from 'lucide-react';
 
 import { SendLocationModal } from './SendLocationModal';
+import { InteractiveMapPicker } from './InteractiveMapPicker';
 
 interface RepresentativeDashboardProps {
   orders: Order[];
@@ -88,6 +90,7 @@ export default function RepresentativeDashboard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [selectedLocationOrder, setSelectedLocationOrder] = useState<Order | null>(null);
+  const [isFormMapPickerOpen, setIsFormMapPickerOpen] = useState(false);
 
   const handleGetCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -838,20 +841,32 @@ export default function RepresentativeDashboard({
 
                 {/* Delivery Location GPS/Map Input (Optional) */}
                 <div className="bg-sky-50/70 border border-sky-200 rounded-xl p-3 space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
                     <label className="block text-xs font-bold text-sky-950 flex items-center gap-1.5">
                       <MapPin className="w-4 h-4 text-sky-600" />
                       <span>لینک لوکیشن یا مختصات نقشه تخلیه بار</span>
                       <span className="text-[10px] text-slate-500 font-normal">(اختیاری)</span>
                     </label>
-                    <button
-                      type="button"
-                      onClick={handleGetCurrentLocation}
-                      className="text-[10px] bg-white hover:bg-sky-100 text-sky-800 border border-sky-300 px-2 py-1 rounded-md flex items-center gap-1 font-bold transition-all shadow-xs"
-                    >
-                      <Navigation className="w-3 h-3 text-sky-600" />
-                      <span>📌 دریافت GPS کنونی من</span>
-                    </button>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setIsFormMapPickerOpen(true)}
+                        className="text-[10px] bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded-md flex items-center gap-1 font-extrabold transition-all shadow-xs"
+                      >
+                        <Map className="w-3 h-3 text-rose-100" />
+                        <span>🗺️ انتخاب روی نقشه تعاملی</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleGetCurrentLocation}
+                        className="text-[10px] bg-white hover:bg-sky-100 text-sky-800 border border-sky-300 px-2 py-1 rounded-md flex items-center gap-1 font-bold transition-all shadow-xs"
+                      >
+                        <Navigation className="w-3 h-3 text-sky-600" />
+                        <span>📌 GPS کنونی</span>
+                      </button>
+                    </div>
                   </div>
 
                   <input
@@ -1384,6 +1399,17 @@ export default function RepresentativeDashboard({
           onShowToast={showToast}
         />
       )}
+
+      {/* Form Map Picker Modal */}
+      <InteractiveMapPicker
+        isOpen={isFormMapPickerOpen}
+        onClose={() => setIsFormMapPickerOpen(false)}
+        cityHint={destinationCity}
+        onConfirmLocation={(url) => {
+          setDeliveryLocationUrl(url);
+          showToast('موقعیت مکانی جدید روی نقشه انتخاب شد.', 'success');
+        }}
+      />
     </div>
   );
 }

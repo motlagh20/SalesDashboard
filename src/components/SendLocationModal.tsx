@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { InteractiveMapPicker } from './InteractiveMapPicker';
 import {
   X,
   MapPin,
@@ -22,7 +23,8 @@ import {
   AlertCircle,
   Share2,
   Sparkles,
-  Info
+  Info,
+  Map
 } from 'lucide-react';
 import { Order } from '../types';
 
@@ -52,6 +54,7 @@ export const SendLocationModal: React.FC<SendLocationModalProps> = ({
   const [isEditingLocation, setIsEditingLocation] = useState(!order.deliveryLocationUrl);
   const [isSavingLoc, setIsSavingLoc] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
   
   // Simulated SMS state
   const [isSendingSms, setIsSendingSms] = useState(false);
@@ -267,16 +270,28 @@ ${activeLocationUrl}
             {/* Editing / Input Box */}
             {isEditingLocation ? (
               <div className="pt-2 border-t border-sky-200/80 space-y-2">
-                <div className="flex items-center justify-between text-[11px]">
+                <div className="flex items-center justify-between text-[11px] flex-wrap gap-1">
                   <label className="font-bold text-slate-700">لینک گوگل مپس، نشان، بلد یا مختصات GPS:</label>
-                  <button
-                    type="button"
-                    onClick={handleGetGpsLocation}
-                    className="bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-300 text-[10px] px-2 py-1 rounded-md font-bold flex items-center gap-1"
-                  >
-                    <Navigation className="w-3 h-3 text-emerald-600" />
-                    <span>📌 دریافت GPS کنونی</span>
-                  </button>
+                  
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsMapPickerOpen(true)}
+                      className="bg-rose-600 hover:bg-rose-700 text-white text-[10px] px-2.5 py-1 rounded-md font-extrabold flex items-center gap-1 transition-colors shadow-xs"
+                    >
+                      <Map className="w-3 h-3 text-rose-100" />
+                      <span>🗺️ انتخاب دقیق روی نقشه تعاملی</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleGetGpsLocation}
+                      className="bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-300 text-[10px] px-2 py-1 rounded-md font-bold flex items-center gap-1"
+                    >
+                      <Navigation className="w-3 h-3 text-emerald-600" />
+                      <span>📌 GPS کنونی</span>
+                    </button>
+                  </div>
                 </div>
                 
                 <input
@@ -467,6 +482,17 @@ ${activeLocationUrl}
         </div>
 
       </div>
+
+      {/* Leaflet Interactive Map Picker Modal */}
+      <InteractiveMapPicker
+        isOpen={isMapPickerOpen}
+        onClose={() => setIsMapPickerOpen(false)}
+        cityHint={order.destinationCity}
+        onConfirmLocation={(url) => {
+          setLocationUrl(url);
+          onShowToast('موقعیت جدید از روی نقشه انتخاب شد.', 'success');
+        }}
+      />
     </div>
   );
 };
