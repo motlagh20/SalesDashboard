@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { Order, VehicleDetails, ShippingCompany, Product, AppUser, PermanentDriver } from '../types';
+import { SendLocationModal } from './SendLocationModal';
 import { 
   Truck, 
   MapPin, 
@@ -21,7 +22,8 @@ import {
   Building,
   UserCheck,
   Undo2,
-  AlertCircle
+  AlertCircle,
+  Send
 } from 'lucide-react';
 
 interface ShippingCompanyDashboardProps {
@@ -31,6 +33,7 @@ interface ShippingCompanyDashboardProps {
   permanentDrivers?: PermanentDriver[];
   onAssignVehicle: (orderId: string, vehicle: VehicleDetails) => void;
   onReturnOrderToSales?: (orderId: string, reason: string) => void;
+  onSaveLocation?: (orderId: string, deliveryLocationUrl: string) => Promise<void>;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
   currentUser?: AppUser | null;
@@ -69,6 +72,7 @@ export default function ShippingCompanyDashboard({
   permanentDrivers = [],
   onAssignVehicle,
   onReturnOrderToSales,
+  onSaveLocation,
   showToast,
   askConfirm,
   currentUser,
@@ -94,6 +98,7 @@ export default function ShippingCompanyDashboard({
 
   const [activeTab, setActiveTab] = useState<'NEW_REQUESTS' | 'COMPLETED'>('NEW_REQUESTS');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedLocationOrder, setSelectedLocationOrder] = useState<Order | null>(null);
 
   // Selected company object
   const currentCompany = shippingCompanies.find(sc => sc.id === selectedCompanyId) || shippingCompanies[0];
@@ -580,6 +585,22 @@ export default function ShippingCompanyDashboard({
                                   <span className="text-slate-600 font-bold">{order.vehicleDetails.estimatedArrival || new Date().toLocaleDateString('fa-IR')}</span>
                                 </div>
                               </div>
+
+                              {/* Location Send Button for Driver */}
+                              <div className="mt-3 border-t border-emerald-100/80 pt-2.5 flex items-center justify-between flex-wrap gap-2">
+                                <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                                  <MapPin className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                                  <span>لوکیشن تخلیه بار: <strong>{order.deliveryLocationUrl ? 'ثبت شده روی نقشه' : 'هنوز لینکی ثبت نشده'}</strong></span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedLocationOrder(order)}
+                                  className="bg-sky-700 hover:bg-sky-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                                >
+                                  <Send className="w-3.5 h-3.5" />
+                                  <span>📲 ارسال لوکیشن و آدرس به راننده</span>
+                                </button>
+                              </div>
                             </div>
                           )}
 
@@ -771,6 +792,17 @@ export default function ShippingCompanyDashboard({
         )}
 
       </div>
+
+      {/* Location Modal */}
+      {selectedLocationOrder && (
+        <SendLocationModal
+          isOpen={!!selectedLocationOrder}
+          onClose={() => setSelectedLocationOrder(null)}
+          order={selectedLocationOrder}
+          onSaveLocation={onSaveLocation}
+          onShowToast={showToast}
+        />
+      )}
 
     </div>
   );

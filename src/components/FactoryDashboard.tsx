@@ -31,6 +31,7 @@ interface FactoryDashboardProps {
   onAssignVehicle: (orderId: string, vehicle: VehicleDetails) => void;
   onRequestTransport?: (orderId: string, shippingCompanyId: string, shippingAgency: string) => void;
   onDispatchOrder: (orderId: string) => void;
+  onSaveLocation?: (orderId: string, deliveryLocationUrl: string) => Promise<void>;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
 }

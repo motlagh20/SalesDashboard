@@ -93,6 +93,7 @@ interface ManagerDashboardProps {
   onDeletePermanentDriver?: (driverId: string) => void;
   onApproveAllOrders?: (orderIds?: string[]) => void;
   onDispatchAllToFactory?: () => void;
+  onSaveLocation?: (orderId: string, deliveryLocationUrl: string) => Promise<void>;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
   sandboxEnabled?: boolean;

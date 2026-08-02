@@ -1346,6 +1346,7 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "orders", "shippingCompanyId", "VARCHAR(150) NULL");
     await ensureColumnExists(db, "orders", "isExportOrder", "TINYINT(1) DEFAULT 0");
     await ensureColumnExists(db, "orders", "destinationCountry", "VARCHAR(100) NULL");
+    await ensureColumnExists(db, "orders", "deliveryLocationUrl", "TEXT NULL");
 
     // products primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, imageUrl
     await ensureColumnExists(db, "products", "primaryUnit", "VARCHAR(50) NULL");

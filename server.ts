@@ -775,6 +775,7 @@ async function startServer() {
           shippingCompanyId: o.shippingCompanyId,
           isExportOrder: !!o.isExportOrder,
           destinationCountry: o.destinationCountry,
+          deliveryLocationUrl: o.deliveryLocationUrl || null,
           statusHistory: historyMap[o.id] || []
         };
 
@@ -802,7 +803,7 @@ async function startServer() {
   app.post("/api/orders", async (req, res) => {
     try {
       const db = getDbPool();
-      const { customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName, notes, itemsJson, paymentTrackingCode, isExportOrder, destinationCountry } = req.body;
+      const { customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName, notes, itemsJson, paymentTrackingCode, isExportOrder, destinationCountry, deliveryLocationUrl } = req.body;
       
       const id = `ord-${Date.now()}`;
       
@@ -840,14 +841,14 @@ async function startServer() {
           INSERT INTO orders (
             id, orderNumber, customerName, agentCode, productId, productName, quantity, unit,
             destinationCity, exactAddress, phoneNumber, buyerName, notes, createdAt, status, priorityIndex,
-            itemsJson, paymentTrackingCode, isExportOrder, destinationCountry
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-        `, [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName || null, notes || null, createdAt, status, itemsJson || null, paymentTrackingCode || null, isExportOrder ? 1 : 0, destinationCountry || null]);
+            itemsJson, paymentTrackingCode, isExportOrder, destinationCountry, deliveryLocationUrl
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+        `, [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName || null, notes || null, createdAt, status, itemsJson || null, paymentTrackingCode || null, isExportOrder ? 1 : 0, destinationCountry || null, deliveryLocationUrl || null]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, createdAt, "ثبت سفارش از طریق اپلیکیشن نمایندگی"]);
+        `, [id, status, createdAt, deliveryLocationUrl ? "ثبت سفارش به همراه لینک لوکیشن نقشه تخلیه بار" : "ثبت سفارش از طریق اپلیکیشن نمایندگی"]);
 
         await connection.commit();
         res.status(201).json({ success: true, id, orderNumber });
@@ -861,6 +862,45 @@ async function startServer() {
       console.error("Error in POST /api/orders:", err);
       writeServerErrorLog("POST /api/orders", err, req.body);
       res.status(500).json({ error: err.message || "Unknown database error" });
+    }
+  });
+
+  app.patch("/api/orders/:id/location", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const { deliveryLocationUrl } = req.body;
+      const updatedAt = new Date().toISOString();
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        await connection.query("UPDATE orders SET deliveryLocationUrl = ? WHERE id = ?", [deliveryLocationUrl || null, id]);
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          SELECT status, status, ?, ? FROM orders WHERE id = ?
+        `, [updatedAt, deliveryLocationUrl ? "بروزرسانی موقعیت مکانی و لینک نقشه تخلیه بار" : "حذف/ثبت مجدد لوکیشن نقشه تخلیه بار", id]);
+
+        await connection.commit();
+
+        await recordActivity(
+          req,
+          "ثبت/بروزرسانی لوکیشن تخلیه بار",
+          `بروزرسانی موقعیت جغرافیایی و نقشه سفارش کد ${id}`,
+          "ORDERS"
+        );
+
+        res.json({ success: true });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/location:", err);
+      res.status(500).json({ error: err.message });
     }
   });
 

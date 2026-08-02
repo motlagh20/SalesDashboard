@@ -533,7 +533,10 @@ export default function App() {
           buyerName: orderData.buyerName || '',
           notes: orderData.notes || '',
           itemsJson: orderData.itemsJson || null,
-          paymentTrackingCode: orderData.paymentTrackingCode || null
+          paymentTrackingCode: orderData.paymentTrackingCode || null,
+          isExportOrder: orderData.isExportOrder || false,
+          destinationCountry: orderData.destinationCountry || null,
+          deliveryLocationUrl: orderData.deliveryLocationUrl || null
         })
       });
 
@@ -564,6 +567,26 @@ export default function App() {
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
+  };
+
+  // 1b. Update Order Delivery Location (GPS/Map URL)
+  const handleUpdateOrderLocation = async (orderId: string, deliveryLocationUrl: string) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/location`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deliveryLocationUrl })
+      });
+      if (response.ok) {
+        showToast('موقعیت مکانی تحویل بار با موفقیت بروزرسانی شد.', 'success');
+        refreshAllData();
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت موقعیت مکانی');
+        showToast(`خطا: ${errorMsg}`, 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ثبت موقعیت مکانی', 'error');
     }
   };
 
@@ -1399,6 +1422,7 @@ export default function App() {
                 onCreateOrder={handleCreateOrder}
                 onCancelOrder={handleCancelOrder}
                 onUpdatePaymentTracking={handleUpdatePaymentTracking}
+                onSaveLocation={handleUpdateOrderLocation}
                 selectedAgent={selectedAgent}
                 setSelectedAgent={setSelectedAgent}
                 showToast={showToast}
@@ -1438,6 +1462,7 @@ export default function App() {
                 onDeletePermanentDriver={handleDeletePermanentDriver}
                 onApproveAllOrders={handleApproveAllOrders}
                 onDispatchAllToFactory={handleDispatchAllToFactory}
+                onSaveLocation={handleUpdateOrderLocation}
                 showToast={showToast}
                 askConfirm={askConfirm}
                 sandboxEnabled={sandboxEnabled}
@@ -1454,6 +1479,7 @@ export default function App() {
                 onAssignVehicle={handleAssignVehicle}
                 onRequestTransport={handleRequestTransport}
                 onDispatchOrder={handleDispatchOrder}
+                onSaveLocation={handleUpdateOrderLocation}
                 showToast={showToast}
                 askConfirm={askConfirm}
               />
@@ -1467,6 +1493,7 @@ export default function App() {
                 permanentDrivers={permanentDrivers}
                 onAssignVehicle={handleAssignVehicle}
                 onReturnOrderToSales={handleReturnOrderToSales}
+                onSaveLocation={handleUpdateOrderLocation}
                 showToast={showToast}
                 askConfirm={askConfirm}
                 currentUser={currentUser}

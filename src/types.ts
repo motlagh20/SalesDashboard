@@ -45,6 +45,7 @@ export interface Order {
   shippingCompanyId?: string; // شناسه شرکت حمل و نقل ارجاع شده
   isExportOrder?: boolean;    // آیا سفارش صادراتی است
   destinationCountry?: string; // کشور مقصد صادراتی
+  deliveryLocationUrl?: string; // لینک یا مختصات نقشه تخلیه بار (گوگل مپ، نشان، بلد)
 }
 
 export interface Product {

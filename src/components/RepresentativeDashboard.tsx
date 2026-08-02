@@ -28,8 +28,11 @@ import {
   ChevronDown,
   ChevronUp,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Send
 } from 'lucide-react';
+
+import { SendLocationModal } from './SendLocationModal';
 
 interface RepresentativeDashboardProps {
   orders: Order[];
@@ -38,6 +41,7 @@ interface RepresentativeDashboardProps {
   onCreateOrder: (orderData: Partial<Order>) => void;
   onCancelOrder: (orderId: string) => void;
   onUpdatePaymentTracking: (orderId: string, paymentTrackingCode: string) => void;
+  onSaveLocation?: (orderId: string, deliveryLocationUrl: string) => Promise<void>;
   selectedAgent: string;
   setSelectedAgent: (agent: string) => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -53,6 +57,7 @@ export default function RepresentativeDashboard({
   onCreateOrder,
   onCancelOrder,
   onUpdatePaymentTracking,
+  onSaveLocation,
   selectedAgent,
   setSelectedAgent,
   showToast,
@@ -76,11 +81,34 @@ export default function RepresentativeDashboard({
   const [quantity, setQuantity] = useState(330);
   const [destinationCity, setDestinationCity] = useState('تهران - تهران');
   const [exactAddress, setExactAddress] = useState('');
+  const [deliveryLocationUrl, setDeliveryLocationUrl] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [buyerName, setBuyerName] = useState('');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [selectedLocationOrder, setSelectedLocationOrder] = useState<Order | null>(null);
+
+  const handleGetCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      showToast('مرورگر شما از قابلیت دریافت موقعیت GPS پشتیبانی نمی‌کند.', 'error');
+      return;
+    }
+    showToast('در حال دریافت موقعیت مکانی GPS...', 'info');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude.toFixed(6);
+        const lng = pos.coords.longitude.toFixed(6);
+        const generatedUrl = `https://maps.google.com/?q=${lat},${lng}`;
+        setDeliveryLocationUrl(generatedUrl);
+        showToast('موقعیت GPS کنونی شما با موفقیت ثبت گردید.', 'success');
+      },
+      () => {
+        showToast('خطا در دسترسی به GPS. لطفاً دسترسی موقعیت مکانی را تأیید کنید.', 'error');
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
 
   // Territory-based location filtering
   const agentTerritories = currentAgentObj.territories || [];
@@ -341,12 +369,14 @@ export default function RepresentativeDashboard({
         itemsJson: JSON.stringify(finalItems),
         paymentTrackingCode: paymentTrackingCode.trim() || undefined,
         isExportOrder: isExportAllowed ? isExportOrder : false,
-        destinationCountry: (isExportAllowed && isExportOrder) ? selectedCountry : undefined
+        destinationCountry: (isExportAllowed && isExportOrder) ? selectedCountry : undefined,
+        deliveryLocationUrl: deliveryLocationUrl.trim() || undefined
       });
 
       // Reset form fields
       setQuantity(selectedProduct.defaultQuantity || 330);
       setExactAddress('');
+      setDeliveryLocationUrl('');
       setPhoneNumber('');
       setNotes('');
       setInvoiceItems([]);
@@ -804,6 +834,37 @@ export default function RepresentativeDashboard({
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder-slate-400 font-sans"
                     id="form-address-textarea"
                   />
+                </div>
+
+                {/* Delivery Location GPS/Map Input (Optional) */}
+                <div className="bg-sky-50/70 border border-sky-200 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-sky-950 flex items-center gap-1.5">
+                      <MapPin className="w-4 h-4 text-sky-600" />
+                      <span>لینک لوکیشن یا مختصات نقشه تخلیه بار</span>
+                      <span className="text-[10px] text-slate-500 font-normal">(اختیاری)</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleGetCurrentLocation}
+                      className="text-[10px] bg-white hover:bg-sky-100 text-sky-800 border border-sky-300 px-2 py-1 rounded-md flex items-center gap-1 font-bold transition-all shadow-xs"
+                    >
+                      <Navigation className="w-3 h-3 text-sky-600" />
+                      <span>📌 دریافت GPS کنونی من</span>
+                    </button>
+                  </div>
+
+                  <input
+                    type="text"
+                    placeholder="مثال: https://maps.google.com/?q=35.6997,51.3380 یا لینک نشان/بلد..."
+                    value={deliveryLocationUrl}
+                    onChange={(e) => setDeliveryLocationUrl(e.target.value)}
+                    className="w-full bg-white border border-sky-200 rounded-lg py-1.5 px-3 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 font-sans text-left dir-ltr placeholder-slate-400"
+                    id="form-location-input"
+                  />
+                  <p className="text-[10px] text-sky-800 flex items-center justify-between">
+                    <span>💡 این لینک جهت مسیریابی آسان به راننده حامل بار ارسال خواهد شد.</span>
+                  </p>
                 </div>
 
                 <div>
@@ -1276,6 +1337,28 @@ export default function RepresentativeDashboard({
                                   🚚 پلاک راننده اختصاصی (همگام برخط) • تاریخ مقرر بارگیری: <strong>{order.vehicleDetails.estimatedArrival || new Date().toLocaleDateString('fa-IR')}</strong>
                                 </div>
                               </div>
+
+                              {/* Location Send Button for Driver */}
+                              <div className="mt-3 flex items-center justify-between bg-sky-50/80 p-2.5 rounded-xl border border-sky-200">
+                                <div className="flex items-center gap-2 text-xs text-sky-950">
+                                  <MapPin className="w-4 h-4 text-sky-600 shrink-0" />
+                                  <div>
+                                    <span className="font-bold">موقعیت نقشه تخلیه بار: </span>
+                                    <span className="text-[11px] text-slate-600">
+                                      {order.deliveryLocationUrl ? 'ثبت شده روی نقشه' : 'لینک مستقیم هنوز ثبت نشده'}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedLocationOrder(order)}
+                                  className="bg-sky-700 hover:bg-sky-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                                >
+                                  <Send className="w-3.5 h-3.5" />
+                                  <span>📲 ارسال لوکیشن به راننده</span>
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1289,6 +1372,17 @@ export default function RepresentativeDashboard({
             </div>
           )}
         </div>
+      )}
+
+      {/* Location Modal */}
+      {selectedLocationOrder && (
+        <SendLocationModal
+          isOpen={!!selectedLocationOrder}
+          onClose={() => setSelectedLocationOrder(null)}
+          order={selectedLocationOrder}
+          onSaveLocation={onSaveLocation}
+          onShowToast={showToast}
+        />
       )}
     </div>
   );
