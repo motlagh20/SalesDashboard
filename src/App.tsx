@@ -1261,14 +1261,16 @@ export default function App() {
               </div>
 
               {/* Mobile Reset Button */}
-              <button
-                onClick={handleResetApp}
-                title="بازنشانی پایگاه داده شبیه‌ساز"
-                className="sm:hidden px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 border border-slate-700"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>بازنشانی</span>
-              </button>
+              {sandboxEnabled && (
+                <button
+                  onClick={handleResetApp}
+                  title="بازنشانی پایگاه داده شبیه‌ساز"
+                  className="sm:hidden px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 border border-slate-700"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>بازنشانی</span>
+                </button>
+              )}
             </div>
 
             {/* User Session Info / Exit */}
@@ -1336,21 +1338,23 @@ export default function App() {
             )}
 
             {/* Desktop Reset Button */}
-            <button
-              onClick={handleResetApp}
-              title="بازنشانی پایگاه داده شبیه‌ساز"
-              className="hidden sm:flex px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 hover:text-rose-400 text-slate-400 rounded-lg text-[10px] transition-all items-center gap-1 cursor-pointer shrink-0 border border-slate-700"
-              id="reset-simulation-btn"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>بازنشانی دمو</span>
-            </button>
+            {sandboxEnabled && (
+              <button
+                onClick={handleResetApp}
+                title="بازنشانی پایگاه داده شبیه‌ساز"
+                className="hidden sm:flex px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 hover:text-rose-400 text-slate-400 rounded-lg text-[10px] transition-all items-center gap-1 cursor-pointer shrink-0 border border-slate-700"
+                id="reset-simulation-btn"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>بازنشانی دمو</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
 
-      {/* Role Play Tester Nav strictly visible ONLY to SYSTEM_ADMIN (Senior Software Admin) */}
-      {(currentUser?.role === 'SYSTEM_ADMIN' || !currentUser) && (
+      {/* Role Play Tester Nav strictly visible ONLY when sandboxEnabled is active */}
+      {sandboxEnabled && (currentUser?.role === 'SYSTEM_ADMIN' || !currentUser) && (
         <div className="bg-slate-800 text-slate-200 py-2 sm:py-2.5 border-b border-slate-700 shadow-inner" id="role-tester-bar">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
