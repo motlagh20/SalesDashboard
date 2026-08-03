@@ -39,6 +39,8 @@ interface SeniorAdminDashboardProps {
   onTogglePermanentDriver?: (driverId: string) => void;
   onDeletePermanentDriver?: (driverId: string) => void;
   onClearTransactions?: () => Promise<boolean>;
+  sandboxEnabled?: boolean;
+  onToggleSandbox?: () => void;
 }
 
 export default function SeniorAdminDashboard({
@@ -53,7 +55,9 @@ export default function SeniorAdminDashboard({
   onUpdatePermanentDriver,
   onTogglePermanentDriver,
   onDeletePermanentDriver,
-  onClearTransactions
+  onClearTransactions,
+  sandboxEnabled = true,
+  onToggleSandbox
 }: SeniorAdminDashboardProps) {
   const [activeAdminTab, setActiveAdminTab] = useState<'SYSTEM_MONITOR' | 'PERMANENT_DRIVERS' | 'SEARCH_ORDERS'>('SYSTEM_MONITOR');
   const [orderSearchQuery, setOrderSearchQuery] = useState<string>('');
@@ -277,6 +281,22 @@ export default function SeniorAdminDashboard({
 
           {/* Action Controls */}
           <div className="flex flex-wrap items-center gap-2">
+            {onToggleSandbox && (
+              <button
+                type="button"
+                onClick={onToggleSandbox}
+                className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer border flex items-center gap-2 shadow-md ${
+                  sandboxEnabled
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400/50'
+                    : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/30'
+                }`}
+                title="فعال یا غیرفعال‌سازی نوار میانبر شبیه‌ساز (Sandbox) در بالای برنامه"
+              >
+                <Zap className="w-4 h-4 text-amber-200" />
+                <span>{sandboxEnabled ? 'میانبر شبیه‌ساز: فعال 🟢' : 'میانبر شبیه‌ساز: غیرفعال 🔴'}</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleClearTransactionsClick}

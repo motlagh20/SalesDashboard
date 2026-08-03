@@ -1172,29 +1172,30 @@ export default function App() {
     );
   };
 
-  const handleLogout = async () => {
-    if (currentUser) {
-      try {
-        await fetch('/api/system/activity-logs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: currentUser.id,
-            userName: currentUser.fullName,
-            userRole: currentUser.role,
-            action: 'خروج از سیستم',
-            details: `خروج موفق کاربر (${currentUser.fullName}) از حساب کاربری`,
-            module: 'AUTH',
-            status: 'SUCCESS'
-          })
-        });
-      } catch (err) {
-        console.error('Logout log error:', err);
-      }
-    }
+  const handleLogout = () => {
+    const userToLog = currentUser;
+    // 1. Immediately clear user session & state for 0ms instant UI reaction
     localStorage.removeItem('tabarestan_user');
     setCurrentUser(null);
+    setIsLocked(false);
     showToast('🔒 با موفقیت از حساب کاربری خود خارج شدید.', 'info');
+
+    // 2. Fire activity log asynchronously in background without blocking UI exit
+    if (userToLog) {
+      fetch('/api/system/activity-logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userToLog.id,
+          userName: userToLog.fullName,
+          userRole: userToLog.role,
+          action: 'خروج از سیستم',
+          details: `خروج موفق کاربر (${userToLog.fullName}) از حساب کاربری`,
+          module: 'AUTH',
+          status: 'SUCCESS'
+        })
+      }).catch(err => console.error('Logout log error:', err));
+    }
   };
 
   if (!currentUser) {
@@ -1553,8 +1554,6 @@ export default function App() {
                 onSaveLocation={handleUpdateOrderLocation}
                 showToast={showToast}
                 askConfirm={askConfirm}
-                sandboxEnabled={sandboxEnabled}
-                onToggleSandbox={handleToggleSandbox}
               />
             )}
 
@@ -1603,6 +1602,8 @@ export default function App() {
                 onTogglePermanentDriver={handleTogglePermanentDriver}
                 onDeletePermanentDriver={handleDeletePermanentDriver}
                 onClearTransactions={handleClearTransactions}
+                sandboxEnabled={sandboxEnabled}
+                onToggleSandbox={handleToggleSandbox}
               />
             )}
 

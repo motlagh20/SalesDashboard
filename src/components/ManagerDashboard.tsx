@@ -96,8 +96,6 @@ interface ManagerDashboardProps {
   onSaveLocation?: (orderId: string, deliveryLocationUrl: string) => Promise<void>;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
-  sandboxEnabled?: boolean;
-  onToggleSandbox?: () => void;
 }
 
 type PanelTab = 'COMMERCIAL_ANALYTICS' | 'APPROVED_PRIORITIES' | 'PENDING_APPROVAL' | 'AGENTS_MGMT' | 'PRODUCTS_MGMT' | 'SHIPPING_MGMT' | 'ARCHIVAL_ORDERS' | 'USERS_MGMT' | 'PARTNERS_MGMT';
@@ -133,8 +131,6 @@ export default function ManagerDashboard({
   onDispatchAllToFactory,
   showToast,
   askConfirm,
-  sandboxEnabled = true,
-  onToggleSandbox,
 }: ManagerDashboardProps) {
   // Navigation tabs for the Manager workspace
   const [activeTab, setActiveTab] = useState<PanelTab>('PENDING_APPROVAL');
@@ -1704,29 +1700,6 @@ export default function ManagerDashboard({
                   پیرو آیین‌نامه انضباطی سازمان فروش، اختصاص پنل نمایندگان صرفاً بر اساس قراردادهای تجاری منعقد شده مقدور است. هرگونه تعریف حساب کاربری غیراز این بخش ممنوع بوده و حق فعال‌سازی، غیرفعالسازی و تغییر کدهای تفصیلیِ نمایندگان و باربری‌های همکار منحصراً در غیاب ثبت‌نام عمومی، در اختیار اداره بازرگانی است.
                 </p>
               </div>
-
-              {/* Sandbox Role Switcher Toggle Control */}
-              {onToggleSandbox && (
-                <div className="bg-slate-800/90 border border-slate-700 p-3 rounded-xl flex items-center justify-between gap-3 shrink-0 self-start lg:self-auto min-w-[260px]">
-                  <div>
-                    <span className="text-[11px] font-extrabold text-amber-300 block">⚒️ میانبر شبیه‌ساز (Sandbox)</span>
-                    <span className="text-[9px] text-slate-400 block font-sans">
-                      {sandboxEnabled ? 'میانبرهای تست فعال است' : 'میانبرهای تست پنهان است'}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onToggleSandbox}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer border flex items-center gap-1 ${
-                      sandboxEnabled
-                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500'
-                        : 'bg-slate-700 hover:bg-slate-650 text-slate-300 border-slate-600'
-                    }`}
-                  >
-                    <span>{sandboxEnabled ? '🟢 فعال' : '🔴 غیرفعال / پنهان'}</span>
-                  </button>
-                </div>
-              )}
             </div>
 
              {/* Sub-tab Switches */}

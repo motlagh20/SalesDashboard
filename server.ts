@@ -50,10 +50,10 @@ async function startServer() {
     return { userId, userName, userRole };
   }
 
-  async function recordActivity(req: express.Request, action: string, details: string, module: string, status: "SUCCESS" | "WARNING" | "ERROR" = "SUCCESS") {
+  function recordActivity(req: express.Request, action: string, details: string, module: string, status: "SUCCESS" | "WARNING" | "ERROR" = "SUCCESS") {
     try {
       const actor = extractActor(req);
-      await logUserActivity({
+      logUserActivity({
         userId: actor.userId,
         userName: actor.userName,
         userRole: actor.userRole,
@@ -62,9 +62,9 @@ async function startServer() {
         module,
         ipAddress: (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || "127.0.0.1",
         status
-      });
+      }).catch(err => console.error("Error recording activity log:", err));
     } catch (err) {
-      console.error("Error recording activity log:", err);
+      console.error("Error setting up activity log:", err);
     }
   }
 
@@ -1496,21 +1496,17 @@ async function startServer() {
         return res.status(400).json({ error: "رمز عبور نادرست است." });
       }
 
-      // Record login activity in user_activity_logs
-      try {
-        await logUserActivity({
-          userId: user.id,
-          userName: user.fullName || user.username,
-          userRole: user.role,
-          action: "ورود به سیستم",
-          details: `ورود موفق کاربر (${user.fullName || user.username}) به پنل ${user.role}`,
-          module: "AUTH",
-          ipAddress: req.ip || "127.0.0.1",
-          status: "SUCCESS"
-        });
-      } catch (logErr) {
-        console.error("Error logging user login activity:", logErr);
-      }
+      // Record login activity in user_activity_logs asynchronously (non-blocking)
+      logUserActivity({
+        userId: user.id,
+        userName: user.fullName || user.username,
+        userRole: user.role,
+        action: "ورود به سیستم",
+        details: `ورود موفق کاربر (${user.fullName || user.username}) به پنل ${user.role}`,
+        module: "AUTH",
+        ipAddress: req.ip || "127.0.0.1",
+        status: "SUCCESS"
+      }).catch(logErr => console.error("Error logging user login activity:", logErr));
 
       res.json({
         success: true,
@@ -2006,10 +2002,11 @@ async function startServer() {
     }
   });
 
-  app.post("/api/system/activity-logs", async (req, res) => {
+  app.post("/api/system/activity-logs", (req, res) => {
     try {
       const { userId, userName, userRole, action, details, module, ipAddress, status } = req.body;
-      await logUserActivity({
+      res.json({ success: true });
+      logUserActivity({
         userId,
         userName: userName || 'کاربر سیستم',
         userRole: userRole || 'GUEST',
@@ -2018,8 +2015,7 @@ async function startServer() {
         module: module || 'SYSTEM',
         ipAddress: ipAddress || req.ip || '127.0.0.1',
         status: status || 'SUCCESS'
-      });
-      res.json({ success: true });
+      }).catch(err => console.error("Error in async logUserActivity:", err));
     } catch (err: any) {
       console.error("Error in POST /api/system/activity-logs:", err);
       res.status(500).json({ error: err.message });
