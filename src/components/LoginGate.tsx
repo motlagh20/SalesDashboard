@@ -41,6 +41,9 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
   // 1. Password Login
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     if (!loginKey.trim() || !loginPassword.trim()) {
       showToast('لطفا نام کاربری/تلفن و رمز عبور را وارد کنید.', 'error');
       return;
@@ -73,6 +76,9 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
   // 2. OTP Code Request
   const handleSendOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     if (!phoneNumber.trim()) {
       showToast('لطفا شماره تلفن همراه خود را وارد کنید.', 'error');
       return;
@@ -92,7 +98,8 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
         const data = await res.json();
         setStep('OTP_INPUT');
         setReceivedOtp(data.otp);
-        showToast('🔑 کد تایید پیامکی (شبیه‌سازی) صادر شد.', 'success');
+        setOtpCode(data.otp); // Pre-fill OTP code on mobile for 1-tap verification
+        showToast('🔑 کد تایید پیامکی صادر گردید.', 'success');
       } else {
         const errorData = await res.json();
         showToast(errorData.error || 'خطایی در ارسال کد تایید رخ داد.', 'error');
@@ -108,6 +115,9 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
   // 3. OTP Code Verification
   const handleVerifyOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     if (!otpCode.trim()) {
       showToast('لطفا کد تایید ۴ رقمی را وارد کنید.', 'error');
       return;
@@ -213,62 +223,36 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
     }
   };
 
-  // Quick sandbox helper login
+  // Quick sandbox helper login (Instant 0-delay login for fast mobile access)
   const handleQuickLogin = async (acc: typeof defaultAccounts[0]) => {
-    if (loginMode === 'PASSWORD') {
-      setLoginKey(acc.username);
-      setLoginPassword('123456');
-      setLoading(true);
-      try {
-        const res = await fetch('/api/auth/login-password', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ loginKey: acc.username, password: '123456' })
-        });
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    setLoginKey(acc.username);
+    setLoginPassword('123456');
+    setPhoneNumber(acc.phone);
+    setLoading(true);
 
-        if (res.ok) {
-          const data = await res.json();
-          showToast(`🌸 خوش آمدید، جناب ${data.user.fullName}`, 'success');
-          onLoginSuccess(data.user);
-        } else {
-          const errorData = await res.json();
-          showToast(errorData.error || 'خطا در ورود سریع با این حساب.', 'error');
-        }
-      } catch (err) {
-        console.error(err);
-        showToast('خطا در برقراری ارتباط با وب‌سرور.', 'error');
-      } finally {
-        setLoading(false);
+    try {
+      const res = await fetch('/api/auth/login-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loginKey: acc.username, password: '123456' })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`🌸 خوش آمدید، جناب ${data.user.fullName}`, 'success');
+        onLoginSuccess(data.user);
+      } else {
+        const errorData = await res.json();
+        showToast(errorData.error || 'خطا در ورود سریع با این حساب.', 'error');
       }
-    } else {
-      setPhoneNumber(acc.phone);
-      setStep('PHONE_INPUT');
-      setOtpCode('');
-      // Automatically trigger OTP send for that phone
-      setTimeout(async () => {
-        setLoading(true);
-        try {
-          const res = await fetch('/api/auth/send-otp', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phoneNumber: acc.phone })
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setStep('OTP_INPUT');
-            setReceivedOtp(data.otp);
-            setOtpCode(data.otp); // pre-populate inside the sandbox
-            showToast(`🔑 پیامک موقت کاربر شبیه‌سازی شد (کد: ${data.otp})`, 'success');
-          } else {
-            const errData = await res.json();
-            showToast(errData.error, 'error');
-          }
-        } catch (err) {
-          console.error(err);
-        } finally {
-          setLoading(false);
-        }
-      }, 150);
+    } catch (err) {
+      console.error(err);
+      showToast('خطا در برقراری ارتباط با وب‌سرور.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -334,7 +318,8 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                     value={loginKey}
                     onChange={(e) => setLoginKey(e.target.value)}
                     disabled={loading}
-                    className="w-full bg-slate-900/80 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    autoComplete="username"
+                    className="w-full bg-slate-900/80 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500 touch-manipulation"
                     required
                   />
                   <User className="w-4 h-4 text-slate-500 absolute right-3.5 top-3.5" />
@@ -349,7 +334,7 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                       setLoginMode('RECOVERY');
                       setRecoveryPhone('');
                     }}
-                    className="text-[10px] text-amber-500 hover:underline cursor-pointer"
+                    className="text-[10px] text-amber-500 hover:underline cursor-pointer touch-manipulation"
                   >
                     بازیابی رمز عبور (فراموشی کلمه عبور)
                   </button>
@@ -362,7 +347,8 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
                     disabled={loading}
-                    className="w-full bg-slate-900/80 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-xs text-white text-left font-mono tracking-widest focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    autoComplete="current-password"
+                    className="w-full bg-slate-900/80 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-xs text-white text-left font-mono tracking-widest focus:outline-none focus:ring-1 focus:ring-amber-500 touch-manipulation"
                     required
                   />
                   <Lock className="w-4 h-4 text-slate-500 absolute right-3.5 top-3.5" />
@@ -372,7 +358,7 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-2.5 px-4 rounded-lg text-xs tracking-wide transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10 mt-2"
+                className="w-full bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-slate-950 font-black py-2.5 px-4 rounded-lg text-xs tracking-wide transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10 mt-2 touch-manipulation"
               >
                 {loading ? 'در حال تایید...' : 'ورود امن به پنل طبرستان'}
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -592,13 +578,13 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                     key={idx}
                     type="button"
                     onClick={() => handleQuickLogin(acc)}
-                    className="bg-slate-700/50 hover:bg-slate-700 border border-slate-700 text-[10px] text-slate-300 hover:text-white p-2 text-right rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                    className="bg-slate-700/50 hover:bg-slate-700 active:scale-95 border border-slate-700 text-[10px] text-slate-300 hover:text-white p-2 text-right rounded-lg transition-all flex items-center gap-1.5 cursor-pointer touch-manipulation"
                   >
                     <span className="text-xs">{acc.icon}</span>
                     <div className="leading-tight flex-1 font-sans">
                       <p className="font-bold opacity-90">{acc.name}</p>
                       <p className="font-mono text-[8px] text-slate-400 mt-0.5">
-                        {loginMode === 'PASSWORD' ? `نام کاربری: ${acc.username}` : acc.phone}
+                        {acc.username}
                       </p>
                     </div>
                   </button>
