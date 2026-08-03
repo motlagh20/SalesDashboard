@@ -16,6 +16,7 @@ import InfrastructureInfo from './components/InfrastructureInfo';
 import LoginGate from './components/LoginGate';
 import TabarestanLogo from './components/TabarestanLogo';
 import InstallPwaPrompt from './components/InstallPwaPrompt';
+import { LockScreenOverlay, AutoLockSettingsModal } from './components/AutoLockModal';
 import { 
   Smartphone, 
   ShieldAlert, 
@@ -27,7 +28,8 @@ import {
   Info,
   X,
   Lock,
-  User
+  User,
+  Clock
 } from 'lucide-react';
 
 export default function App() {
@@ -46,6 +48,52 @@ export default function App() {
     const saved = localStorage.getItem('tabarestan_sandbox_enabled');
     return saved !== null ? JSON.parse(saved) : true;
   });
+
+  // Auto Lock States
+  const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => {
+    const saved = localStorage.getItem('tabarestan_autolock_minutes');
+    return saved !== null ? Number(saved) : 15;
+  });
+  const [isLocked, setIsLocked] = useState<boolean>(false);
+  const [isAutoLockSettingsOpen, setIsAutoLockSettingsOpen] = useState<boolean>(false);
+
+  // Auto-Lock Inactivity Listener
+  const lastActivityRef = React.useRef<number>(Date.now());
+
+  useEffect(() => {
+    if (!currentUser || autoLockMinutes <= 0) return;
+
+    const resetTimer = () => {
+      lastActivityRef.current = Date.now();
+    };
+
+    const events = ['mousemove', 'keydown', 'pointerdown', 'touchstart', 'scroll', 'click'];
+    events.forEach(evt => window.addEventListener(evt, resetTimer, { passive: true }));
+
+    const interval = setInterval(() => {
+      if (!isLocked && currentUser && autoLockMinutes > 0) {
+        const inactiveMs = Date.now() - lastActivityRef.current;
+        if (inactiveMs >= autoLockMinutes * 60 * 1000) {
+          setIsLocked(true);
+        }
+      }
+    }, 5000);
+
+    return () => {
+      events.forEach(evt => window.removeEventListener(evt, resetTimer));
+      clearInterval(interval);
+    };
+  }, [currentUser, autoLockMinutes, isLocked]);
+
+  const handleSaveAutoLockMinutes = (minutes: number) => {
+    setAutoLockMinutes(minutes);
+    localStorage.setItem('tabarestan_autolock_minutes', minutes.toString());
+    if (minutes === 0) {
+      showToast('🔴 قفل خودکار عدم فعالیت غیرفعال شد.', 'info');
+    } else {
+      showToast(`⏱️ قفل خودکار عدم فعالیت روی ${minutes} دقیقه تنظیم شد.`, 'success');
+    }
+  };
 
   const handleToggleSandbox = () => {
     setSandboxEnabled(prev => {
@@ -1260,6 +1308,24 @@ export default function App() {
                     رمز
                   </button>
                   <button
+                    type="button"
+                    onClick={() => setIsLocked(true)}
+                    className="bg-rose-500/10 hover:bg-rose-500 hover:text-white border border-rose-500/30 text-rose-300 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                    title="قفل کردن سریع صفحه"
+                  >
+                    <Lock className="w-3 h-3 text-rose-400" />
+                    <span className="hidden xs:inline">قفل</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsAutoLockSettingsOpen(true)}
+                    className="bg-sky-500/10 hover:bg-sky-500 hover:text-white border border-sky-500/30 text-sky-300 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                    title={`تنظیم زمان قفل خودکار (فعلی: ${autoLockMinutes > 0 ? autoLockMinutes + ' دقیقه' : 'غیرفعال'})`}
+                  >
+                    <Clock className="w-3 h-3 text-sky-400" />
+                    <span>{autoLockMinutes > 0 ? `${autoLockMinutes}m` : 'خاموش'}</span>
+                  </button>
+                  <button
                     onClick={handleLogout}
                     className="bg-rose-500/20 hover:bg-rose-500 hover:text-white text-rose-300 px-2 py-1 rounded text-[10px] font-bold"
                   >
@@ -1941,6 +2007,26 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Lock Screen Overlay */}
+      <LockScreenOverlay
+        isLocked={isLocked}
+        currentUser={currentUser}
+        onUnlock={() => setIsLocked(false)}
+        onLogout={() => {
+          setIsLocked(false);
+          handleLogout();
+        }}
+        onShowToast={showToast}
+      />
+
+      {/* Auto Lock Settings Modal */}
+      <AutoLockSettingsModal
+        isOpen={isAutoLockSettingsOpen}
+        onClose={() => setIsAutoLockSettingsOpen(false)}
+        currentMinutes={autoLockMinutes}
+        onSaveMinutes={handleSaveAutoLockMinutes}
+      />
 
       {/* PWA Floating Install Prompt */}
       <InstallPwaPrompt />
