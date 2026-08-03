@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { PermanentDriver, ShippingCompany } from '../types';
+import { PermanentDriver, ShippingCompany, Order } from '../types';
 import PermanentDriversManager from './PermanentDriversManager';
 import {
   Activity,
@@ -21,10 +21,13 @@ import {
   Search,
   X,
   Globe,
-  Truck
+  Truck,
+  ShoppingBag,
+  FileText
 } from 'lucide-react';
 
 interface SeniorAdminDashboardProps {
+  orders?: Order[];
   showToast: (message: string, type: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
   currentUser?: any;
@@ -39,6 +42,7 @@ interface SeniorAdminDashboardProps {
 }
 
 export default function SeniorAdminDashboard({
+  orders = [],
   showToast,
   askConfirm,
   currentUser,
@@ -51,7 +55,8 @@ export default function SeniorAdminDashboard({
   onDeletePermanentDriver,
   onClearTransactions
 }: SeniorAdminDashboardProps) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'SYSTEM_MONITOR' | 'PERMANENT_DRIVERS'>('SYSTEM_MONITOR');
+  const [activeAdminTab, setActiveAdminTab] = useState<'SYSTEM_MONITOR' | 'PERMANENT_DRIVERS' | 'SEARCH_ORDERS'>('SYSTEM_MONITOR');
+  const [orderSearchQuery, setOrderSearchQuery] = useState<string>('');
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [systemMetrics, setSystemMetrics] = useState<any>(null);
   const [activitySearch, setActivitySearch] = useState<string>('');
@@ -334,10 +339,157 @@ export default function SeniorAdminDashboard({
           }`}
         >
           <Truck className="w-4 h-4 text-amber-400" />
-          <span>مدیریت و ثبت دائم رانندگان شرکت‌های حمل و نقل ({permanentDrivers.length})</span>
+          <span>مدیریت و ثبت دائم رانندگان ({permanentDrivers.length})</span>
           <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[10px] rounded-full font-bold">اختصاصی ادمین ارشد</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveAdminTab('SEARCH_ORDERS')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+            activeAdminTab === 'SEARCH_ORDERS'
+              ? 'bg-purple-900 text-white shadow-md'
+              : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200/80'
+          }`}
+        >
+          <Search className="w-4 h-4 text-cyan-300" />
+          <span>استعلام و جستجوی سرتاسری سفارشات ({orders.length})</span>
+        </button>
       </div>
+
+      {activeAdminTab === 'SEARCH_ORDERS' && (
+        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm animate-fade-in space-y-5">
+          <div className="p-4 bg-indigo-50/70 rounded-2xl border border-indigo-100 text-indigo-900 text-xs flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Search className="w-6 h-6 text-indigo-600 shrink-0" />
+              <div>
+                <strong className="font-extrabold text-sm block">جستجوی آنی و سرتاسری کلیه سفارشات سیستم</strong>
+                <p className="text-indigo-700 mt-0.5">
+                  جستجو بر اساس کد رهگیری، شماره فاکتور، نام خریدار، نمایندگی، محصول، راننده، شماره بارنامه و کد مالی.
+                </p>
+              </div>
+            </div>
+            <span className="bg-indigo-600 text-white text-xs font-bold px-3 py-1 rounded-full font-mono shrink-0">
+              کل سفارشات: {orders.length}
+            </span>
+          </div>
+
+          <div className="relative">
+            <input
+              type="text"
+              value={orderSearchQuery}
+              onChange={(e) => setOrderSearchQuery(e.target.value)}
+              placeholder="عبارت مورد نظر جهت جستجو را وارد کنید (کد رهگیری / نام خریدار / شماره فاکتور / محصول / نمایندگی / راننده...)"
+              className="w-full bg-slate-50 border border-slate-300 focus:border-indigo-500 rounded-xl py-3 pr-11 pl-10 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all font-sans"
+            />
+            <Search className="w-5 h-5 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            {orderSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setOrderSearchQuery('')}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                title="پاکسازی عبارت"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {(() => {
+            const q = orderSearchQuery.toLowerCase().trim();
+            const filtered = orders.filter(o => {
+              if (!q) return true;
+              return (
+                (o.orderNumber && o.orderNumber.toLowerCase().includes(q)) ||
+                (o.id && o.id.toLowerCase().includes(q)) ||
+                (o.customerName && o.customerName.toLowerCase().includes(q)) ||
+                (o.buyerName && o.buyerName.toLowerCase().includes(q)) ||
+                (o.productName && o.productName.toLowerCase().includes(q)) ||
+                (o.destinationCity && o.destinationCity.toLowerCase().includes(q)) ||
+                (o.financialDocId && o.financialDocId.toLowerCase().includes(q)) ||
+                (o.paymentTrackingCode && o.paymentTrackingCode.toLowerCase().includes(q)) ||
+                (o.agentCode && o.agentCode.toLowerCase().includes(q)) ||
+                (o.vehicleDetails?.driverName && o.vehicleDetails.driverName.toLowerCase().includes(q)) ||
+                (o.vehicleDetails?.billOfLadingNumber && o.vehicleDetails.billOfLadingNumber.toLowerCase().includes(q))
+              );
+            });
+
+            if (filtered.length === 0) {
+              return (
+                <div className="text-center py-12 bg-slate-50 rounded-2xl border border-slate-200">
+                  <Search className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-slate-700 text-sm font-bold">هیچ سفارشی مطابق عبارت «{orderSearchQuery}» یافت نشد.</p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-3">
+                <div className="text-xs text-slate-500 font-bold px-1">
+                  نمایش {filtered.length} از {orders.length} سفارش
+                </div>
+                <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                      <tr>
+                        <th className="p-3">کد رهگیری / فاکتور</th>
+                        <th className="p-3">نمایندگی / خریدار</th>
+                        <th className="p-3">محصول</th>
+                        <th className="p-3">مقدار</th>
+                        <th className="p-3">شهر مقصد</th>
+                        <th className="p-3">وضعیت سفارش</th>
+                        <th className="p-3">راننده / باربری</th>
+                        <th className="p-3">تاریخ ثبت</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {filtered.map(order => (
+                        <tr key={order.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-indigo-700 dir-ltr text-right">
+                            #{order.orderNumber || order.id}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-bold text-slate-800">{order.customerName}</div>
+                            {order.buyerName && <div className="text-[11px] text-slate-500">خریدار: {order.buyerName}</div>}
+                          </td>
+                          <td className="p-3 font-medium text-slate-800">{order.productName}</td>
+                          <td className="p-3 font-bold text-slate-700">{order.quantity?.toLocaleString()} {order.unit}</td>
+                          <td className="p-3 text-slate-600">{order.destinationCity}</td>
+                          <td className="p-3">
+                            <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-800 border border-slate-200">
+                              {order.status === 'PENDING_APPROVAL' && '⏳ در انتظار تایید مدیریت فروش'}
+                              {order.status === 'APPROVED_BY_SALES' && '✅ تایید اولویت مالی و واحد بازرگانی'}
+                              {order.status === 'SENT_TO_FACTORY' && '🏭 ارجاع به کارخانه'}
+                              {order.status === 'VEHICLE_ASSIGNED' && '🚛 تخصیص ناوگان'}
+                              {order.status === 'LOADED_AND_DISPATCHED' && '🏁 خروج و ترخیص'}
+                              {order.status === 'REJECTED' && '❌ رد شده'}
+                            </span>
+                          </td>
+                          <td className="p-3 text-slate-600">
+                            {order.vehicleDetails?.driverName ? (
+                              <div>
+                                <span className="font-bold text-slate-800">{order.vehicleDetails.driverName}</span>
+                                {order.vehicleDetails.billOfLadingNumber && (
+                                  <div className="text-[10px] text-slate-500">بارنامه: {order.vehicleDetails.billOfLadingNumber}</div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-slate-500 text-[11px] font-mono">
+                            {new Date(order.createdAt).toLocaleDateString('fa-IR')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {activeAdminTab === 'PERMANENT_DRIVERS' && (
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm animate-fade-in space-y-4">

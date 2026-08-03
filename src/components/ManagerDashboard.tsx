@@ -879,7 +879,10 @@ export default function ManagerDashboard({
 
       // Query Filter match
       if (searchQuery) {
-        const q = searchQuery.toLowerCase();
+        const q = searchQuery.toLowerCase().trim();
+        const orderId = (order.id || '').toLowerCase();
+        const financialDoc = (order.financialDocId || '').toLowerCase();
+        const billNo = (order.vehicleDetails?.billOfLadingNumber || '').toLowerCase();
         const driverName = order.vehicleDetails?.driverName?.toLowerCase() || '';
         const driverPhone = order.vehicleDetails?.driverPhone?.toLowerCase() || '';
         const licensePlate = order.vehicleDetails?.licensePlate?.toLowerCase() || '';
@@ -893,6 +896,9 @@ export default function ManagerDashboard({
           order.productName.toLowerCase().includes(q) ||
           order.orderNumber.toLowerCase().includes(q) ||
           order.destinationCity.toLowerCase().includes(q) ||
+          orderId.includes(q) ||
+          financialDoc.includes(q) ||
+          billNo.includes(q) ||
           buyerName.includes(q) ||
           agentCode.includes(q) ||
           driverName.includes(q) ||
@@ -1076,15 +1082,25 @@ export default function ManagerDashboard({
 
           {/* Quick query filter (only for order views) */}
           {(activeTab === 'PENDING_APPROVAL' || activeTab === 'APPROVED_PRIORITIES' || activeTab === 'ARCHIVAL_ORDERS') && (
-            <div className="relative w-full md:w-64" id="manager-tab-search">
+            <div className="relative w-full md:w-80" id="manager-tab-search">
               <input
                 type="text"
-                placeholder="جستجو در فاکتورها..."
+                placeholder="جستجوی سریع سفارش (کد رهگیری، خریدار، نماینده، شهر...)"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg py-1.5 pl-3 pr-9 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
+                className="w-full bg-slate-50 border border-slate-200 focus:border-emerald-500 rounded-xl py-2 pr-9 pl-8 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all font-sans"
               />
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-auto right-3.5 top-2.5" />
+              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                  title="پاکسازی عبارت جستجو"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           )}
         </div>

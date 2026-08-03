@@ -1587,6 +1587,7 @@ export default function App() {
 
             {activeRole === 'SYSTEM_ADMIN' && (
               <SeniorAdminDashboard
+                orders={orders}
                 showToast={showToast}
                 askConfirm={askConfirm}
                 currentUser={currentUser}

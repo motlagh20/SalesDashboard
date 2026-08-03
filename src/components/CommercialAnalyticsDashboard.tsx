@@ -201,12 +201,18 @@ export default function CommercialAnalyticsDashboard({
   // Filter SLA Table orders
   const filteredSLAOrders = useMemo(() => {
     return ordersWithSLA.filter(order => {
+      const q = searchQuery.toLowerCase().trim();
       const matchesSearch = !searchQuery ||
-        order.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.destinationCity.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.agentCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (order.buyerName && order.buyerName.toLowerCase().includes(searchQuery.toLowerCase()));
+        order.customerName.toLowerCase().includes(q) ||
+        order.orderNumber.toLowerCase().includes(q) ||
+        (order.id && order.id.toLowerCase().includes(q)) ||
+        (order.financialDocId && order.financialDocId.toLowerCase().includes(q)) ||
+        (order.paymentTrackingCode && order.paymentTrackingCode.toLowerCase().includes(q)) ||
+        order.destinationCity.toLowerCase().includes(q) ||
+        order.agentCode.toLowerCase().includes(q) ||
+        (order.buyerName && order.buyerName.toLowerCase().includes(q)) ||
+        (order.productName && order.productName.toLowerCase().includes(q)) ||
+        (order.vehicleDetails?.driverName && order.vehicleDetails.driverName.toLowerCase().includes(q));
 
       const matchesSLA = slaFilter === 'ALL' || order.slaStatus === slaFilter;
 

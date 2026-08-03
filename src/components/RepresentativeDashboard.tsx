@@ -30,7 +30,9 @@ import {
   Maximize2,
   Minimize2,
   Send,
-  Map
+  Map,
+  Search,
+  X
 } from 'lucide-react';
 
 import { SendLocationModal } from './SendLocationModal';
@@ -315,8 +317,38 @@ export default function RepresentativeDashboard({
 
   const estimatedPrice = quantity * selectedProduct.pricePerUnit;
 
-  // Filter orders for the selected agent
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Filter orders for the selected agent and query search
   const agentOrders = orders.filter(o => o.customerName === selectedAgent);
+
+  const filteredAgentOrders = agentOrders.filter(order => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+    const orderNum = (order.orderNumber || '').toLowerCase();
+    const orderId = (order.id || '').toLowerCase();
+    const customer = (order.customerName || '').toLowerCase();
+    const buyer = (order.buyerName || '').toLowerCase();
+    const product = (order.productName || '').toLowerCase();
+    const city = (order.destinationCity || '').toLowerCase();
+    const financialDoc = (order.financialDocId || '').toLowerCase();
+    const paymentTrack = (order.paymentTrackingCode || '').toLowerCase();
+    const driver = (order.vehicleDetails?.driverName || '').toLowerCase();
+    const billNo = (order.vehicleDetails?.billOfLadingNumber || '').toLowerCase();
+
+    return (
+      orderNum.includes(q) ||
+      orderId.includes(q) ||
+      customer.includes(q) ||
+      buyer.includes(q) ||
+      product.includes(q) ||
+      city.includes(q) ||
+      financialDoc.includes(q) ||
+      paymentTrack.includes(q) ||
+      driver.includes(q) ||
+      billNo.includes(q)
+    );
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -939,13 +971,13 @@ export default function RepresentativeDashboard({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 mb-5 gap-3">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs bg-slate-100 text-slate-700 border border-slate-200 py-1 px-2.5 rounded-full font-mono font-bold">
-                {agentOrders.length} سفارش
+                {searchQuery ? `نمایش ${filteredAgentOrders.length} از ${agentOrders.length} سفارش` : `${agentOrders.length} سفارش`}
               </span>
-              {agentOrders.length > 0 && (
+              {filteredAgentOrders.length > 0 && (
                 <>
                   <button
                     type="button"
-                    onClick={() => expandAllOrders(agentOrders)}
+                    onClick={() => expandAllOrders(filteredAgentOrders)}
                     className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 py-1 px-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
                     title="باز کردن تمامی کارت‌های سفارش جهت مشاهده کامل جزئیات"
                   >
@@ -978,6 +1010,32 @@ export default function RepresentativeDashboard({
             </div>
           </div>
 
+          {/* Search Box */}
+          {agentOrders.length > 0 && (
+            <div className="mb-5 relative">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="جستجوی سریع سفارش (بر اساس کد رهگیری، شماره فاکتور، نام خریدار، محصول، شهر مقصد...)"
+                  className="w-full bg-slate-50 border border-slate-300 focus:border-emerald-500 rounded-xl py-2.5 pr-10 pl-9 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all font-sans"
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full"
+                    title="پاک کردن جستجو"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {agentOrders.length === 0 ? (
             <div className="text-center py-16 bg-slate-50 rounded-2xl border border-dashed border-slate-200" id="empty-agent-orders">
               <Sparkles className="w-12 h-12 text-slate-300 mx-auto mb-3" />
@@ -992,9 +1050,21 @@ export default function RepresentativeDashboard({
                 <span>ثبت اولین سفارش جدید</span>
               </button>
             </div>
+          ) : filteredAgentOrders.length === 0 ? (
+            <div className="text-center py-12 bg-slate-50 rounded-2xl border border-slate-200">
+              <Search className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+              <p className="text-slate-700 text-sm font-bold">هیچ سفارشی مطابق عبارت «{searchQuery}» پیدا نشد.</p>
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="mt-3 text-xs text-emerald-600 font-bold hover:underline cursor-pointer"
+              >
+                پاکسازی عبارت جستجو
+              </button>
+            </div>
           ) : (
             <div className="space-y-3" id="agent-orders-sequence">
-              {agentOrders.map((order) => {
+              {filteredAgentOrders.map((order) => {
                 const statusDetails = getStatusLabelAndColor(order.status);
                 const isExpanded = !!expandedOrderIds[order.id];
 

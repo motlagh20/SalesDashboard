@@ -42,6 +42,7 @@ export interface Order {
   rejectionReason?: string;
   itemsJson?: string;
   paymentTrackingCode?: string;
+  financialDocId?: string;
   shippingCompanyId?: string; // شناسه شرکت حمل و نقل ارجاع شده
   isExportOrder?: boolean;    // آیا سفارش صادراتی است
   destinationCountry?: string; // کشور مقصد صادراتی
