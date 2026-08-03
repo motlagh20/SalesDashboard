@@ -5,18 +5,17 @@ interface TabarestanLogoProps {
   size?: number | string;
 }
 
-export default function TabarestanLogo({ className = "w-10 h-10 object-contain", size }: TabarestanLogoProps) {
+export default function TabarestanLogo({ className = "w-10 h-10 object-cover rounded-xl shadow-sm border border-slate-700/30", size }: TabarestanLogoProps) {
   const [hasError, setHasError] = useState(false);
   const style = size ? { width: size, height: size } : undefined;
 
   if (hasError) {
-    // Elegant typographic fallback if the file logo.png is not yet uploaded or found in the public folder
     return (
       <div 
-        className={`${className} flex items-center justify-center bg-teal-500 text-white font-extrabold rounded-lg text-center select-none text-[10px] sm:text-xs shrink-0 whitespace-nowrap px-1.5`}
-        style={style || { width: 36, height: 36 }}
+        className={`${className} flex items-center justify-center bg-gradient-to-br from-amber-600 via-orange-600 to-amber-700 text-white font-black rounded-xl text-center select-none text-[11px] sm:text-xs shrink-0 whitespace-nowrap shadow-md px-2 border border-amber-400/40`}
+        style={style || { width: 40, height: 40 }}
       >
-        طبرستان
+        سفال طبرستان
       </div>
     );
   }
@@ -24,15 +23,15 @@ export default function TabarestanLogo({ className = "w-10 h-10 object-contain",
   return (
     <img
       src="/logo.png"
-      alt="سفال طبرستان"
-      className={className}
+      alt="لوگوی شرکت صنایع سفال طبرستان"
+      className={`${className} transition-transform hover:scale-105`}
       style={style}
       referrerPolicy="no-referrer"
       onError={() => {
-        // If logo.png is not found, try to look for logo.svg or fall back to text label gracefully
         setHasError(true);
       }}
     />
   );
 }
+
 
