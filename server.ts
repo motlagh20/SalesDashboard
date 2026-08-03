@@ -28,6 +28,34 @@ async function startServer() {
     next();
   });
 
+  // Global Sandbox state persistence
+  const SANDBOX_CONFIG_FILE = path.join(process.cwd(), 'data', 'sandbox_config.json');
+  let globalSandboxEnabled = true;
+
+  try {
+    if (fs.existsSync(SANDBOX_CONFIG_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SANDBOX_CONFIG_FILE, 'utf-8'));
+      if (typeof data.sandboxEnabled === 'boolean') {
+        globalSandboxEnabled = data.sandboxEnabled;
+      }
+    }
+  } catch (e) {
+    console.error("Error reading sandbox config file:", e);
+  }
+
+  function saveSandboxConfig(enabled: boolean) {
+    globalSandboxEnabled = enabled;
+    try {
+      const dir = path.dirname(SANDBOX_CONFIG_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(SANDBOX_CONFIG_FILE, JSON.stringify({ sandboxEnabled: enabled }), 'utf-8');
+    } catch (e) {
+      console.error("Error writing sandbox config file:", e);
+    }
+  }
+
   function extractActor(req: express.Request) {
     let userId = (req.headers["x-user-id"] as string) || req.body?.actorUserId || "system";
     let userName = "";
@@ -2000,6 +2028,24 @@ async function startServer() {
       console.error("Error in GET /api/system/activity-logs:", err);
       res.status(500).json({ error: err.message });
     }
+  });
+
+  app.get("/api/system/sandbox-status", (req, res) => {
+    res.json({ sandboxEnabled: globalSandboxEnabled });
+  });
+
+  app.post("/api/system/sandbox-status", (req, res) => {
+    const { sandboxEnabled } = req.body;
+    if (typeof sandboxEnabled === 'boolean') {
+      saveSandboxConfig(sandboxEnabled);
+      recordActivity(
+        req,
+        sandboxEnabled ? "فعالسازی شبیه‌ساز" : "غیرفعالسازی و پنهان‌سازی شبیه‌ساز",
+        `وضعیت میانبرهای شبیه‌ساز (Sandbox) به ${sandboxEnabled ? 'فعال' : 'پنهان/غیرفعال'} تغییر یافت.`,
+        "SYSTEM"
+      );
+    }
+    res.json({ success: true, sandboxEnabled: globalSandboxEnabled });
   });
 
   app.post("/api/system/activity-logs", (req, res) => {

@@ -49,6 +49,19 @@ export default function App() {
     return saved !== null ? JSON.parse(saved) : true;
   });
 
+  // Fetch initial sandbox status from server on mount
+  useEffect(() => {
+    fetch('/api/system/sandbox-status')
+      .then(res => res.json())
+      .then(data => {
+        if (typeof data.sandboxEnabled === 'boolean') {
+          setSandboxEnabled(data.sandboxEnabled);
+          localStorage.setItem('tabarestan_sandbox_enabled', JSON.stringify(data.sandboxEnabled));
+        }
+      })
+      .catch(err => console.error("Error loading sandbox status:", err));
+  }, []);
+
   // Auto Lock States
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => {
     const saved = localStorage.getItem('tabarestan_autolock_minutes');
@@ -99,6 +112,11 @@ export default function App() {
     setSandboxEnabled(prev => {
       const next = !prev;
       localStorage.setItem('tabarestan_sandbox_enabled', JSON.stringify(next));
+      fetch('/api/system/sandbox-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sandboxEnabled: next })
+      }).catch(err => console.error("Error saving sandbox status:", err));
       showToast(next ? '🟢 میانبرهای شبیه‌ساز ورود به عنوان تست (Sandbox) فعال شدند.' : '🔴 میانبرهای شبیه‌ساز ورود به عنوان تست (Sandbox) غیرفعال و پنهان شدند.', 'info');
       return next;
     });
@@ -1518,6 +1536,7 @@ export default function App() {
                 askConfirm={askConfirm}
                 currentUser={currentUser}
                 onOpenEditProfile={handleOpenEditProfile}
+                sandboxEnabled={sandboxEnabled}
               />
             )}
 
@@ -1585,6 +1604,7 @@ export default function App() {
                 askConfirm={askConfirm}
                 currentUser={currentUser}
                 onOpenEditProfile={handleOpenEditProfile}
+                sandboxEnabled={sandboxEnabled}
               />
             )}
 

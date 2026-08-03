@@ -39,6 +39,7 @@ interface ShippingCompanyDashboardProps {
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
   currentUser?: AppUser | null;
   onOpenEditProfile?: (targetAgentId?: string, targetShippingId?: string) => void;
+  sandboxEnabled?: boolean;
 }
 
 // Preset frequent drivers for quick instant filling (to save high-value company time)
@@ -78,6 +79,7 @@ export default function ShippingCompanyDashboard({
   askConfirm,
   currentUser,
   onOpenEditProfile,
+  sandboxEnabled = true,
 }: ShippingCompanyDashboardProps) {
   // Select which shipping company is simulating/viewing
   const activeCompanies = shippingCompanies.filter(sc => sc.isEnabled);
@@ -262,24 +264,26 @@ export default function ShippingCompanyDashboard({
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 bg-indigo-900/50 p-2 rounded-xl border border-indigo-700/60 self-start md:self-auto">
-            <span className="text-xs text-indigo-200 font-bold shrink-0">ورود شبیه‌سازی باعنوان:</span>
-            <select
-              value={selectedCompanyId}
-              onChange={(e) => {
-                setSelectedCompanyId(e.target.value);
-                setAssigningOrderId(null);
-              }}
-              className="bg-slate-900 text-white border border-indigo-500 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-emerald-400 font-bold focus:outline-none cursor-pointer"
-              id="shipping-company-login-select"
-            >
-              {shippingCompanies.map((sc) => (
-                <option key={sc.id} value={sc.id}>
-                  {sc.name} {sc.isEnabled ? '' : '(غیرفعال)'}
-                </option>
-              ))}
-            </select>
-          </div>
+          {sandboxEnabled && (
+            <div className="flex items-center gap-2.5 bg-indigo-900/50 p-2 rounded-xl border border-indigo-700/60 self-start md:self-auto">
+              <span className="text-xs text-indigo-200 font-bold shrink-0">ورود شبیه‌سازی باعنوان:</span>
+              <select
+                value={selectedCompanyId}
+                onChange={(e) => {
+                  setSelectedCompanyId(e.target.value);
+                  setAssigningOrderId(null);
+                }}
+                className="bg-slate-900 text-white border border-indigo-500 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-emerald-400 font-bold focus:outline-none cursor-pointer"
+                id="shipping-company-login-select"
+              >
+                {shippingCompanies.map((sc) => (
+                  <option key={sc.id} value={sc.id}>
+                    {sc.name} {sc.isEnabled ? '' : '(غیرفعال)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       ) : (
         <div className="bg-gradient-to-r from-slate-900 to-slate-950 text-white rounded-2xl p-5 shadow-md border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4" id="shipping-company-locked-header">

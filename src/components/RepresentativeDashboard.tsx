@@ -52,6 +52,7 @@ interface RepresentativeDashboardProps {
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
   currentUser?: AppUser | null;
   onOpenEditProfile?: (targetAgentId?: string, targetShippingId?: string) => void;
+  sandboxEnabled?: boolean;
 }
 
 export default function RepresentativeDashboard({
@@ -68,6 +69,7 @@ export default function RepresentativeDashboard({
   askConfirm,
   currentUser,
   onOpenEditProfile,
+  sandboxEnabled = true,
 }: RepresentativeDashboardProps) {
   const currentAgentObj = agents.find(a => a.alias === selectedAgent || a.agentCode === selectedAgent || a.id === selectedAgent || a.fullName === selectedAgent) || agents[0] || PRESET_AGENTS.find(a => a.alias === selectedAgent) || PRESET_AGENTS[0] || {
     id: 'unknown',
@@ -451,7 +453,7 @@ export default function RepresentativeDashboard({
       
       {/* Top Header: Agent Switcher Simulator (for SALES_MANAGER) or Agency Details Card */}
       <div className="p-3 sm:p-4 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-3" id="agent-info-card-header">
-        {currentUser?.role === 'SALES_MANAGER' && (
+        {sandboxEnabled && currentUser?.role === 'SALES_MANAGER' && (
           <div className="bg-emerald-50/70 rounded-xl border border-emerald-100 p-2.5 sm:p-3 mb-2" id="agent-selector-box">
             <label className="block text-xs font-bold text-emerald-800 mb-1 font-sans">📲 شبیه‌ساز ورود به عنوان نمایندگی فروش (مدیر بازرگانی):</label>
             <select

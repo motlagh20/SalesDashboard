@@ -581,20 +581,10 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
           )}
 
           {/* Sandbox Access Section */}
-          {sandboxEnabled ? (
+          {sandboxEnabled && (
             <div className="pt-4 border-t border-slate-700/40 space-y-3" id="sandbox-login-section">
               <div className="flex items-center justify-between pb-1 border-b border-slate-700/20">
                 <span className="text-[10px] font-extrabold text-amber-400">⚒️ میانبر شبیه‌ساز ورود به عنوان تست (Sandbox):</span>
-                {onToggleSandbox && (
-                  <button
-                    type="button"
-                    onClick={onToggleSandbox}
-                    className="text-[9px] text-slate-400 hover:text-rose-300 font-sans cursor-pointer transition-colors"
-                    title="پنهان‌سازی میانبر شبیه‌ساز ورود"
-                  >
-                    [پنهان‌سازی]
-                  </button>
-                )}
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {defaultAccounts.map((acc, idx) => (
@@ -617,19 +607,6 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
               <p className="text-[8px] text-slate-500 text-center leading-relaxed font-sans">
                 در حالت امن، تمامی سطوح دسترسی بر اساس دیتابیس کاربری کنترل خواهند شد.
               </p>
-            </div>
-          ) : (
-            <div className="pt-3 border-t border-slate-800 text-center">
-              {onToggleSandbox && (
-                <button
-                  type="button"
-                  onClick={onToggleSandbox}
-                  className="text-[9px] text-slate-500 hover:text-amber-400 transition-colors font-sans cursor-pointer inline-flex items-center gap-1"
-                  title="نمایش مجدد میانبرهای شبیه‌ساز ورود"
-                >
-                  <span>⚒️ نمایش میانبر شبیه‌ساز ورود به عنوان تست (Sandbox)</span>
-                </button>
-              )}
             </div>
           )}
 
