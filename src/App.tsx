@@ -381,10 +381,17 @@ export default function App() {
   };
 
   // Load data from production Express API instead of localstorage mock
-  const refreshAllData = async () => {
+  const refreshAllData = async (bypassCache: boolean = false) => {
     const fetchWithFallback = async (url: string, setter: (data: any) => void) => {
       try {
-        const res = await fetch(url);
+        const fetchUrl = bypassCache ? `${url}?_t=${Date.now()}` : `${url}?_v=${Date.now()}`;
+        const res = await fetch(fetchUrl, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          },
+          cache: 'no-store'
+        });
         if (res.ok) {
           const parsed = await safeParseResponse(res, []);
           setter(parsed);
@@ -1063,14 +1070,25 @@ export default function App() {
   // Clear only transactions & orders (preserving user accounts, agents, products & shipping companies)
   const handleClearTransactions = async (): Promise<boolean> => {
     try {
+      if ('caches' in window) {
+        try {
+          await caches.delete('tabarestan-api-cache-v1');
+        } catch {}
+      }
       const response = await fetch('/api/system/clear-transactions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store'
       });
       if (response.ok) {
         showToast('کلیه سفارشات، فاکتورها و لاگ‌های سیستم با موفقیت پاکسازی شدند.', 'success');
         setOrders([]);
-        refreshAllData();
+        if ('caches' in window) {
+          try {
+            await caches.delete('tabarestan-api-cache-v1');
+          } catch {}
+        }
+        await refreshAllData(true);
         return true;
       } else {
         const errorMsg = await getErrorMessage(response, 'خطا در پاکسازی تراکنش‌ها');

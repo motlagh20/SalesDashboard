@@ -70,10 +70,13 @@ export default function SeniorAdminDashboard({
       async () => {
         setIsClearingTransactions(true);
         try {
+          if ('caches' in window) {
+            try { await caches.delete('tabarestan-api-cache-v1'); } catch {}
+          }
           if (onClearTransactions) {
             await onClearTransactions();
           } else {
-            const res = await fetch('/api/system/clear-transactions', { method: 'POST' });
+            const res = await fetch('/api/system/clear-transactions', { method: 'POST', cache: 'no-store' });
             const d = await res.json();
             if (d.success) {
               showToast('کلیه تراکنش‌ها و سفارشات با موفقیت پاکسازی شدند.', 'success');
@@ -81,7 +84,10 @@ export default function SeniorAdminDashboard({
               showToast(d.error || 'خطا در پاکسازی تراکنش‌ها', 'error');
             }
           }
-          fetchSystemLogsAndStats();
+          if ('caches' in window) {
+            try { await caches.delete('tabarestan-api-cache-v1'); } catch {}
+          }
+          await fetchSystemLogsAndStats();
         } catch (err) {
           showToast('خطا در ارتباط با سرور جهت پاکسازی تراکنش‌ها', 'error');
         } finally {

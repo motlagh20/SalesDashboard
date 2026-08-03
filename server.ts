@@ -20,6 +20,14 @@ async function startServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  // Prevent client and browser HTTP caching on all API endpoints
+  app.use("/api", (req, res, next) => {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+    next();
+  });
+
   function extractActor(req: express.Request) {
     let userId = (req.headers["x-user-id"] as string) || req.body?.actorUserId || "system";
     let userName = "";

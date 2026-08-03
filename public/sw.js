@@ -40,13 +40,26 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Skip non-GET requests and chrome extension requests
-  if (event.request.method !== 'GET' || !url.protocol.startsWith('http')) {
+  // Skip non-HTTP requests
+  if (!url.protocol.startsWith('http')) {
+    return;
+  }
+
+  // Non-GET requests (POST, PUT, PATCH, DELETE): Invalidate API cache immediately
+  if (event.request.method !== 'GET') {
+    if (url.pathname.startsWith('/api/')) {
+      caches.delete('tabarestan-api-cache-v1').catch(() => {});
+    }
     return;
   }
 
   // API Requests: Network-First with Offline Cache Fallback
   if (url.pathname.startsWith('/api/')) {
+    // System control endpoints bypass cache completely
+    if (url.pathname.startsWith('/api/system/')) {
+      return;
+    }
+
     event.respondWith(
       fetch(event.request)
         .then((response) => {
