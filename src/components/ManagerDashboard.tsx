@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx';
  */
 
 import React, { useState, useEffect } from 'react';
-import { Order, OrderStatus, Product, Agent, ShippingCompany, PermanentDriver, AppUser, UserRole, TerritoryAssignment } from '../types';
+import { Order, OrderStatus, Product, Agent, ShippingCompany, PermanentDriver, AppUser, UserRole, TerritoryAssignment, PersonType } from '../types';
 import PermanentDriversManager from './PermanentDriversManager';
 import CommercialAnalyticsDashboard from './CommercialAnalyticsDashboard';
 import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary } from '../data/iranLocations';
@@ -70,6 +70,8 @@ interface ManagerDashboardProps {
   agents: Agent[];
   shippingCompanies: ShippingCompany[];
   permanentDrivers?: PermanentDriver[];
+  initialTab?: PanelTab;
+  initialPartnerSubTab?: 'AGENTS' | 'SHIPPING' | 'USERS' | 'DRIVERS';
   onApproveOrder: (orderId: string) => void;
   onRejectOrder: (orderId: string, reason: string) => void;
   onDispatchToFactory: (orderId: string, comment?: string) => void;
@@ -106,6 +108,8 @@ export default function ManagerDashboard({
   agents,
   shippingCompanies = [],
   permanentDrivers = [],
+  initialTab,
+  initialPartnerSubTab,
   onApproveOrder,
   onRejectOrder,
   onDispatchToFactory,
@@ -133,10 +137,10 @@ export default function ManagerDashboard({
   askConfirm,
 }: ManagerDashboardProps) {
   // Navigation tabs for the Manager workspace
-  const [activeTab, setActiveTab] = useState<PanelTab>('PENDING_APPROVAL');
+  const [activeTab, setActiveTab] = useState<PanelTab>(initialTab || 'PENDING_APPROVAL');
   
   // Sub-filter for combined Partners & Users view
-  const [partnerSubTab, setPartnerSubTab] = useState<'AGENTS' | 'SHIPPING' | 'USERS' | 'DRIVERS'>('USERS');
+  const [partnerSubTab, setPartnerSubTab] = useState<'AGENTS' | 'SHIPPING' | 'USERS' | 'DRIVERS'>(initialPartnerSubTab || 'USERS');
   
   // Sub-filter state for archival logs
   const [archiveStatusFilter, setArchiveStatusFilter] = useState<string>('ALL');
@@ -223,6 +227,12 @@ export default function ManagerDashboard({
   };
 
   // Form: Create Agent state
+  const [newAgentPersonType, setNewAgentPersonType] = useState<PersonType>('REAL');
+  const [newAgentCompanyName, setNewAgentCompanyName] = useState('');
+  const [newAgentRegistrationNumber, setNewAgentRegistrationNumber] = useState('');
+  const [newAgentEconomicCode, setNewAgentEconomicCode] = useState('');
+  const [newAgentNationalId, setNewAgentNationalId] = useState('');
+  const [newAgentNationalCode, setNewAgentNationalCode] = useState('');
   const [newAgentName, setNewAgentName] = useState('');
   const [newAgentAlias, setNewAgentAlias] = useState('');
   const [newAgentCode, setNewAgentCode] = useState('');
@@ -244,6 +254,12 @@ export default function ManagerDashboard({
 
   const startEditingAgent = (agent: Agent) => {
     setEditingAgent(agent);
+    setNewAgentPersonType(agent.personType || 'REAL');
+    setNewAgentCompanyName(agent.companyName || '');
+    setNewAgentRegistrationNumber(agent.registrationNumber || '');
+    setNewAgentEconomicCode(agent.economicCode || '');
+    setNewAgentNationalId(agent.nationalId || '');
+    setNewAgentNationalCode(agent.nationalCode || '');
     setNewAgentName(agent.fullName);
     setNewAgentAlias(agent.alias);
     setNewAgentCode(agent.agentCode || '');
@@ -257,6 +273,12 @@ export default function ManagerDashboard({
 
   const cancelEditingAgent = () => {
     setEditingAgent(null);
+    setNewAgentPersonType('REAL');
+    setNewAgentCompanyName('');
+    setNewAgentRegistrationNumber('');
+    setNewAgentEconomicCode('');
+    setNewAgentNationalId('');
+    setNewAgentNationalCode('');
     setNewAgentName('');
     setNewAgentAlias('');
     setNewAgentCode('');
@@ -415,6 +437,8 @@ export default function ManagerDashboard({
   const [newSCCode, setNewSCCode] = useState('');
   const [newSCPhone, setNewSCPhone] = useState('');
   const [newSCManagerName, setNewSCManagerName] = useState('');
+  const [newSCNationalId, setNewSCNationalId] = useState('');
+  const [newSCEconomicCode, setNewSCEconomicCode] = useState('');
   const [newSCPassword, setNewSCPassword] = useState('');
   const [editingShippingCompany, setEditingShippingCompany] = useState<ShippingCompany | null>(null);
 
@@ -424,6 +448,8 @@ export default function ManagerDashboard({
     setNewSCCode(company.code);
     setNewSCManagerName(company.managerName || '');
     setNewSCPhone(company.phoneNumber);
+    setNewSCNationalId(company.nationalId || '');
+    setNewSCEconomicCode(company.economicCode || '');
     setNewSCPassword('');
   };
 
@@ -433,6 +459,8 @@ export default function ManagerDashboard({
     setNewSCCode('');
     setNewSCManagerName('');
     setNewSCPhone('');
+    setNewSCNationalId('');
+    setNewSCEconomicCode('');
     setNewSCPassword('');
   };
 
@@ -619,6 +647,11 @@ export default function ManagerDashboard({
     const phone = newAgentPhone.trim();
     const address = newAgentAddress.trim();
     const area = newAgentArea.trim();
+    const companyName = newAgentCompanyName.trim();
+    const registrationNumber = newAgentRegistrationNumber.trim();
+    const economicCode = newAgentEconomicCode.trim();
+    const nationalId = newAgentNationalId.trim();
+    const nationalCode = newAgentNationalCode.trim();
 
     if (!name) {
       showToast('لطفاً نام نماینده را وارد نمایید.', 'error');
@@ -626,6 +659,10 @@ export default function ManagerDashboard({
     }
     if (!alias) {
       showToast('لطفاً نام برند یا نام مستعار نمایندگی را وارد نمایید.', 'error');
+      return;
+    }
+    if (newAgentPersonType === 'LEGAL' && !companyName) {
+      showToast('لطفاً نام شرکت یا موسسه حقوقی را وارد نمایید.', 'error');
       return;
     }
     if (!code) {
@@ -660,7 +697,13 @@ export default function ManagerDashboard({
         address: address,
         area: summaryArea,
         territories: newAgentTerritories,
-        isExportAgent: newAgentIsExport
+        isExportAgent: newAgentIsExport,
+        personType: newAgentPersonType,
+        companyName: newAgentPersonType === 'LEGAL' ? companyName : undefined,
+        registrationNumber: newAgentPersonType === 'LEGAL' ? registrationNumber : undefined,
+        economicCode: economicCode || undefined,
+        nationalId: newAgentPersonType === 'LEGAL' ? nationalId : undefined,
+        nationalCode: newAgentPersonType === 'REAL' ? nationalCode : undefined,
       };
       const success = await onUpdateAgent(updatedAgent);
       if (success) {
@@ -678,6 +721,12 @@ export default function ManagerDashboard({
         territories: newAgentTerritories,
         isExportAgent: newAgentIsExport,
         isEnabled: true,
+        personType: newAgentPersonType,
+        companyName: newAgentPersonType === 'LEGAL' ? companyName : undefined,
+        registrationNumber: newAgentPersonType === 'LEGAL' ? registrationNumber : undefined,
+        economicCode: economicCode || undefined,
+        nationalId: newAgentPersonType === 'LEGAL' ? nationalId : undefined,
+        nationalCode: newAgentPersonType === 'REAL' ? nationalCode : undefined,
       };
 
       const success = await onAddAgent(newAgentObject);
@@ -824,6 +873,8 @@ export default function ManagerDashboard({
         code: code.toUpperCase(),
         phoneNumber: phone,
         managerName: manager || 'نامشخص',
+        nationalId: newSCNationalId.trim() || undefined,
+        economicCode: newSCEconomicCode.trim() || undefined,
         password: newSCPassword.trim() || undefined,
       };
 
@@ -839,6 +890,8 @@ export default function ManagerDashboard({
         phoneNumber: phone,
         managerName: manager || 'نامشخص',
         isEnabled: true,
+        nationalId: newSCNationalId.trim() || undefined,
+        economicCode: newSCEconomicCode.trim() || undefined,
         password: newSCPassword.trim() || '123456',
       };
 
@@ -973,112 +1026,141 @@ export default function ManagerDashboard({
       {/* Main workspace navigation tabs */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6" id="manager-control-hub">
         
-        {/* Workspace navigation */}
-        <div className="flex flex-wrap items-center justify-between border-b border-slate-200 pb-4 mb-5 gap-3">
-          <div className="flex flex-wrap gap-1.5" id="manager-panel-tabs">
-            {/* Tab 0: Commercial Analytics Dashboard */}
-            <button
-              onClick={() => setActiveTab('COMMERCIAL_ANALYTICS')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'COMMERCIAL_ANALYTICS'
-                  ? 'bg-amber-600 text-white shadow-sm ring-2 ring-amber-300'
-                  : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
-              }`}
-            >
-              <BarChart3 className="w-3.5 h-3.5 text-amber-700" />
-              <span>📊 آمار و تحلیل بازرگانی</span>
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-            </button>
+        {/* Workspace navigation: Visually separated into Order Operations & Base System Definitions */}
+        <div className="space-y-4 border-b border-slate-200 pb-5 mb-5">
+          
+          {/* Top Row: Group 1 & Group 2 Cards */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3" id="manager-panel-tabs">
+            
+            {/* Group 1: Order Operations & Analytics (7 Cols) */}
+            <div className="lg:col-span-7 bg-slate-50 border border-slate-200/90 rounded-2xl p-3 shadow-2xs space-y-2">
+              <div className="flex items-center justify-between border-b border-slate-200/80 pb-2 px-1">
+                <span className="text-[11px] font-black text-slate-700 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                  🛒 مدیریت و پردازش سفارشات (جریان لایو)
+                </span>
+                <span className="text-[10px] text-slate-500 font-medium">سفارشات، ارسال‌ها و آمار</span>
+              </div>
+              
+              <div className="flex flex-wrap gap-1.5">
+                {/* Tab 0: Commercial Analytics Dashboard */}
+                <button
+                  onClick={() => setActiveTab('COMMERCIAL_ANALYTICS')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'COMMERCIAL_ANALYTICS'
+                      ? 'bg-amber-600 text-white shadow-sm ring-2 ring-amber-300'
+                      : 'bg-white text-amber-900 border border-amber-200 hover:bg-amber-100'
+                  }`}
+                >
+                  <BarChart3 className="w-3.5 h-3.5 text-amber-700" />
+                  <span>آمار و تحلیل بازرگانی</span>
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                </button>
 
-            {/* Tab 1: Pending */}
-            <button
-              onClick={() => setActiveTab('PENDING_APPROVAL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'PENDING_APPROVAL'
-                  ? 'bg-amber-500 text-slate-950 shadow-sm'
-                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-              }`}
-            >
-              <Clock className="w-3.5 h-3.5" />
-              <span>کارتابل تایید سفارشات ({totalPending})</span>
-            </button>
+                {/* Tab 1: Received Orders (formerly "کارتابل تایید سفارشات") */}
+                <button
+                  onClick={() => setActiveTab('PENDING_APPROVAL')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'PENDING_APPROVAL'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm ring-2 ring-amber-400'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5 text-amber-600" />
+                  <span>سفارشات رسیده ({totalPending})</span>
+                </button>
 
-            {/* Tab 2: Re-order/Dispatch approved */}
-            <button
-              onClick={() => setActiveTab('APPROVED_PRIORITIES')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'APPROVED_PRIORITIES'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>اولویت‌بندی ارسال کارخانه ({approvedButPendingDispatch.length})</span>
-            </button>
+                {/* Tab 2: Dispatch to Sales (formerly "اولویت‌بندی ارسال کارخانه") */}
+                <button
+                  onClick={() => setActiveTab('APPROVED_PRIORITIES')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'APPROVED_PRIORITIES'
+                      ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-300'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>ارسال به فروش ({approvedButPendingDispatch.length})</span>
+                </button>
 
-            {/* Tab 3: Unified Partners & Users Management */}
-            <button
-              onClick={() => {
-                setActiveTab('PARTNERS_MGMT');
-                fetchUsers();
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'PARTNERS_MGMT'
-                  ? 'bg-slate-800 text-white shadow-sm ring-2 ring-slate-300'
-                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-              }`}
-            >
-              <Users className="w-3.5 h-3.5 text-amber-400" />
-              <span>نمایندگی‌ها و دسترسی کاربران ({agents.length} نمایندگی / {users.length} کاربر)</span>
-            </button>
+                {/* Tab 6: Archival & Factory Tracking */}
+                <button
+                  onClick={() => setActiveTab('ARCHIVAL_ORDERS')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'ARCHIVAL_ORDERS'
+                      ? 'bg-slate-800 text-white shadow-sm ring-2 ring-slate-400'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>رهگیری و آرشیو ({orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length})</span>
+                </button>
+              </div>
+            </div>
 
-            {/* Tab 4: Products */}
-            <button
-              onClick={() => setActiveTab('PRODUCTS_MGMT')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'PRODUCTS_MGMT'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-              }`}
-            >
-              <Briefcase className="w-3.5 h-3.5" />
-              <span>تعریف و مدیریت محصولات ({products.length})</span>
-            </button>
+            {/* Group 2: Base System Definitions & Users (5 Cols - DISTINCT VISUAL STYLE) */}
+            <div className="lg:col-span-5 bg-gradient-to-br from-indigo-50/90 to-purple-50/90 border-2 border-indigo-200/90 rounded-2xl p-3 shadow-xs space-y-2">
+              <div className="flex items-center justify-between border-b border-indigo-200/80 pb-2 px-1">
+                <span className="text-[11px] font-black text-indigo-950 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                  ⚙️ تعریف اطلاعات پایه و دسترسی کاربران
+                </span>
+                <span className="px-2 py-0.5 bg-indigo-600 text-white text-[9px] rounded-full font-bold">پایه سیستم</span>
+              </div>
+              
+              <div className="flex flex-wrap gap-1.5">
+                {/* Tab 3: Unified Partners & Users Management */}
+                <button
+                  onClick={() => {
+                    setActiveTab('PARTNERS_MGMT');
+                    fetchUsers();
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'PARTNERS_MGMT' && partnerSubTab !== 'SHIPPING'
+                      ? 'bg-slate-900 text-amber-300 shadow-md ring-2 ring-amber-400'
+                      : 'bg-white text-slate-800 border border-indigo-200 hover:bg-indigo-100/70'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5 text-amber-500" />
+                  <span>کاربران و نمایندگی‌ها ({agents.length} نمایندگی / {users.length} کاربر)</span>
+                </button>
 
-            {/* Tab 5: Shipping Companies */}
-            <button
-              onClick={() => {
-                setActiveTab('PARTNERS_MGMT');
-                setPartnerSubTab('SHIPPING');
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'PARTNERS_MGMT' && partnerSubTab === 'SHIPPING'
-                  ? 'bg-blue-600 text-white shadow-sm ring-2 ring-slate-300'
-                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-              }`}
-            >
-              <Truck className="w-3.5 h-3.5 text-blue-500" />
-              <span>شرکت‌های حمل و نقل ({shippingCompanies.length})</span>
-            </button>
+                {/* Tab 4: Products */}
+                <button
+                  onClick={() => setActiveTab('PRODUCTS_MGMT')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'PRODUCTS_MGMT'
+                      ? 'bg-emerald-600 text-white shadow-md ring-2 ring-emerald-300'
+                      : 'bg-white text-emerald-950 border border-emerald-200 hover:bg-emerald-100/70'
+                  }`}
+                >
+                  <Briefcase className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>محصولات ({products.length})</span>
+                </button>
 
-            {/* Tab 6: Archival & Factory Tracking */}
-            <button
-              onClick={() => setActiveTab('ARCHIVAL_ORDERS')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'ARCHIVAL_ORDERS'
-                  ? 'bg-slate-700 text-white shadow-sm ring-2 ring-slate-300'
-                  : 'bg-indigo-50/70 text-indigo-900 border border-indigo-100 hover:bg-indigo-100'
-              }`}
-            >
-              <FileText className="w-3.5 h-3.5 text-indigo-600" />
-              <span className="font-extrabold text-slate-900">رهگیری لایو کارخانه و آرشیو ({orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length} مورد)</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            </button>
+                {/* Tab 5: Shipping Companies */}
+                <button
+                  onClick={() => {
+                    setActiveTab('PARTNERS_MGMT');
+                    setPartnerSubTab('SHIPPING');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'PARTNERS_MGMT' && partnerSubTab === 'SHIPPING'
+                      ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-300'
+                      : 'bg-white text-blue-950 border border-blue-200 hover:bg-blue-100/70'
+                  }`}
+                >
+                  <Truck className="w-3.5 h-3.5 text-blue-600" />
+                  <span>شرکت‌های حمل ({shippingCompanies.length})</span>
+                </button>
+              </div>
+            </div>
+
           </div>
 
           {/* Quick query filter (only for order views) */}
           {(activeTab === 'PENDING_APPROVAL' || activeTab === 'APPROVED_PRIORITIES' || activeTab === 'ARCHIVAL_ORDERS') && (
-            <div className="relative w-full md:w-80" id="manager-tab-search">
+            <div className="relative w-full" id="manager-tab-search">
               <input
                 type="text"
                 placeholder="جستجوی سریع سفارش (کد رهگیری، خریدار، نماینده، شهر...)"
@@ -1771,6 +1853,15 @@ export default function ManagerDashboard({
                         <div className="flex items-center gap-2 wrap flex-wrap">
                           <strong className="text-slate-800 text-sm">{agent.alias}</strong>
                           <span className="text-[9px] bg-slate-100 text-slate-500 font-mono py-0.5 px-2 rounded">کد: {agent.agentCode}</span>
+                          {agent.personType === 'LEGAL' ? (
+                            <span className="text-[9px] bg-indigo-100 text-indigo-900 border border-indigo-200/80 py-0.5 px-2 rounded-full font-bold flex items-center gap-1">
+                              🏢 شخص حقوقی {agent.companyName ? `(${agent.companyName})` : ''}
+                            </span>
+                          ) : (
+                            <span className="text-[9px] bg-emerald-100 text-emerald-900 border border-emerald-200/80 py-0.5 px-2 rounded-full font-bold flex items-center gap-1">
+                              👤 شخص حقیقی
+                            </span>
+                          )}
                           {agent.isExportAgent && (
                             <span className="text-[9px] bg-sky-100 text-sky-800 border border-sky-200/80 py-0.5 px-2 rounded-full font-bold flex items-center gap-1">
                               <Globe className="w-2.5 h-2.5 text-sky-600" />
@@ -1782,7 +1873,17 @@ export default function ManagerDashboard({
                         <p className="text-[11px] text-slate-600 mt-1 font-sans">
                           💼 مسئول: <strong>{agent.fullName}</strong> • محدوده: {agent.area}
                         </p>
-                        <p className="text-[10px] text-slate-400 leading-snug">📍 آدرس: {agent.address}</p>
+                        {agent.personType === 'LEGAL' ? (
+                          <div className="text-[10px] text-slate-600 font-mono mt-1 bg-indigo-50/50 p-1.5 rounded border border-indigo-100/80 space-y-0.5">
+                            <div>🏛️ شرکت: <strong className="text-indigo-950 font-sans">{agent.companyName || '-'}</strong></div>
+                            <div>شناسه ملی: <strong className="text-slate-800">{agent.nationalId || '-'}</strong> | شماره ثبت: <strong className="text-slate-800">{agent.registrationNumber || '-'}</strong> | شماره اقتصادی: <strong className="text-slate-800">{agent.economicCode || '-'}</strong></div>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-slate-600 font-mono mt-1 bg-emerald-50/40 p-1.5 rounded border border-emerald-100/80">
+                            🆔 کد ملی نماینده: <strong className="text-slate-800">{agent.nationalCode || '-'}</strong> | شماره اقتصادی: <strong className="text-slate-800">{agent.economicCode || '-'}</strong>
+                          </div>
+                        )}
+                        <p className="text-[10px] text-slate-400 leading-snug mt-1">📍 آدرس: {agent.address}</p>
                         <p className="text-[10px] text-slate-400 font-mono">📞 تماس: {agent.phoneNumber}</p>
                       </div>
 
@@ -1842,9 +1943,131 @@ export default function ManagerDashboard({
               </h4>
 
               <form id="agent-registration-form" onSubmit={handleAgentSubmit} className="space-y-3.5">
+                {/* Person Type Selector */}
+                <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5">
+                  <label className="block text-slate-700 text-[10px] font-bold">
+                    نوع شخص نماینده: <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewAgentPersonType('REAL')}
+                      className={`py-1.5 px-3 rounded text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border ${
+                        newAgentPersonType === 'REAL'
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>👤 شخص حقیقی</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewAgentPersonType('LEGAL')}
+                      className={`py-1.5 px-3 rounded text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border ${
+                        newAgentPersonType === 'LEGAL'
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>🏢 شخص حقوقی</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Conditional Fields: Legal vs Real Person */}
+                {newAgentPersonType === 'LEGAL' ? (
+                  <div className="bg-indigo-50/60 border border-indigo-200/70 p-3 rounded-lg space-y-3">
+                    <div className="text-[10px] font-bold text-indigo-900 flex items-center gap-1 border-b border-indigo-100 pb-1">
+                      <span>اطلاعات تکمیلی شخص حقوقی / شرکت</span>
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 text-[10px] mb-1 font-bold">
+                        نام شرکت یا موسسه حقوقی: <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="مثال: شرکت بازرگانی کاشی و سرامیک طبرستان (سهامی خاص)"
+                        value={newAgentCompanyName}
+                        onChange={(e) => setNewAgentCompanyName(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-sans"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-slate-700 text-[10px] mb-1 font-bold">
+                          شناسه ملی (۱۱ رقمی):
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="1010..."
+                          value={newAgentNationalId}
+                          onChange={(e) => setNewAgentNationalId(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 text-[10px] mb-1 font-bold">
+                          شماره ثبت شرکت:
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="مثال: ۴۵۸۹۲"
+                          value={newAgentRegistrationNumber}
+                          onChange={(e) => setNewAgentRegistrationNumber(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 text-[10px] mb-1 font-bold">
+                        شماره اقتصادی شخص حقوقی:
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="411..."
+                        value={newAgentEconomicCode}
+                        onChange={(e) => setNewAgentEconomicCode(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-emerald-50/50 border border-emerald-200/70 p-3 rounded-lg space-y-3">
+                    <div className="text-[10px] font-bold text-emerald-900 flex items-center gap-1 border-b border-emerald-100 pb-1">
+                      <span>اطلاعات تکمیلی شخص حقیقی</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-slate-700 text-[10px] mb-1 font-bold">
+                          کد ملی نماینده (۱۰ رقمی):
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="209..."
+                          value={newAgentNationalCode}
+                          onChange={(e) => setNewAgentNationalCode(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-left"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 text-[10px] mb-1 font-bold">
+                          شماره اقتصادی:
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="411..."
+                          value={newAgentEconomicCode}
+                          onChange={(e) => setNewAgentEconomicCode(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-left"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-slate-600 text-[10px] mb-1 font-bold">
-                    نام و نام خانوادگی نماینده مسئول: <span className="text-rose-500">*</span>
+                    نام و نام خانوادگی نماینده مسئول / مدیریت: <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -2439,9 +2662,18 @@ export default function ManagerDashboard({
                   <tbody>
                     {shippingCompanies.map((company) => (
                       <tr key={company.id} className="border-b border-slate-100 hover:bg-slate-50 transition-all">
-                        <td className="p-3 font-bold text-slate-900 flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded bg-blue-500 block"></span>
-                          <span>{company.name}</span>
+                        <td className="p-3">
+                          <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded bg-blue-500 block"></span>
+                            <span>{company.name}</span>
+                          </div>
+                          {(company.nationalId || company.economicCode) && (
+                            <div className="text-[10px] text-slate-500 font-mono mt-1 pr-4">
+                              {company.nationalId && <span>شناسه ملی: <strong className="text-slate-700">{company.nationalId}</strong></span>}
+                              {company.nationalId && company.economicCode && <span className="mx-1 text-slate-300">|</span>}
+                              {company.economicCode && <span>کد اقتصادی: <strong className="text-slate-700">{company.economicCode}</strong></span>}
+                            </div>
+                          )}
                         </td>
                         <td className="p-3 font-mono text-slate-600 font-bold">{company.code}</td>
                         <td className="p-3 text-slate-600">{company.managerName}</td>
@@ -2555,6 +2787,29 @@ export default function ManagerDashboard({
                       className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
                       required
                     />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-slate-600 text-[10px] mb-1 font-bold">شناسه ملی شرکت (۱۱ رقمی):</label>
+                      <input
+                        type="text"
+                        placeholder="1010..."
+                        value={newSCNationalId}
+                        onChange={(e) => setNewSCNationalId(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-600 text-[10px] mb-1 font-bold">شماره / کد اقتصادی:</label>
+                      <input
+                        type="text"
+                        placeholder="411..."
+                        value={newSCEconomicCode}
+                        onChange={(e) => setNewSCEconomicCode(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 font-mono text-left focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      />
+                    </div>
                   </div>
 
                   <div>

@@ -325,6 +325,8 @@ export default function ShippingCompanyDashboard({
             <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center justify-end gap-3">
               <span>👤 مدیر باربری: <strong className="text-slate-700">{currentCompany?.managerName || 'نامشخص'}</strong></span>
               <span>📞 تلفن تماس: <strong className="font-mono text-slate-700 dir-ltr inline-block">{currentCompany?.phoneNumber || currentUser?.phoneNumber || 'نامشخص'}</strong></span>
+              {currentCompany?.nationalId && <span>🆔 شناسه ملی: <strong className="font-mono text-slate-700">{currentCompany.nationalId}</strong></span>}
+              {currentCompany?.economicCode && <span>🏢 کد اقتصادی: <strong className="font-mono text-slate-700">{currentCompany.economicCode}</strong></span>}
               <span>📍 آدرس پایانه/دفتر: <span className="text-slate-700">{currentCompany?.address || 'نامشخص'}</span></span>
             </div>
           </div>

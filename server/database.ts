@@ -553,8 +553,10 @@ function executeQuery(sql: string, values: any[] = []): any {
 
   // 12. INSERT INTO agents
   if (/INSERT\s+INTO\s+agents/i.test(cleanSql)) {
-    let id, fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent;
-    if (values.length >= 9) {
+    let id, fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, personType, companyName, registrationNumber, economicCode, nationalId, nationalCode;
+    if (values.length >= 15) {
+      [id, fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, personType, companyName, registrationNumber, economicCode, nationalId, nationalCode] = values;
+    } else if (values.length >= 9) {
       [id, fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent] = values;
     } else {
       [id, fullName, alias, agentCode, phoneNumber, address, area, territories] = values;
@@ -579,7 +581,13 @@ function executeQuery(sql: string, values: any[] = []): any {
       area: area || null,
       territories: territoriesParsed,
       isExportAgent: Number(isExportAgent) === 1 || isExportAgent === true,
-      isEnabled: 1
+      isEnabled: 1,
+      personType: personType || 'REAL',
+      companyName: companyName || null,
+      registrationNumber: registrationNumber || null,
+      economicCode: economicCode || null,
+      nationalId: nationalId || null,
+      nationalCode: nationalCode || null
     });
     saveJsonData(jsonData);
     return [{ affectedRows: 1 }];
@@ -606,7 +614,12 @@ function executeQuery(sql: string, values: any[] = []): any {
 
   // 15. INSERT INTO shipping_companies
   if (/INSERT\s+INTO\s+shipping_companies/i.test(cleanSql)) {
-    const [id, name, code, phoneNumber, managerName] = values;
+    let id, name, code, phoneNumber, managerName, nationalId, economicCode;
+    if (values.length >= 7) {
+      [id, name, code, phoneNumber, managerName, nationalId, economicCode] = values;
+    } else {
+      [id, name, code, phoneNumber, managerName] = values;
+    }
     if (code && jsonData.shipping_companies.some((sc: any) => sc.code && sc.code.toUpperCase() === code.toUpperCase())) {
       const err: any = new Error("Company duplicate error");
       err.code = "ER_DUP_ENTRY";
@@ -619,7 +632,9 @@ function executeQuery(sql: string, values: any[] = []): any {
       code,
       phoneNumber,
       managerName: managerName || null,
-      isEnabled: 1
+      isEnabled: 1,
+      nationalId: nationalId || null,
+      economicCode: economicCode || null
     });
     saveJsonData(jsonData);
     return [{ affectedRows: 1 }];
@@ -633,6 +648,20 @@ function executeQuery(sql: string, values: any[] = []): any {
       if (sc) {
         sc.phoneNumber = phoneNumber;
         sc.address = address;
+        saveJsonData(jsonData);
+      }
+    } else if (values.length >= 8) {
+      const [name, code, phoneNumber, managerName, address, isEnabled, nationalId, economicCode, id] = values;
+      const sc = jsonData.shipping_companies.find((s: any) => s.id === id);
+      if (sc) {
+        sc.name = name;
+        sc.code = code;
+        sc.phoneNumber = phoneNumber;
+        sc.managerName = managerName;
+        sc.address = address;
+        sc.isEnabled = Number(isEnabled) === 1 || isEnabled === true;
+        if (nationalId !== undefined) sc.nationalId = nationalId;
+        if (economicCode !== undefined) sc.economicCode = economicCode;
         saveJsonData(jsonData);
       }
     } else if (values.length >= 7) {
@@ -925,8 +954,10 @@ function executeQuery(sql: string, values: any[] = []): any {
       }
       return [{ affectedRows: 1 }];
     }
-    let fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, isEnabled, id;
-    if (values.length >= 10) {
+    let fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, isEnabled, personType, companyName, registrationNumber, economicCode, nationalId, nationalCode, id;
+    if (values.length >= 16) {
+      [fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, isEnabled, personType, companyName, registrationNumber, economicCode, nationalId, nationalCode, id] = values;
+    } else if (values.length >= 10) {
       [fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, isEnabled, id] = values;
     } else if (values.length >= 9) {
       [fullName, alias, agentCode, phoneNumber, address, area, territories, isEnabled, id] = values;
@@ -948,6 +979,12 @@ function executeQuery(sql: string, values: any[] = []): any {
         ag.isExportAgent = Number(isExportAgent) === 1 || isExportAgent === true;
       }
       ag.isEnabled = Number(isEnabled) === 1 || isEnabled === true;
+      if (personType !== undefined) ag.personType = personType;
+      if (companyName !== undefined) ag.companyName = companyName;
+      if (registrationNumber !== undefined) ag.registrationNumber = registrationNumber;
+      if (economicCode !== undefined) ag.economicCode = economicCode;
+      if (nationalId !== undefined) ag.nationalId = nationalId;
+      if (nationalCode !== undefined) ag.nationalCode = nationalCode;
       saveJsonData(jsonData);
     }
     return [{ affectedRows: 1 }];
@@ -1200,7 +1237,13 @@ export async function bootstrapDatabase() {
         phoneNumber VARCHAR(20) NOT NULL,
         address TEXT,
         area VARCHAR(100),
-        isEnabled TINYINT(1) DEFAULT 1
+        isEnabled TINYINT(1) DEFAULT 1,
+        personType VARCHAR(20) DEFAULT 'REAL',
+        companyName VARCHAR(150),
+        registrationNumber VARCHAR(50),
+        economicCode VARCHAR(50),
+        nationalId VARCHAR(50),
+        nationalCode VARCHAR(50)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
@@ -1212,7 +1255,9 @@ export async function bootstrapDatabase() {
         code VARCHAR(50) NOT NULL UNIQUE,
         phoneNumber VARCHAR(20) NOT NULL,
         managerName VARCHAR(150),
-        isEnabled TINYINT(1) DEFAULT 1
+        isEnabled TINYINT(1) DEFAULT 1,
+        nationalId VARCHAR(50),
+        economicCode VARCHAR(50)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
@@ -1316,10 +1361,18 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "agents", "territories", "TEXT");
     await ensureColumnExists(db, "agents", "isExportAgent", "TINYINT(1) DEFAULT 0");
     await ensureColumnExists(db, "agents", "isEnabled", "TINYINT(1) DEFAULT 1");
+    await ensureColumnExists(db, "agents", "personType", "VARCHAR(20) DEFAULT 'REAL'");
+    await ensureColumnExists(db, "agents", "companyName", "VARCHAR(150)");
+    await ensureColumnExists(db, "agents", "registrationNumber", "VARCHAR(50)");
+    await ensureColumnExists(db, "agents", "economicCode", "VARCHAR(50)");
+    await ensureColumnExists(db, "agents", "nationalId", "VARCHAR(50)");
+    await ensureColumnExists(db, "agents", "nationalCode", "VARCHAR(50)");
 
     await ensureColumnExists(db, "shipping_companies", "managerName", "VARCHAR(150)");
     await ensureColumnExists(db, "shipping_companies", "address", "TEXT");
     await ensureColumnExists(db, "shipping_companies", "isEnabled", "TINYINT(1) DEFAULT 1");
+    await ensureColumnExists(db, "shipping_companies", "nationalId", "VARCHAR(50)");
+    await ensureColumnExists(db, "shipping_companies", "economicCode", "VARCHAR(50)");
 
     await ensureColumnExists(db, "app_users", "username", "VARCHAR(100) NOT NULL UNIQUE");
     await ensureColumnExists(db, "app_users", "fullName", "VARCHAR(150) NOT NULL");

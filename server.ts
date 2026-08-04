@@ -305,12 +305,15 @@ async function startServer() {
   app.post("/api/agents", async (req, res) => {
     try {
       const db = getDbPool();
-      const { id, fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent } = req.body;
+      const { id, fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, personType, companyName, registrationNumber, economicCode, nationalId, nationalCode } = req.body;
       const territoriesStr = territories ? (typeof territories === 'string' ? territories : JSON.stringify(territories)) : null;
 
       await db.query(
-        "INSERT INTO agents (id, fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
-        [id, fullName, alias, agentCode, phoneNumber, address || null, area || null, territoriesStr, isExportAgent ? 1 : 0]
+        "INSERT INTO agents (id, fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, isEnabled, personType, companyName, registrationNumber, economicCode, nationalId, nationalCode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+        [
+          id, fullName, alias, agentCode, phoneNumber, address || null, area || null, territoriesStr, isExportAgent ? 1 : 0,
+          personType || 'REAL', companyName || null, registrationNumber || null, economicCode || null, nationalId || null, nationalCode || null
+        ]
       );
       
       // Auto-create or link user account for this representative
@@ -391,15 +394,20 @@ async function startServer() {
     try {
       const db = getDbPool();
       const { id } = req.params;
-      const { fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, isEnabled } = req.body;
+      const { fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, isEnabled, personType, companyName, registrationNumber, economicCode, nationalId, nationalCode } = req.body;
       const territoriesStr = territories ? (typeof territories === 'string' ? territories : JSON.stringify(territories)) : null;
 
       await db.query(`
         UPDATE agents SET 
           fullName = ?, alias = ?, agentCode = ?, phoneNumber = ?, 
-          address = ?, area = ?, territories = ?, isExportAgent = ?, isEnabled = ? 
+          address = ?, area = ?, territories = ?, isExportAgent = ?, isEnabled = ?,
+          personType = ?, companyName = ?, registrationNumber = ?, economicCode = ?, nationalId = ?, nationalCode = ?
         WHERE id = ?
-      `, [fullName, alias, agentCode, phoneNumber, address || null, area || null, territoriesStr, isExportAgent ? 1 : 0, isEnabled ? 1 : 0, id]);
+      `, [
+        fullName, alias, agentCode, phoneNumber, address || null, area || null, territoriesStr, isExportAgent ? 1 : 0, isEnabled ? 1 : 0,
+        personType || 'REAL', companyName || null, registrationNumber || null, economicCode || null, nationalId || null, nationalCode || null,
+        id
+      ]);
 
       try {
         await db.query(`
@@ -494,12 +502,12 @@ async function startServer() {
   app.post("/api/shipping-companies", async (req, res) => {
     try {
       const db = getDbPool();
-      const { id, name, code, phoneNumber, managerName, password } = req.body;
+      const { id, name, code, phoneNumber, managerName, password, nationalId, economicCode } = req.body;
       const userPassword = password || '123456';
 
       await db.query(
-        "INSERT INTO shipping_companies (id, name, code, phoneNumber, managerName, isEnabled) VALUES (?, ?, ?, ?, ?, 1)",
-        [id, name, code, phoneNumber, managerName || null]
+        "INSERT INTO shipping_companies (id, name, code, phoneNumber, managerName, isEnabled, nationalId, economicCode) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+        [id, name, code, phoneNumber, managerName || null, nationalId || null, economicCode || null]
       );
 
       try {
@@ -547,13 +555,13 @@ async function startServer() {
     try {
       const db = getDbPool();
       const { id } = req.params;
-      const { name, code, phoneNumber, managerName, address, isEnabled, password } = req.body;
+      const { name, code, phoneNumber, managerName, address, isEnabled, password, nationalId, economicCode } = req.body;
 
       await db.query(`
         UPDATE shipping_companies
-        SET name = ?, code = ?, phoneNumber = ?, managerName = ?, address = ?, isEnabled = ?
+        SET name = ?, code = ?, phoneNumber = ?, managerName = ?, address = ?, isEnabled = ?, nationalId = ?, economicCode = ?
         WHERE id = ?
-      `, [name, code, phoneNumber, managerName || null, address || null, isEnabled ? 1 : 0, id]);
+      `, [name, code, phoneNumber, managerName || null, address || null, isEnabled ? 1 : 0, nationalId || null, economicCode || null, id]);
 
       try {
         if (password) {

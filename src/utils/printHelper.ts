@@ -37,15 +37,28 @@ export function printOrders(orders: Order[], products: Product[], agents: Agent[
   orders.forEach((order, index) => {
     // 1. Resolve Agent Code and Name
     const agent = agents.find(a => a.agentCode === order.agentCode || a.fullName === order.customerName);
-    const agentLabel = agent 
-      ? `
-        <div style="font-size: 11px; font-weight: bold; color: #1e3a8a; line-height: 1.3;">${agent.fullName}</div>
-        <div style="font-size: 10px; color: #475569; margin-top: 2.5px; font-weight: normal; font-family: 'Tahoma', sans-serif;">کد نمایندگی: ${agent.agentCode}</div>
-      `
-      : `
+    let agentDetailsHtml = '';
+    if (agent) {
+      if (agent.personType === 'LEGAL') {
+        agentDetailsHtml = `
+          <div style="font-size: 11px; font-weight: bold; color: #1e3a8a; line-height: 1.3;">${agent.companyName || agent.alias}</div>
+          <div style="font-size: 9.5px; color: #334155; margin-top: 2px;">مسئول: ${agent.fullName} | کد: ${agent.agentCode}</div>
+          <div style="font-size: 8.5px; color: #64748b; font-family: 'Tahoma', sans-serif;">شناسه ملی: ${agent.nationalId || '-'} | شماره ثبت: ${agent.registrationNumber || '-'} | کد اقتصادی: ${agent.economicCode || '-'}</div>
+        `;
+      } else {
+        agentDetailsHtml = `
+          <div style="font-size: 11px; font-weight: bold; color: #1e3a8a; line-height: 1.3;">${agent.fullName} (${agent.alias})</div>
+          <div style="font-size: 9.5px; color: #334155; margin-top: 2px;">کد نمایندگی: ${agent.agentCode}</div>
+          <div style="font-size: 8.5px; color: #64748b; font-family: 'Tahoma', sans-serif;">کد ملی: ${agent.nationalCode || '-'} | کد اقتصادی: ${agent.economicCode || '-'}</div>
+        `;
+      }
+    } else {
+      agentDetailsHtml = `
         <div style="font-size: 11px; font-weight: bold; color: #1e3a8a; line-height: 1.3;">${order.customerName || 'نامشخص'}</div>
         <div style="font-size: 10px; color: #475569; margin-top: 2.5px; font-weight: normal; font-family: 'Tahoma', sans-serif;">کد نمایندگی: ${order.agentCode || 'نامشخص'}</div>
       `;
+    }
+    const agentLabel = agentDetailsHtml;
 
     // 2. Resolve Product details (showing items separately "به تفکیک")
     let productDetailsText = '';

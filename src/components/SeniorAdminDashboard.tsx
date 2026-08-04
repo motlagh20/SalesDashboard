@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { PermanentDriver, ShippingCompany, Order } from '../types';
+import { PermanentDriver, ShippingCompany, Order, Product, Agent } from '../types';
 import PermanentDriversManager from './PermanentDriversManager';
+import ManagerDashboard from './ManagerDashboard';
 import {
   Activity,
   Shield,
@@ -23,21 +24,44 @@ import {
   Globe,
   Truck,
   ShoppingBag,
-  FileText
+  FileText,
+  Users,
+  Briefcase
 } from 'lucide-react';
 
 interface SeniorAdminDashboardProps {
   orders?: Order[];
+  products?: Product[];
+  agents?: Agent[];
+  shippingCompanies?: ShippingCompany[];
+  permanentDrivers?: PermanentDriver[];
   showToast: (message: string, type: 'success' | 'error' | 'info') => void;
   askConfirm: (title: string, message: string, onConfirm: () => void) => void;
   currentUser?: any;
-  permanentDrivers?: PermanentDriver[];
-  shippingCompanies?: ShippingCompany[];
+  onAddProduct?: (newProduct: Product) => Promise<boolean>;
+  onToggleProduct?: (productId: string) => void;
+  onDeleteProduct?: (productId: string) => void;
+  onUpdateProduct?: (productData: Product) => Promise<boolean>;
+  onAddAgent?: (newAgent: Agent) => Promise<boolean>;
+  onToggleAgent?: (agentId: string) => void;
+  onDeleteAgent?: (agentId: string) => void;
+  onUpdateAgent?: (agentData: Agent) => Promise<boolean>;
+  onAddShippingCompany?: (newCompany: ShippingCompany) => Promise<boolean>;
+  onUpdateShippingCompany?: (companyData: ShippingCompany) => Promise<boolean>;
+  onToggleShippingCompany?: (companyId: string) => void;
+  onDeleteShippingCompany?: (companyId: string) => void;
   onAddPermanentDriver?: (driver: Partial<PermanentDriver>) => Promise<boolean>;
   onBulkImportPermanentDrivers?: (drivers: Partial<PermanentDriver>[]) => Promise<boolean>;
   onUpdatePermanentDriver?: (driver: PermanentDriver) => Promise<boolean>;
   onTogglePermanentDriver?: (driverId: string) => void;
   onDeletePermanentDriver?: (driverId: string) => void;
+  onApproveOrder?: (orderId: string) => void;
+  onRejectOrder?: (orderId: string, reason: string) => void;
+  onDispatchToFactory?: (orderId: string, comment?: string) => void;
+  onUpdateAllOrders?: (updatedOrders: Order[]) => void;
+  onApproveAllOrders?: (orderIds?: string[]) => void;
+  onDispatchAllToFactory?: () => void;
+  onSaveLocation?: (orderId: string, deliveryLocationUrl: string) => Promise<void>;
   onClearTransactions?: () => Promise<boolean>;
   sandboxEnabled?: boolean;
   onToggleSandbox?: () => void;
@@ -45,21 +69,42 @@ interface SeniorAdminDashboardProps {
 
 export default function SeniorAdminDashboard({
   orders = [],
+  products = [],
+  agents = [],
+  shippingCompanies = [],
+  permanentDrivers = [],
   showToast,
   askConfirm,
   currentUser,
-  permanentDrivers = [],
-  shippingCompanies = [],
+  onAddProduct,
+  onToggleProduct,
+  onDeleteProduct,
+  onUpdateProduct,
+  onAddAgent,
+  onToggleAgent,
+  onDeleteAgent,
+  onUpdateAgent,
+  onAddShippingCompany,
+  onUpdateShippingCompany,
+  onToggleShippingCompany,
+  onDeleteShippingCompany,
   onAddPermanentDriver,
   onBulkImportPermanentDrivers,
   onUpdatePermanentDriver,
   onTogglePermanentDriver,
   onDeletePermanentDriver,
+  onApproveOrder,
+  onRejectOrder,
+  onDispatchToFactory,
+  onUpdateAllOrders,
+  onApproveAllOrders,
+  onDispatchAllToFactory,
+  onSaveLocation,
   onClearTransactions,
   sandboxEnabled = true,
   onToggleSandbox
 }: SeniorAdminDashboardProps) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'SYSTEM_MONITOR' | 'PERMANENT_DRIVERS' | 'SEARCH_ORDERS'>('SYSTEM_MONITOR');
+  const [activeAdminTab, setActiveAdminTab] = useState<'SYSTEM_MONITOR' | 'SYSTEM_DEFINITIONS' | 'PERMANENT_DRIVERS' | 'SEARCH_ORDERS'>('SYSTEM_MONITOR');
   const [orderSearchQuery, setOrderSearchQuery] = useState<string>('');
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [systemMetrics, setSystemMetrics] = useState<any>(null);
@@ -351,6 +396,20 @@ export default function SeniorAdminDashboard({
 
         <button
           type="button"
+          onClick={() => setActiveAdminTab('SYSTEM_DEFINITIONS')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+            activeAdminTab === 'SYSTEM_DEFINITIONS'
+              ? 'bg-purple-900 text-white shadow-md'
+              : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200/80'
+          }`}
+        >
+          <Users className="w-4 h-4 text-emerald-400" />
+          <span>تعریف کاربران، نمایندگی‌ها و کالاها ({agents.length} نمایندگی / {products.length} محصول)</span>
+          <span className="px-2 py-0.5 bg-emerald-500 text-slate-950 text-[10px] rounded-full font-bold">تعریف پایه</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveAdminTab('PERMANENT_DRIVERS')}
           className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
             activeAdminTab === 'PERMANENT_DRIVERS'
@@ -376,6 +435,60 @@ export default function SeniorAdminDashboard({
           <span>استعلام و جستجوی سرتاسری سفارشات ({orders.length})</span>
         </button>
       </div>
+
+      {activeAdminTab === 'SYSTEM_DEFINITIONS' && (
+        <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 space-y-4" id="senior-admin-definitions-view">
+          <div className="bg-gradient-to-r from-purple-950 via-slate-900 to-indigo-950 text-white p-4 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border border-purple-800/50 shadow-md">
+            <div>
+              <h3 className="text-sm font-black text-amber-300 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-emerald-400" />
+                <span>تعریف و مدیریت دسترسی کاربران، نمایندگان و اطلاعات پایه (دسترسی ویژه ادمین ارشد)</span>
+              </h3>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                دسترسی کامل مدیریت جهت تعریف حساب کاربران، فعال‌سازی کدهای نمایندگی، فهرست محصولات و شرکت‌های حمل و نقل
+              </p>
+            </div>
+            <span className="px-3 py-1 bg-emerald-500 text-slate-950 font-black text-xs rounded-lg shadow-sm whitespace-nowrap">
+              دسترسی کامل ادمین ارشد 🛡️
+            </span>
+          </div>
+
+          <ManagerDashboard
+            orders={orders}
+            products={products}
+            agents={agents}
+            shippingCompanies={shippingCompanies}
+            permanentDrivers={permanentDrivers}
+            initialTab="PARTNERS_MGMT"
+            onApproveOrder={onApproveOrder || (() => {})}
+            onRejectOrder={onRejectOrder || (() => {})}
+            onDispatchToFactory={onDispatchToFactory || (() => {})}
+            onUpdateAllOrders={onUpdateAllOrders || (() => {})}
+            onAddProduct={onAddProduct || (async () => false)}
+            onToggleProduct={onToggleProduct || (() => {})}
+            onDeleteProduct={onDeleteProduct || (() => {})}
+            onUpdateProduct={onUpdateProduct || (async () => false)}
+            onAddAgent={onAddAgent || (async () => false)}
+            onToggleAgent={onToggleAgent || (() => {})}
+            onDeleteAgent={onDeleteAgent || (() => {})}
+            onUpdateAgent={onUpdateAgent || (async () => false)}
+            onAddShippingCompany={onAddShippingCompany || (async () => false)}
+            onUpdateShippingCompany={onUpdateShippingCompany || (async () => false)}
+            onToggleShippingCompany={onToggleShippingCompany || (() => {})}
+            onDeleteShippingCompany={onDeleteShippingCompany || (() => {})}
+            onAddPermanentDriver={onAddPermanentDriver}
+            onBulkImportPermanentDrivers={onBulkImportPermanentDrivers}
+            onUpdatePermanentDriver={onUpdatePermanentDriver}
+            onTogglePermanentDriver={onTogglePermanentDriver}
+            onDeletePermanentDriver={onDeletePermanentDriver}
+            onApproveAllOrders={onApproveAllOrders}
+            onDispatchAllToFactory={onDispatchAllToFactory}
+            onSaveLocation={onSaveLocation}
+            showToast={showToast}
+            askConfirm={askConfirm}
+          />
+        </div>
+      )}
 
       {activeAdminTab === 'SEARCH_ORDERS' && (
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm animate-fade-in space-y-5">

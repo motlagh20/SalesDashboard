@@ -67,6 +67,8 @@ export interface Product {
   imageUrl?: string;         // تصویر محصول (آدرس URL یا بیس۶۴)
 }
 
+export type PersonType = 'REAL' | 'LEGAL';
+
 export interface TerritoryAssignment {
   province: string;
   allCities: boolean; // if true, covers whole province
@@ -84,6 +86,12 @@ export interface Agent {
   territories?: TerritoryAssignment[]; // محدوده تفکیکی استان‌ها و شهرها
   isExportAgent?: boolean; // آیا نمایندگی مجاز به ثبت سفارش صادراتی است
   isEnabled: boolean; // فعال / غیرفعال بودن
+  personType?: PersonType; // 'REAL' (حقیقی) | 'LEGAL' (حقوقی)
+  companyName?: string; // نام شرکت یا موسسه حقوقی
+  registrationNumber?: string; // شماره ثبت شخص حقوقی
+  economicCode?: string; // شماره اقتصادی (مشترک)
+  nationalId?: string; // شناسه ملی (برای اشخاص حقوقی)
+  nationalCode?: string; // کد ملی نماینده (برای اشخاص حقیقی)
 }
 
 export interface ShippingCompany {
@@ -95,6 +103,8 @@ export interface ShippingCompany {
   address?: string;
   isEnabled: boolean;
   password?: string;
+  nationalId?: string; // شناسه ملی (برای شرکت‌های حمل و نقل)
+  economicCode?: string; // شماره اقتصادی (برای شرکت‌های حمل و نقل)
 }
 
 export interface PermanentDriver {
