@@ -98,6 +98,32 @@ export default function App() {
     };
   }, [currentUser, autoLockMinutes, isLocked]);
 
+  // Periodic heartbeat to track online status on server
+  useEffect(() => {
+    if (!currentUser) return;
+    const sendHeartbeat = async () => {
+      try {
+        await fetch('/api/users/heartbeat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            username: currentUser.username,
+            fullName: currentUser.fullName,
+            role: currentUser.role,
+            agentCode: currentUser.agentCode
+          })
+        });
+      } catch (err) {
+        // ignore network error
+      }
+    };
+
+    sendHeartbeat();
+    const interval = setInterval(sendHeartbeat, 15000);
+    return () => clearInterval(interval);
+  }, [currentUser]);
+
   const handleSaveAutoLockMinutes = (minutes: number) => {
     setAutoLockMinutes(minutes);
     localStorage.setItem('tabarestan_autolock_minutes', minutes.toString());

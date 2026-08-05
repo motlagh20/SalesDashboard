@@ -130,4 +130,6 @@ export interface AppUser {
   agentCode?: string | null;
   shippingCompanyId?: string | null;
   isEnabled: boolean;
+  isOnline?: boolean;
+  lastSeenAt?: string | null;
 }

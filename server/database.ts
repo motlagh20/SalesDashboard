@@ -1277,6 +1277,7 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "app_users", "shippingCompanyId", "VARCHAR(100) NULL");
     await ensureColumnExists(db, "app_users", "isEnabled", "TINYINT(1) DEFAULT 1");
     await ensureColumnExists(db, "app_users", "password", "VARCHAR(255) DEFAULT '123456'");
+    await ensureColumnExists(db, "app_users", "lastSeenAt", "VARCHAR(50) NULL");
 
     await ensureColumnExists(db, "orders", "sentToFactoryAt", "VARCHAR(50) NULL");
     await ensureColumnExists(db, "orders", "priorityIndex", "INT DEFAULT 0");

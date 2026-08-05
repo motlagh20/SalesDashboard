@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { PermanentDriver, ShippingCompany, Order, Product, Agent } from '../types';
+import { PermanentDriver, ShippingCompany, Order, Product, Agent, AppUser } from '../types';
 import PermanentDriversManager from './PermanentDriversManager';
 import ManagerDashboard from './ManagerDashboard';
 import {
@@ -115,6 +115,7 @@ export default function SeniorAdminDashboard({
   const [logsConsoleContent, setLogsConsoleContent] = useState<string>('');
   const [isRefreshingMonitor, setIsRefreshingMonitor] = useState<boolean>(false);
   const [registeredUsersCount, setRegisteredUsersCount] = useState<number>(0);
+  const [usersList, setUsersList] = useState<AppUser[]>([]);
   const [isClearingTransactions, setIsClearingTransactions] = useState<boolean>(false);
 
   const handleClearTransactionsClick = () => {
@@ -211,7 +212,7 @@ export default function SeniorAdminDashboard({
         }
       }
 
-      // 4. Fetch users count
+      // 4. Fetch users count & online status
       const resUsers = await fetch('/api/users');
       if (resUsers.ok) {
         const ct = resUsers.headers.get('content-type') || '';
@@ -219,6 +220,7 @@ export default function SeniorAdminDashboard({
           const data = await resUsers.json();
           if (Array.isArray(data)) {
             setRegisteredUsersCount(data.length);
+            setUsersList(data);
           }
         }
       }
@@ -695,16 +697,22 @@ export default function SeniorAdminDashboard({
         {/* KPI 2: Active Users / Registered Users */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md transition-all flex items-center justify-between">
           <div>
-            <span className="text-xs font-bold text-slate-500 block mb-1">کاربران مجاز و فعال سیستم</span>
+            <span className="text-xs font-bold text-slate-500 block mb-1">کاربران مجاز و آنلاین سیستم</span>
             <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-800">{registeredUsersCount || systemMetrics?.database?.counts?.users || 9}</span>
-              <span className="text-xs font-bold text-purple-600">کاربر فعال</span>
+              <span className="text-2xl font-black text-slate-800">{registeredUsersCount || systemMetrics?.database?.counts?.users || 0}</span>
+              <span className="text-xs font-bold text-purple-600">کل کاربران</span>
             </div>
-            <span className="text-[11px] text-slate-400 mt-1 block">
-              {systemMetrics?.software?.activeSessionsEstimate || 8} نشست آنلاین همزمان
-            </span>
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+              <span className="text-xs font-black text-emerald-600">
+                {usersList.filter(u => u.isOnline).length} کاربر آنلاین همزمان
+              </span>
+            </div>
           </div>
-          <div className="p-3.5 bg-blue-50 text-blue-600 rounded-2xl border border-blue-100">
+          <div className="p-3.5 bg-emerald-50 text-emerald-600 rounded-2xl border border-emerald-100">
             <UserCheck className="w-6 h-6" />
           </div>
         </div>
@@ -745,6 +753,96 @@ export default function SeniorAdminDashboard({
           <div className="p-3.5 bg-indigo-50 text-indigo-600 rounded-2xl border border-indigo-100">
             <Cpu className="w-6 h-6" />
           </div>
+        </div>
+      </div>
+
+      {/* Live Online Users Panel */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-6" id="online-users-live-panel">
+        <div className="p-5 md:p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
+              <UserCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base md:text-lg font-bold text-slate-800 flex items-center gap-2">
+                <span>کاربران آنلاین و حاضر در سامانه</span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span>{usersList.filter(u => u.isOnline).length} نفر آنلاین</span>
+                </span>
+              </h3>
+              <p className="text-slate-500 text-xs mt-0.5">
+                رصد زنده نشست‌های فعال و کاربران در حال استفاده از سامانه طبرستان
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={fetchSystemLogsAndStats}
+            className="self-start sm:self-auto px-3 py-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${isRefreshingMonitor ? 'animate-spin' : ''}`} />
+            <span>به‌روزرسانی وضعیت</span>
+          </button>
+        </div>
+
+        <div className="p-5">
+          {usersList.filter(u => u.isOnline).length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {usersList.filter(u => u.isOnline).map((u) => {
+                const matchedAgent = agents.find(a => a.agentCode === u.agentCode);
+                const matchedSC = shippingCompanies.find(sc => sc.id === u.shippingCompanyId);
+                return (
+                  <div key={u.id} className="p-4 bg-slate-50/80 hover:bg-emerald-50/30 border border-slate-200 hover:border-emerald-200 rounded-2xl transition-all relative">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="relative">
+                          <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-black text-sm flex items-center justify-center border border-emerald-300 shadow-sm">
+                            {u.fullName.slice(0, 2)}
+                          </div>
+                          <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-white"></span>
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-extrabold text-slate-800">{u.fullName}</h4>
+                          <span className="text-[11px] font-mono text-slate-500 dir-ltr text-right block">@{u.username}</span>
+                        </div>
+                      </div>
+                      <span className="py-0.5 px-2 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        🟢 آنلاین
+                      </span>
+                    </div>
+
+                    <div className="mt-3 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-600">
+                      <span className="font-bold">
+                        {u.role === 'SYSTEM_ADMIN' ? 'ادمین ارشد' :
+                         u.role === 'SALES_MANAGER' ? 'مدیر بازرگانی' :
+                         u.role === 'REPRESENTATIVE' ? 'نماینده فروش' :
+                         u.role === 'FACTORY_TRANSPORT' ? 'فروش کارخانه' : 'باربری'}
+                      </span>
+                      <span className="font-mono text-slate-500 dir-ltr">{u.phoneNumber}</span>
+                    </div>
+
+                    {(matchedAgent || matchedSC) && (
+                      <div className="mt-1.5 text-[10px] text-slate-600 bg-white/80 p-1.5 rounded-lg border border-slate-200/60">
+                        {matchedAgent ? `🏢 ${matchedAgent.alias}` : `🚚 ${matchedSC?.name}`}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+              <UserCheck className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+              <p className="text-xs font-bold text-slate-500">در حال حاضر هیچ کاربر دیگری آنلاین نیست.</p>
+              <p className="text-[11px] text-slate-400 mt-1">به محض ورود و فعالیت کاربران، وضعیت آن‌ها به صورت زنده بر روی این پنل نمایش داده خواهد شد.</p>
+            </div>
+          )}
         </div>
       </div>
 

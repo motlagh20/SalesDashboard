@@ -1734,6 +1734,77 @@ async function startServer() {
     }
   });
 
+  // --- ONLINE USERS TRACKING ---
+  const onlineUsersMap = new Map<string, { userId: string; username?: string; fullName?: string; role?: string; agentCode?: string; lastSeen: number }>();
+
+  function getOnlineUsersList() {
+    const now = Date.now();
+    const result: Array<{ userId: string; username?: string; fullName?: string; role?: string; agentCode?: string; lastSeenAt: string }> = [];
+    for (const [id, info] of onlineUsersMap.entries()) {
+      if (now - info.lastSeen < 120000) { // 2 minutes threshold
+        result.push({
+          userId: info.userId || id,
+          username: info.username,
+          fullName: info.fullName,
+          role: info.role,
+          agentCode: info.agentCode,
+          lastSeenAt: new Date(info.lastSeen).toISOString()
+        });
+      }
+    }
+    return result;
+  }
+
+  // HEARTBEAT ENDPOINT
+  app.post("/api/users/heartbeat", async (req, res) => {
+    try {
+      const { userId, username, fullName, role, agentCode } = req.body;
+      if (!userId && !username) {
+        return res.status(400).json({ error: "userId or username is required" });
+      }
+      const targetId = userId || username;
+      const nowIso = new Date().toISOString();
+      const nowMs = Date.now();
+
+      onlineUsersMap.set(targetId, {
+        userId: targetId,
+        username,
+        fullName,
+        role,
+        agentCode,
+        lastSeen: nowMs
+      });
+
+      if (username) {
+        onlineUsersMap.set(username, {
+          userId: targetId,
+          username,
+          fullName,
+          role,
+          agentCode,
+          lastSeen: nowMs
+        });
+      }
+
+      try {
+        const db = getDbPool();
+        await db.query("UPDATE app_users SET lastSeenAt = ? WHERE id = ? OR username = ?", [nowIso, targetId, username || targetId]);
+      } catch (dbErr) {
+        // ignore db error
+      }
+
+      const activeList = getOnlineUsersList();
+      res.json({
+        success: true,
+        timestamp: nowIso,
+        onlineCount: activeList.length,
+        onlineUsers: activeList
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET ALL USERS
   app.get("/api/users", async (req, res) => {
     try {
@@ -1794,10 +1865,21 @@ async function startServer() {
       }
 
       const [rows] = await db.query("SELECT * FROM app_users");
-      const users = (rows as any[]).map(u => ({
-        ...u,
-        isEnabled: !!u.isEnabled
-      }));
+      const activeList = getOnlineUsersList();
+      const onlineUserIds = new Set(activeList.map(u => u.userId));
+      const onlineUsernames = new Set(activeList.map(u => u.username).filter(Boolean));
+      const now = Date.now();
+
+      const users = (rows as any[]).map(u => {
+        const lastSeenMs = u.lastSeenAt ? new Date(u.lastSeenAt).getTime() : 0;
+        const isOnline = onlineUserIds.has(u.id) || onlineUsernames.has(u.username) || (now - lastSeenMs < 120000);
+        return {
+          ...u,
+          isEnabled: !!u.isEnabled,
+          isOnline: !!isOnline,
+          lastSeenAt: u.lastSeenAt || (isOnline ? new Date().toISOString() : null)
+        };
+      });
       res.json(users);
     } catch (err: any) {
       console.error("Error in GET /api/users:", err);
@@ -2158,7 +2240,8 @@ async function startServer() {
           nodeRssMb: Math.round(memUsage.rss / (1024 * 1024)),
           heapUsedMb: Math.round(memUsage.heapUsed / (1024 * 1024)),
           heapTotalMb: Math.round(memUsage.heapTotal / (1024 * 1024)),
-          activeSessionsEstimate: Math.max(userCount, 8),
+          activeSessionsEstimate: getOnlineUsersList().length || 1,
+          onlineUsersCount: getOnlineUsersList().length,
           httpStatus: 'ONLINE (Port 3000)',
           responseLatencyMs: Math.floor(12 + Math.random() * 15),
         },

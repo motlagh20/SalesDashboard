@@ -466,6 +466,7 @@ export default function ManagerDashboard({
 
   // --- USERS MANAGEMENT STATE ---
   const [users, setUsers] = useState<AppUser[]>([]);
+  const [userOnlineFilter, setUserOnlineFilter] = useState<'ALL' | 'ONLINE' | 'OFFLINE'>('ALL');
   const [newUsername, setNewUsername] = useState('');
   const [newUserFullName, setNewUserFullName] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('');
@@ -475,7 +476,7 @@ export default function ManagerDashboard({
   const [newUserSCId, setNewUserSCId] = useState('');
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
 
-    const fetchUsers = async () => {
+  const fetchUsers = async () => {
     try {
       const res = await fetch('/api/users');
       if (res.ok) {
@@ -494,6 +495,8 @@ export default function ManagerDashboard({
 
   useEffect(() => {
     fetchUsers();
+    const interval = setInterval(fetchUsers, 10000);
+    return () => clearInterval(interval);
   }, [agents, shippingCompanies]);
 
   const handleAddUser = async (e: React.FormEvent) => {
@@ -2364,6 +2367,51 @@ export default function ManagerDashboard({
             
             {/* Right block: Users list (8 columns) */}
             <div className="lg:col-span-8 space-y-4">
+              {/* Online Users Status Bar */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                  </span>
+                  <div>
+                    <span className="font-extrabold text-slate-800">وضعیت حضور زنده کاربران: </span>
+                    <span className="font-black text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full mr-1">
+                      {users.filter(u => u.isOnline).length} نفر آنلاین
+                    </span>
+                    <span className="text-slate-500 mr-2 text-[11px]">(از کل {users.length} کاربر تعریف شده)</span>
+                  </div>
+                </div>
+
+                {/* Filter buttons */}
+                <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-lg">
+                  <button
+                    onClick={() => setUserOnlineFilter('ALL')}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                      userOnlineFilter === 'ALL' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    همه ({users.length})
+                  </button>
+                  <button
+                    onClick={() => setUserOnlineFilter('ONLINE')}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      userOnlineFilter === 'ONLINE' ? 'bg-emerald-600 text-white shadow-sm' : 'text-emerald-700 hover:bg-emerald-50'
+                    }`}
+                  >
+                    <span>🟢 آنلاین ({users.filter(u => u.isOnline).length})</span>
+                  </button>
+                  <button
+                    onClick={() => setUserOnlineFilter('OFFLINE')}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      userOnlineFilter === 'OFFLINE' ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>⚪ آفلاین ({users.filter(u => !u.isOnline).length})</span>
+                  </button>
+                </div>
+              </div>
+
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">
                   <table className="w-full text-right border-collapse text-xs">
@@ -2374,51 +2422,74 @@ export default function ManagerDashboard({
                         <th className="p-3 font-sans">شماره تماس (جهت پیامک)</th>
                         <th className="p-3 font-sans">نقش سیستمی</th>
                         <th className="p-3 font-sans">منتسب به</th>
-                        <th className="p-3 font-sans text-center">وضعیت</th>
+                        <th className="p-3 font-sans text-center">اتصال آنلاین</th>
+                        <th className="p-3 font-sans text-center">دسترسی ورود</th>
                         <th className="p-3 font-sans text-center w-20">عملیات</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {users.map((u) => {
-                        const matchedAgent = agents.find(a => a.agentCode === u.agentCode);
-                        const matchedSC = shippingCompanies.find(sc => sc.id === u.shippingCompanyId);
-                        return (
-                          <tr key={u.id} className="border-b border-slate-100 hover:bg-slate-50/50">
-                            <td className="p-3 font-bold text-slate-800 font-sans">{u.fullName}</td>
-                            <td className="p-3 font-mono text-slate-600">{u.username}</td>
-                            <td className="p-3 font-mono text-slate-600">{u.phoneNumber}</td>
-                            <td className="p-3 font-sans">
-                              <span className={`py-0.5 px-2 rounded-full text-[10px] font-bold font-sans ${
-                                u.role === 'SYSTEM_ADMIN' ? 'bg-purple-100 text-purple-800' :
-                                u.role === 'SALES_MANAGER' ? 'bg-amber-100 text-amber-800' :
-                                u.role === 'REPRESENTATIVE' ? 'bg-emerald-100 text-emerald-800' :
-                                u.role === 'FACTORY_TRANSPORT' ? 'bg-blue-100 text-blue-800' :
-                                'bg-indigo-100 text-indigo-800'
-                              }`}>
-                                {u.role === 'SYSTEM_ADMIN' ? 'ادمین ارشد سیستم' :
-                                 u.role === 'SALES_MANAGER' ? 'مدیر بازرگانی' :
-                                 u.role === 'REPRESENTATIVE' ? 'نماینده فروش' :
-                                 u.role === 'FACTORY_TRANSPORT' ? 'فروش کارخانه' :
-                                 'شرکت باربری'}
-                              </span>
-                            </td>
-                            <td className="p-3 text-slate-500 font-sans">
-                              {u.role === 'REPRESENTATIVE' && matchedAgent ? (
-                                <span className="text-[10px] font-extrabold text-emerald-700">🏢 {matchedAgent.alias}</span>
-                              ) : u.role === 'SHIPPING_COMPANY' && matchedSC ? (
-                                <span className="text-[10px] font-extrabold text-blue-700 font-sans">🚚 {matchedSC.name}</span>
-                              ) : (
-                                <span className="text-slate-400 font-sans">-</span>
-                              )}
-                            </td>
-                            <td className="p-3 text-center font-sans">
-                              <span className={`inline-flex items-center gap-1 py-0.5 px-2 rounded text-[10px] font-bold ${
-                                u.isEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-                              }`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${u.isEnabled ? 'bg-emerald-600' : 'bg-rose-600'}`} />
-                                {u.isEnabled ? 'مجاز به ورود' : 'منع ورود (تعلیق)'}
-                              </span>
-                            </td>
+                      {users
+                        .filter(u => {
+                          if (userOnlineFilter === 'ONLINE') return u.isOnline;
+                          if (userOnlineFilter === 'OFFLINE') return !u.isOnline;
+                          return true;
+                        })
+                        .map((u) => {
+                          const matchedAgent = agents.find(a => a.agentCode === u.agentCode);
+                          const matchedSC = shippingCompanies.find(sc => sc.id === u.shippingCompanyId);
+                          return (
+                            <tr key={u.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                              <td className="p-3 font-bold text-slate-800 font-sans">{u.fullName}</td>
+                              <td className="p-3 font-mono text-slate-600">{u.username}</td>
+                              <td className="p-3 font-mono text-slate-600">{u.phoneNumber}</td>
+                              <td className="p-3 font-sans">
+                                <span className={`py-0.5 px-2 rounded-full text-[10px] font-bold font-sans ${
+                                  u.role === 'SYSTEM_ADMIN' ? 'bg-purple-100 text-purple-800' :
+                                  u.role === 'SALES_MANAGER' ? 'bg-amber-100 text-amber-800' :
+                                  u.role === 'REPRESENTATIVE' ? 'bg-emerald-100 text-emerald-800' :
+                                  u.role === 'FACTORY_TRANSPORT' ? 'bg-blue-100 text-blue-800' :
+                                  'bg-indigo-100 text-indigo-800'
+                                }`}>
+                                  {u.role === 'SYSTEM_ADMIN' ? 'ادمین ارشد سیستم' :
+                                   u.role === 'SALES_MANAGER' ? 'مدیر بازرگانی' :
+                                   u.role === 'REPRESENTATIVE' ? 'نماینده فروش' :
+                                   u.role === 'FACTORY_TRANSPORT' ? 'فروش کارخانه' :
+                                   'شرکت باربری'}
+                                </span>
+                              </td>
+                              <td className="p-3 text-slate-500 font-sans">
+                                {u.role === 'REPRESENTATIVE' && matchedAgent ? (
+                                  <span className="text-[10px] font-extrabold text-emerald-700">🏢 {matchedAgent.alias}</span>
+                                ) : u.role === 'SHIPPING_COMPANY' && matchedSC ? (
+                                  <span className="text-[10px] font-extrabold text-blue-700 font-sans">🚚 {matchedSC.name}</span>
+                                ) : (
+                                  <span className="text-slate-400 font-sans">-</span>
+                                )}
+                              </td>
+                              <td className="p-3 text-center font-sans">
+                                {u.isOnline ? (
+                                  <span className="inline-flex items-center gap-1.5 py-0.5 px-2 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    <span className="relative flex h-2 w-2">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                    </span>
+                                    <span>آنلاین</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 py-0.5 px-2 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                    <span>آفلاین</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 text-center font-sans">
+                                <span className={`inline-flex items-center gap-1 py-0.5 px-2 rounded text-[10px] font-bold ${
+                                  u.isEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                                }`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${u.isEnabled ? 'bg-emerald-600' : 'bg-rose-600'}`} />
+                                  {u.isEnabled ? 'مجاز' : 'تعلیق'}
+                                </span>
+                              </td>
                             <td className="p-3 text-center">
                               <div className="flex items-center justify-center gap-1.5">
                                 <button
@@ -3220,9 +3291,18 @@ export default function ManagerDashboard({
             
             {/* Right block: Users list (8 columns) */}
             <div className="lg:col-span-8 space-y-4">
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-600 flex items-center justify-between gap-1.5 font-sans">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-600 flex flex-col sm:flex-row sm:items-center justify-between gap-2 font-sans">
                 <div className="text-right">
-                  <h4 className="font-bold text-slate-800">تعریف کاربران و مدیریت سطوح دسترسی سامانه طبرستان</h4>
+                  <h4 className="font-bold text-slate-800 flex items-center gap-2">
+                    <span>تعریف کاربران و مدیریت سطوح دسترسی سامانه طبرستان</span>
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </span>
+                      <span>{users.filter(u => u.isOnline).length} آنلاین</span>
+                    </span>
+                  </h4>
                   <p className="text-[10px] text-slate-500 mt-0.5 font-sans">کاربران تعریف‌شده می‌توانند با شماره تلفن خود و دریافت کد تایید پیامکی (OTP) وارد کارتابل اختصاصی خود شوند.</p>
                 </div>
                 <Users className="w-5 h-5 text-amber-500 flex-shrink-0" />
@@ -3238,7 +3318,8 @@ export default function ManagerDashboard({
                         <th className="p-3">شماره تماس (جهت پیامک)</th>
                         <th className="p-3">نقش سیستمی</th>
                         <th className="p-3">منتسب به</th>
-                        <th className="p-3 text-center">وضعیت</th>
+                        <th className="p-3 text-center">اتصال آنلاین</th>
+                        <th className="p-3 text-center">وضعیت ورود</th>
                         <th className="p-3 text-center w-20">عملیات</th>
                       </tr>
                     </thead>
@@ -3274,7 +3355,7 @@ export default function ManagerDashboard({
                         return (
                           <tr key={u.id} className="border-b border-slate-100 hover:bg-slate-50 transition-all">
                             <td className="p-3 font-bold text-slate-900 flex items-center gap-1.5">
-                              <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                              <span className={`w-2 h-2 rounded-full ${u.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></span>
                               <span>{u.fullName}</span>
                             </td>
                             <td className="p-3 font-mono text-slate-600">{u.username}</td>
@@ -3285,6 +3366,22 @@ export default function ManagerDashboard({
                               </span>
                             </td>
                             <td className="p-3 text-slate-500 font-bold">{matchDesc}</td>
+                            <td className="p-3 text-center">
+                              {u.isOnline ? (
+                                <span className="inline-flex items-center gap-1.5 py-0.5 px-2 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                  <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                  </span>
+                                  <span>آنلاین</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 py-0.5 px-2 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                  <span>آفلاین</span>
+                                </span>
+                              )}
+                            </td>
                             <td className="p-3 text-center">
                               <button
                                 onClick={() => handleToggleUser(u.id)}
