@@ -140,121 +140,12 @@ function seedJsonIfEmpty() {
     changed = true;
   }
 
-  if (!data.orders || data.orders.length === 0) {
-    console.log("🌱 [Mock Seed] Seeding default orders...");
-    data.orders = [
-      {
-        id: 'ord-101',
-        orderNumber: 'TCI-1402-01',
-        customerName: 'نمایندگی تهران (احمدی)',
-        agentCode: 'AG-9081',
-        productId: 'prod-1',
-        productName: 'سفال سقف طبرستان (طرح کلاسیک)',
-        quantity: 12000,
-        unit: 'عدد',
-        destinationCity: 'تهران - شهریار',
-        exactAddress: 'سایت پروژه تفریحی دیپلمات، میدان نماز، انتهای بلوار کلهر، پلاک ۶۴',
-        phoneNumber: '09121111111',
-        notes: 'تحویل اضطراری تا پایان هفته. هماهنگی قبل از ارسال الزامی است.',
-        createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-        status: 'LOADED_AND_DISPATCHED',
-        vehicleType: 'تریلی ۱۸ چرخ لبه‌دار',
-        driverName: 'کریم قنبری',
-        driverPhone: '09117772222',
-        licensePlate: '۵۴ ع ۸۹۲ ایران ۷۲',
-        shippingAgency: 'باربری ترانزیت شمال',
-        estimatedArrival: '۲۴ ساعت آینده',
-        priorityIndex: 0,
-        sentToFactoryAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-        rejectionReason: null
-      },
-      {
-        id: 'ord-102',
-        orderNumber: 'TCI-1402-02',
-        customerName: 'نمایندگی اصفهان (رجایی)',
-        agentCode: 'AG-6055',
-        productId: 'prod-3',
-        productName: 'آجر سفال ۱۵ سانتی درجه یک طبرستان',
-        quantity: 18000,
-        unit: 'قالب',
-        destinationCity: 'اصفهان - شهرک صنعتی جی',
-        exactAddress: 'انبار مرکزی نمایندگی رجایی، خیابان دهم، پلاک ۲',
-        phoneNumber: '09132222222',
-        notes: 'لطفاً بارگیری از کوره تمام اتوماتیک شماره ۲ باشد.',
-        createdAt: new Date(Date.now() - 1.5 * 24 * 60 * 60 * 1000).toISOString(),
-        status: 'VEHICLE_ASSIGNED',
-        vehicleType: 'کامیون جفت ۱۰ تن',
-        driverName: 'غلامرضا صادقی',
-        driverPhone: '09139998888',
-        licensePlate: '۷۲ ب ۵۵۱ ایران ۵۳',
-        shippingAgency: 'باربری زاینده‌رود',
-        estimatedArrival: 'فردا صبح ساعت ۸',
-        priorityIndex: 0,
-        rejectionReason: null,
-        sentToFactoryAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
-      },
-      {
-        id: 'ord-103',
-        orderNumber: 'TCI-1402-03',
-        customerName: 'نمایندگی رشت (پوربخش)',
-        agentCode: 'AG-2019',
-        productId: 'prod-2',
-        productName: 'آجر سفال ۱۰ سانتی طبرستان (تیغه)',
-        quantity: 25000,
-        unit: 'قالب',
-        destinationCity: 'گیلان - رشت',
-        exactAddress: 'پروژه تعاونی فرهنگیان، جاده انزلی، نرسیده به پلیس راه',
-        phoneNumber: '09113333333',
-        createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-        status: 'APPROVED_BY_SALES',
-        priorityIndex: 0,
-        rejectionReason: null,
-        sentToFactoryAt: null,
-        vehicleType: null,
-        driverName: null,
-        driverPhone: null,
-        licensePlate: null,
-        shippingAgency: null,
-        estimatedArrival: null
-      },
-      {
-        id: 'ord-104',
-        orderNumber: 'TCI-1402-04',
-        customerName: 'نمایندگی شیراز (نمازی)',
-        agentCode: 'AG-7023',
-        productId: 'prod-4',
-        productName: 'آجر نما نسوز سموتی طبرستان',
-        quantity: 8000,
-        unit: 'قالب',
-        destinationCity: 'فارس - شیراز',
-        exactAddress: 'بلوار معالی آباد، کوچه ۱۲، پلاک آخر سمت چپ',
-        phoneNumber: '09174444444',
-        createdAt: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
-        status: 'PENDING_APPROVAL',
-        priorityIndex: 0,
-        rejectionReason: null,
-        sentToFactoryAt: null,
-        vehicleType: null,
-        driverName: null,
-        driverPhone: null,
-        licensePlate: null,
-        shippingAgency: null,
-        estimatedArrival: null
-      }
-    ];
-
-    data.order_history = [
-      { id: 1, orderId: 'ord-101', status: 'PENDING_APPROVAL', updatedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), comment: 'ثبت سفارش توسط نمایندگی احمدی' },
-      { id: 2, orderId: 'ord-101', status: 'APPROVED_BY_SALES', updatedAt: new Date(Date.now() - 2.5 * 24 * 60 * 60 * 1000).toISOString(), comment: 'تایید حجم سفارش توسط واحد مالی و فروش تهران' },
-      { id: 3, orderId: 'ord-101', status: 'VEHICLE_ASSIGNED', updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), comment: 'اختصاص تریلی ۱۸ چرخ البرز به رانندگی قنبری' },
-      { id: 4, orderId: 'ord-101', status: 'LOADED_AND_DISPATCHED', updatedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), comment: 'بارگیری انجام شد و کامیون به مقصد حرکت کرد.' },
-      { id: 5, orderId: 'ord-102', status: 'PENDING_APPROVAL', updatedAt: new Date(Date.now() - 1.5 * 24 * 60 * 60 * 1000).toISOString(), comment: 'سفارش جدید نمایندگی اصفهان' },
-      { id: 6, orderId: 'ord-102', status: 'APPROVED_BY_SALES', updatedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), comment: 'تایید سقف اعتباری و حواله مالی' },
-      { id: 7, orderId: 'ord-102', status: 'VEHICLE_ASSIGNED', updatedAt: new Date(Date.now() - 0.2 * 24 * 60 * 60 * 1000).toISOString(), comment: 'معرفی کامیون جفت جهت بارگیری فردا صبح' },
-      { id: 8, orderId: 'ord-103', status: 'PENDING_APPROVAL', updatedAt: new Date(Date.now() - 4 * 60 * 60 * 1000 - 10000).toISOString(), comment: 'ثبت سیستم شد' },
-      { id: 9, orderId: 'ord-103', status: 'APPROVED_BY_SALES', updatedAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(), comment: 'مدیریت فروش سفارش را به کارخانه ارجاع داد.' },
-      { id: 10, orderId: 'ord-104', status: 'PENDING_APPROVAL', updatedAt: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(), comment: 'در انتظار بررسی بخش مدیریت مالی و فروش' }
-    ];
+  if (!data.orders) {
+    data.orders = [];
+    changed = true;
+  }
+  if (!data.order_history) {
+    data.order_history = [];
     changed = true;
   }
 
@@ -1005,6 +896,10 @@ function executeQuery(sql: string, values: any[] = []): any {
   if (/DELETE\s+FROM/i.test(cleanSql)) {
     if (cleanSql.includes("order_history")) jsonData.order_history = [];
     if (cleanSql.includes("orders")) jsonData.orders = [];
+    if (cleanSql.includes("user_activity_logs")) {
+      jsonData.user_activity_logs = [];
+      inMemoryActivityLogs.length = 0;
+    }
     if (cleanSql.includes("products")) jsonData.products = [];
     if (cleanSql.includes("agents")) jsonData.agents = [];
     if (cleanSql.includes("shipping_companies")) jsonData.shipping_companies = [];
@@ -1465,243 +1360,55 @@ async function seedDatabaseIfEmpty(db: mysql.Pool) {
       }
     }
 
-    // 2. Agents
-    const [agentRows] = await db.query("SELECT COUNT(*) as count FROM agents") as any[];
-    const agentCount = (agentRows && agentRows[0]?.count !== undefined) ? agentRows[0].count : 0;
-    if (agentCount === 0) {
-      console.log("🌱 [Seed] Seeding default agents...");
-      const dummyAgents = [
-        ['ag-1', 'آقای حمیدرضا احمدی', 'نمایندگی تهران (احمدی)', 'AG-9081', '09121111111', 'تهران، ابتدای جاده قدیم کرج، مجتمع تجاری پایتخت، پلاک ۱۲', 'استان تهران و حومه البرز', 1],
-        ['ag-2', 'آقای علیرضا رجایی', 'نمایندگی اصفهان (رجایی)', 'AG-6055', '09132222222', 'اصفهان، بلوار فرودگاه، نرسیده به شهرک صنعتی جی، پلاک ۴۶', 'استان اصفهان و یزد', 1],
-        ['ag-3', 'آقای سهراب پوربخش', 'نمایندگی رشت (پوربخش)', 'AG-2019', '09113333333', 'گیلان، رشت، کیلومتر ۵ جاده انزلی، جنب انبار فومن‌شیمی', 'استان گیلان و غربی مازندران', 1],
-        ['ag-4', 'آقای کریم نمازی', 'نمایندگی شیراز (نمازی)', 'AG-7023', '09174444444', 'فارس، شیراز، بلوار امیرکبیر، روبروی باغ جنت، مجتمع سفال', 'استان فارس و استان بوشهر', 1]
+    // 4. Orders table ready check (no auto-seeding of fake orders on empty database)
+
+    // 5. App Users
+    const [userRows] = await db.query("SELECT COUNT(*) as count FROM app_users") as any[];
+    const userCount = (userRows && userRows[0]?.count !== undefined) ? userRows[0].count : 0;
+    if (userCount === 0) {
+      console.log("🌱 [Seed] Seeding default app users...");
+      const dummyUsers = [
+        ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, '123456'],
+        ['usr-1', 'manager', 'آقای احمدی (مدیر بازرگانی)', '09121111111', 'SALES_MANAGER', null, null, 1, '123456'],
+        ['usr-2', 'rep_tehran', 'آقای حمیدرضا احمدی', '09120000001', 'REPRESENTATIVE', 'AG-9081', null, 1, '123456'],
+        ['usr-3', 'rep_esfahan', 'آقای علیرضا رجایی', '09130000002', 'REPRESENTATIVE', 'AG-6055', null, 1, '123456'],
+        ['usr-4', 'rep_rasht', 'آقای سهراب پوربخش', '09110000003', 'REPRESENTATIVE', 'AG-2019', null, 1, '123456'],
+        ['usr-5', 'rep_shiraz', 'آقای کریم نمازی', '09170000004', 'REPRESENTATIVE', 'AG-7023', null, 1, '123456'],
+        ['usr-6', 'factory', 'مسئول اول فروش کارخانه', '09110000005', 'FACTORY_TRANSPORT', null, null, 1, '123456'],
+        ['usr-62', 'factory2', 'مسئول دوم فروش کارخانه', '09110000007', 'FACTORY_TRANSPORT', null, null, 1, '123456'],
+        ['usr-7', 'shipping_transit', 'باربری ترانزیت طبرستان', '09110000006', 'SHIPPING_COMPANY', null, 'sc-1', 1, '123456']
       ];
-      for (const a of dummyAgents) {
+      for (const u of dummyUsers) {
         await db.query(
-          "INSERT INTO agents (id, fullName, alias, agentCode, phoneNumber, address, area, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-          a
+          "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          u
+        );
+      }
+    } else {
+      // Ensure SYSTEM_ADMIN (admin) user exists in SQL database if missing
+      const [adminRows] = await db.query("SELECT COUNT(*) as count FROM app_users WHERE username = 'admin' OR role = 'SYSTEM_ADMIN' OR phoneNumber = '09120000000'") as any[];
+      const adminCount = (adminRows && adminRows[0]?.count !== undefined) ? adminRows[0].count : 0;
+      if (adminCount === 0) {
+        console.log("🛡️ [Seed] Auto-inserting missing SYSTEM_ADMIN (admin) user in SQL database...");
+        await db.query(
+          "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, '123456']
         );
       }
     }
 
-    // 3. Shipping companies
-    const [shipRows] = await db.query("SELECT COUNT(*) as count FROM shipping_companies") as any[];
-    const shipCount = (shipRows && shipRows[0]?.count !== undefined) ? shipRows[0].count : 0;
-    if (shipCount === 0) {
-      console.log("🌱 [Seed] Seeding default shipping companies...");
-      const dummyShipping = [
-        ['sc-1', 'باربری ترانزیت طبرستان', 'SC-101', '01133334444', 'آقای صالحی', 1],
-        ['sc-2', 'باربری زاینده‌رود طبرستان', 'SC-102', '01133335555', 'آقای صادقی', 1],
-        ['sc-3', 'اتوبار کاسپین طبرستان', 'SC-103', '01133336666', 'آقای احمدی', 1]
-      ];
-      for (const s of dummyShipping) {
-        await db.query(
-          "INSERT INTO shipping_companies (id, name, code, phoneNumber, managerName, isEnabled) VALUES (?, ?, ?, ?, ?, ?)",
-          s
-        );
-      }
-    }
-
-    // 4. Orders and history
-    const [orderRows] = await db.query("SELECT COUNT(*) as count FROM orders") as any[];
-    const orderCount = (orderRows && orderRows[0]?.count !== undefined) ? orderRows[0].count : 0;
-    if (orderCount === 0) {
-      console.log("🌱 [Seed] Seeding default orders...");
-      const dummyOrders = [
-        {
-          id: 'ord-101',
-          orderNumber: 'TCI-1402-01',
-          customerName: 'نمایندگی تهران (احمدی)',
-          agentCode: 'AG-9081',
-          productId: 'prod-1',
-          productName: 'سفال سقف طبرستان (طرح کلاسیک)',
-          quantity: 12000,
-          unit: 'عدد',
-          destinationCity: 'تهران - شهریار',
-          exactAddress: 'سایت پروژه تفریحی دیپلمات، میدان نماز، انتهای بلوار کلهر، پلاک ۶۴',
-          phoneNumber: '09121111111',
-          notes: 'تحویل اضطراری تا پایان هفته. هماهنگی قبل از ارسال الزامی است.',
-          createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-          status: 'LOADED_AND_DISPATCHED',
-          vehicleType: 'تریلی ۱۸ چرخ لبه‌دار',
-          driverName: 'کریم قنبری',
-          driverPhone: '09117772222',
-          licensePlate: '۵۴ ع ۸۹۲ ایران ۷۲',
-          shippingAgency: 'باربری ترانزیت شمال',
-          estimatedArrival: '۲۴ ساعت آینده',
-          priorityIndex: 0,
-          history: [
-            { status: 'PENDING_APPROVAL', offsetDays: -3, comment: 'ثبت سفارش توسط نمایندگی احمدی' },
-            { status: 'APPROVED_BY_SALES', offsetDays: -2.5, comment: 'تایید حجم سفارش توسط واحد مالی و فروش تهران' },
-            { status: 'VEHICLE_ASSIGNED', offsetDays: -2, comment: 'اختصاص تریلی ۱۸ چرخ البرز به رانندگی قنبری' },
-            { status: 'LOADED_AND_DISPATCHED', offsetDays: -1, comment: 'بارگیری انجام شد و کامیون به مقصد حرکت کرد.' }
-          ]
-        },
-        {
-          id: 'ord-102',
-          orderNumber: 'TCI-1402-02',
-          customerName: 'نمایندگی اصفهان (رجایی)',
-          agentCode: 'AG-6055',
-          productId: 'prod-3',
-          productName: 'آجر سفال ۱۵ سانتی درجه یک طبرستان',
-          quantity: 18000,
-          unit: 'قالب',
-          destinationCity: 'اصفهان - شهرک صنعتی جی',
-          exactAddress: 'انبار مرکزی نمایندگی رجایی، خیابان دهم، پلاک ۲',
-          phoneNumber: '09132222222',
-          notes: 'لطفاً بارگیری از کوره تمام اتوماتیک شماره ۲ باشد.',
-          createdAt: new Date(Date.now() - 1.5 * 24 * 60 * 60 * 1000).toISOString(),
-          status: 'VEHICLE_ASSIGNED',
-          vehicleType: 'کامیون جفت ۱۰ تن',
-          driverName: 'غلامرضا صادقی',
-          driverPhone: '09139998888',
-          licensePlate: '۷۲ ب ۵۵۱ ایران ۵۳',
-          shippingAgency: 'باربری زاینده‌رود',
-          estimatedArrival: 'فردا صبح ساعت ۸',
-          priorityIndex: 0,
-          history: [
-            { status: 'PENDING_APPROVAL', offsetDays: -1.5, comment: 'سفارش جدید نمایندگی اصفهان' },
-            { status: 'APPROVED_BY_SALES', offsetDays: -1, comment: 'تایید سقف اعتباری و حواله مالی' },
-            { status: 'VEHICLE_ASSIGNED', offsetDays: -0.2, comment: 'معرفی کامیون جفت جهت بارگیری فردا صبح' }
-          ]
-        },
-        {
-          id: 'ord-103',
-          orderNumber: 'TCI-1402-03',
-          customerName: 'نمایندگی رشت (پوربخش)',
-          agentCode: 'AG-2019',
-          productId: 'prod-2',
-          productName: 'آجر سفال ۱۰ سانتی طبرستان (تیغه)',
-          quantity: 25000,
-          unit: 'قالب',
-          destinationCity: 'گیلان - رشت',
-          exactAddress: 'پروژه تعاونی فرهنگیان، جاده انزلی، نرسیده به پلیس راه',
-          phoneNumber: '09113333333',
-          createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-          status: 'APPROVED_BY_SALES',
-          priorityIndex: 0,
-          history: [
-            { status: 'PENDING_APPROVAL', offsetDays: -0.16, comment: 'ثبت سیستم شد' },
-            { status: 'APPROVED_BY_SALES', offsetDays: -0.08, comment: 'مدیریت فروش سفارش را به کارخانه ارجاع داد.' }
-          ]
-        },
-        {
-          id: 'ord-104',
-          orderNumber: 'TCI-1402-04',
-          customerName: 'نمایندگی شیراز (نمازی)',
-          agentCode: 'AG-7023',
-          productId: 'prod-4',
-          productName: 'آجر نما نسوز سموتی طبرستان',
-          quantity: 8000,
-          unit: 'قالب',
-          destinationCity: 'فارس - شیراز',
-          exactAddress: 'بلوار معالی آباد، کوچه ۱۲، پلاک آخر سمت چپ',
-          phoneNumber: '09174444444',
-          createdAt: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
-          status: 'PENDING_APPROVAL',
-          priorityIndex: 0,
-          history: [
-            { status: 'PENDING_APPROVAL', offsetDays: -0.04, comment: 'در انتظار بررسی بخش مدیریت مالی و فروش' }
-          ]
-        }
-      ];
- 
-       for (const o of dummyOrders) {
-         await db.query(`
-           INSERT INTO orders (
-             id, orderNumber, customerName, agentCode, productId, productName, quantity, unit,
-             destinationCity, exactAddress, phoneNumber, notes, createdAt, status, priorityIndex,
-             vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         `, [
-           o.id, o.orderNumber, o.customerName, o.agentCode, o.productId, o.productName, o.quantity, o.unit,
-           o.destinationCity, o.exactAddress, o.phoneNumber, o.notes || null, o.createdAt, o.status, o.priorityIndex,
-           o.vehicleType || null, o.driverName || null, o.driverPhone || null, o.licensePlate || null, o.shippingAgency || null, o.estimatedArrival || null
-         ]);
- 
-         for (const h of o.history) {
-           const timestamp = h.offsetDays 
-             ? new Date(Date.now() + h.offsetDays * 24 * 60 * 60 * 1000).toISOString()
-             : new Date().toISOString();
-           await db.query(`
-             INSERT INTO order_history (orderId, status, updatedAt, comment)
-             VALUES (?, ?, ?, ?)
-           `, [o.id, h.status, timestamp, h.comment]);
-         }
-       }
-     }
-     // 5. App Users
-      const [userRows] = await db.query("SELECT COUNT(*) as count FROM app_users") as any[];
-      const userCount = (userRows && userRows[0]?.count !== undefined) ? userRows[0].count : 0;
-      if (userCount === 0) {
-        console.log("🌱 [Seed] Seeding default app users...");
-        const dummyUsers = [
-          ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, '123456'],
-          ['usr-1', 'manager', 'آقای احمدی (مدیر بازرگانی)', '09121111111', 'SALES_MANAGER', null, null, 1, '123456'],
-          ['usr-2', 'rep_tehran', 'آقای حمیدرضا احمدی', '09120000001', 'REPRESENTATIVE', 'AG-9081', null, 1, '123456'],
-          ['usr-3', 'rep_esfahan', 'آقای علیرضا رجایی', '09130000002', 'REPRESENTATIVE', 'AG-6055', null, 1, '123456'],
-          ['usr-4', 'rep_rasht', 'آقای سهراب پوربخش', '09110000003', 'REPRESENTATIVE', 'AG-2019', null, 1, '123456'],
-          ['usr-5', 'rep_shiraz', 'آقای کریم نمازی', '09170000004', 'REPRESENTATIVE', 'AG-7023', null, 1, '123456'],
-          ['usr-6', 'factory', 'مسئول اول فروش کارخانه', '09110000005', 'FACTORY_TRANSPORT', null, null, 1, '123456'],
-          ['usr-62', 'factory2', 'مسئول دوم فروش کارخانه', '09110000007', 'FACTORY_TRANSPORT', null, null, 1, '123456'],
-          ['usr-7', 'shipping_transit', 'باربری ترانزیت طبرستان', '09110000006', 'SHIPPING_COMPANY', null, 'sc-1', 1, '123456']
-        ];
-        for (const u of dummyUsers) {
-          await db.query(
-            "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            u
-          );
-        }
-      } else {
-        // Ensure SYSTEM_ADMIN (admin) user exists in SQL database if missing
-        const [adminRows] = await db.query("SELECT COUNT(*) as count FROM app_users WHERE username = 'admin' OR role = 'SYSTEM_ADMIN' OR phoneNumber = '09120000000'") as any[];
-        const adminCount = (adminRows && adminRows[0]?.count !== undefined) ? adminRows[0].count : 0;
-        if (adminCount === 0) {
-          console.log("🛡️ [Seed] Auto-inserting missing SYSTEM_ADMIN (admin) user in SQL database...");
-          await db.query(
-            "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, '123456']
-          );
-        }
-      }
-
-      // Seed initial activity logs
-      try {
-        const [actRows] = await db.query("SELECT COUNT(*) as count FROM user_activity_logs") as any[];
-        const actCount = (actRows && actRows[0]?.count !== undefined) ? actRows[0].count : 0;
-        if (actCount === 0) {
-          console.log("🌱 [Seed] Seeding default user activity logs...");
-          const now = Date.now();
-          const dummyActivityLogs = [
-            ['act-1', 'usr-0', 'ادمین ارشد نرم‌افزار', 'SYSTEM_ADMIN', 'ورود به سیستم', 'ورود موفقیت‌آمیز به پنل ادمین ارشد با احراز هویت دو مرحله‌ای', 'AUTH', '192.168.1.100', 'SUCCESS', new Date(now - 3 * 60 * 1000).toISOString()],
-            ['act-2', 'usr-1', 'آقای احمدی (مدیر بازرگانی)', 'SALES_MANAGER', 'تایید سفارش', 'تایید نهایی سفارش TCI-1402-01 و ارجاع به صف تولید کارخانه', 'ORDERS', '192.168.1.102', 'SUCCESS', new Date(now - 15 * 60 * 1000).toISOString()],
-            ['act-3', 'usr-5', 'آقای کریم نمازی', 'REPRESENTATIVE', 'ثبت سفارش جدید', 'ثبت سفارش پیش‌فاکتور TCI-1402-04 شامل ۸,۰۰۰ قالب آجر نسوز سموتی', 'REPRESENTATIVE', '2.180.45.12', 'SUCCESS', new Date(now - 45 * 60 * 1000).toISOString()],
-            ['act-4', 'usr-7', 'باربری ترانزیت طبرستان', 'SHIPPING_COMPANY', 'تخصیص ناوگان', 'تخصیص کامیون ۱۰ چرخ به رانندگی علی محمدی (ایران ۶۲ - ۴۵۶ ج ۸۸) برای سفارش TCI-1402-02', 'LOGISTICS', '5.160.120.88', 'SUCCESS', new Date(now - 90 * 60 * 1000).toISOString()],
-            ['act-5', 'usr-0', 'ادمین ارشد نرم‌افزار', 'SYSTEM_ADMIN', 'ویرایش کاتالوگ محصول', 'بروزرسانی مشخصات و قیمت محصول سفال ۲۰×۲۰ سانتی‌متر طبرستان', 'PRODUCTS', '192.168.1.100', 'SUCCESS', new Date(now - 120 * 60 * 1000).toISOString()],
-            ['act-6', 'usr-6', 'مسئول اول فروش کارخانه', 'FACTORY_TRANSPORT', 'بارگیری و خروج', 'تایید بارگیری و ثبت برگه خروج کامیون برای سفارش TCI-1402-03', 'FACTORY', '192.168.1.150', 'SUCCESS', new Date(now - 180 * 60 * 1000).toISOString()],
-            ['act-7', 'usr-0', 'ادمین ارشد نرم‌افزار', 'SYSTEM_ADMIN', 'پاکسازی کش سرور', 'پاکسازی حافظه کش Redis و به روزرسانی نمایه‌ها', 'SYSTEM', '192.168.1.100', 'SUCCESS', new Date(now - 300 * 60 * 1000).toISOString()],
-            ['act-8', 'usr-2', 'آقای حمیدرضا احمدی', 'REPRESENTATIVE', 'ویرایش پروفایل', 'به‌روزرسانی شماره تماس پشتیبانی نمایندگی تهران', 'USERS', '91.98.112.4', 'SUCCESS', new Date(now - 420 * 60 * 1000).toISOString()]
-          ];
-          for (const a of dummyActivityLogs) {
-            await db.query(
-              "INSERT INTO user_activity_logs (id, userId, userName, userRole, action, details, module, ipAddress, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-              a
-            );
-          }
-        }
-      } catch (err: any) {
-        console.error("Error seeding activity logs:", err.message);
-      }
-
-      console.log("🌱 [Seed] Database tables successfully synchronized and seeded!");
+    console.log("🌱 [Seed] Database tables successfully synchronized!");
    } catch (err: any) {
      console.error("❌ [Seed] Error during seeding database:", err.message);
    }
  }
 
-
 // --- Activity Logging & Telemetry Helpers ---
 const inMemoryActivityLogs: any[] = [];
+
+export function clearInMemoryActivityLogs() {
+  inMemoryActivityLogs.length = 0;
+}
 
 export async function logUserActivity(log: {
   userId?: string;

@@ -140,178 +140,8 @@
       "isEnabled": 1
     }
   ],
-  "orders": [
-    {
-      "id": "ord-101",
-      "orderNumber": "TCI-1402-01",
-      "customerName": "نمایندگی تهران (احمدی)",
-      "agentCode": "AG-9081",
-      "productId": "prod-1",
-      "productName": "سفال سقف طبرستان (طرح کلاسیک)",
-      "quantity": 12000,
-      "unit": "عدد",
-      "destinationCity": "تهران - شهریار",
-      "exactAddress": "سایت پروژه تفریحی دیپلمات، میدان نماز، انتهای بلوار کلهر، پلاک ۶۴",
-      "phoneNumber": "09121111111",
-      "notes": "تحویل اضطراری تا پایان هفته. هماهنگی قبل از ارسال الزامی است.",
-      "createdAt": "2026-07-25T12:27:08.654Z",
-      "status": "LOADED_AND_DISPATCHED",
-      "vehicleType": "تریلی ۱۸ چرخ لبه‌دار",
-      "driverName": "کریم قنبری",
-      "driverPhone": "09117772222",
-      "licensePlate": "۵۴ ع ۸۹۲ ایران ۷۲",
-      "shippingAgency": "باربری ترانزیت شمال",
-      "estimatedArrival": "۲۴ ساعت آینده",
-      "priorityIndex": 0,
-      "sentToFactoryAt": "2026-07-26T12:27:08.655Z",
-      "rejectionReason": null
-    },
-    {
-      "id": "ord-102",
-      "orderNumber": "TCI-1402-02",
-      "customerName": "نمایندگی اصفهان (رجایی)",
-      "agentCode": "AG-6055",
-      "productId": "prod-3",
-      "productName": "آجر سفال ۱۵ سانتی درجه یک طبرستان",
-      "quantity": 18000,
-      "unit": "قالب",
-      "destinationCity": "اصفهان - شهرک صنعتی جی",
-      "exactAddress": "انبار مرکزی نمایندگی رجایی، خیابان دهم، پلاک ۲",
-      "phoneNumber": "09132222222",
-      "notes": "لطفاً بارگیری از کوره تمام اتوماتیک شماره ۲ باشد.",
-      "createdAt": "2026-07-27T00:27:08.655Z",
-      "status": "VEHICLE_ASSIGNED",
-      "vehicleType": "کامیون جفت ۱۰ تن",
-      "driverName": "غلامرضا صادقی",
-      "driverPhone": "09139998888",
-      "licensePlate": "۷۲ ب ۵۵۱ ایران ۵۳",
-      "shippingAgency": "باربری زاینده‌رود",
-      "estimatedArrival": "فردا صبح ساعت ۸",
-      "priorityIndex": 0,
-      "rejectionReason": null,
-      "sentToFactoryAt": "2026-07-27T12:27:08.655Z"
-    },
-    {
-      "id": "ord-103",
-      "orderNumber": "TCI-1402-03",
-      "customerName": "نمایندگی رشت (پوربخش)",
-      "agentCode": "AG-2019",
-      "productId": "prod-2",
-      "productName": "آجر سفال ۱۰ سانتی طبرستان (تیغه)",
-      "quantity": 25000,
-      "unit": "قالب",
-      "destinationCity": "گیلان - رشت",
-      "exactAddress": "پروژه تعاونی فرهنگیان، جاده انزلی، نرسیده به پلیس راه",
-      "phoneNumber": "09113333333",
-      "createdAt": "2026-07-28T08:27:08.655Z",
-      "status": "APPROVED_BY_SALES",
-      "priorityIndex": 0,
-      "rejectionReason": null,
-      "sentToFactoryAt": null,
-      "vehicleType": null,
-      "driverName": null,
-      "driverPhone": null,
-      "licensePlate": null,
-      "shippingAgency": null,
-      "estimatedArrival": null
-    },
-    {
-      "id": "ord-104",
-      "orderNumber": "TCI-1402-04",
-      "customerName": "نمایندگی شیراز (نمازی)",
-      "agentCode": "AG-7023",
-      "productId": "prod-4",
-      "productName": "آجر نما نسوز سموتی طبرستان",
-      "quantity": 8000,
-      "unit": "قالب",
-      "destinationCity": "فارس - شیراز",
-      "exactAddress": "بلوار معالی آباد، کوچه ۱۲، پلاک آخر سمت چپ",
-      "phoneNumber": "09174444444",
-      "createdAt": "2026-07-28T11:27:08.655Z",
-      "status": "PENDING_APPROVAL",
-      "priorityIndex": 0,
-      "rejectionReason": null,
-      "sentToFactoryAt": null,
-      "vehicleType": null,
-      "driverName": null,
-      "driverPhone": null,
-      "licensePlate": null,
-      "shippingAgency": null,
-      "estimatedArrival": null
-    }
-  ],
-  "order_history": [
-    {
-      "id": 1,
-      "orderId": "ord-101",
-      "status": "PENDING_APPROVAL",
-      "updatedAt": "2026-07-25T12:27:08.655Z",
-      "comment": "ثبت سفارش توسط نمایندگی احمدی"
-    },
-    {
-      "id": 2,
-      "orderId": "ord-101",
-      "status": "APPROVED_BY_SALES",
-      "updatedAt": "2026-07-26T00:27:08.655Z",
-      "comment": "تایید حجم سفارش توسط واحد مالی و فروش تهران"
-    },
-    {
-      "id": 3,
-      "orderId": "ord-101",
-      "status": "VEHICLE_ASSIGNED",
-      "updatedAt": "2026-07-26T12:27:08.655Z",
-      "comment": "اختصاص تریلی ۱۸ چرخ البرز به رانندگی قنبری"
-    },
-    {
-      "id": 4,
-      "orderId": "ord-101",
-      "status": "LOADED_AND_DISPATCHED",
-      "updatedAt": "2026-07-27T12:27:08.655Z",
-      "comment": "بارگیری انجام شد و کامیون به مقصد حرکت کرد."
-    },
-    {
-      "id": 5,
-      "orderId": "ord-102",
-      "status": "PENDING_APPROVAL",
-      "updatedAt": "2026-07-27T00:27:08.655Z",
-      "comment": "سفارش جدید نمایندگی اصفهان"
-    },
-    {
-      "id": 6,
-      "orderId": "ord-102",
-      "status": "APPROVED_BY_SALES",
-      "updatedAt": "2026-07-27T12:27:08.655Z",
-      "comment": "تایید سقف اعتباری و حواله مالی"
-    },
-    {
-      "id": 7,
-      "orderId": "ord-102",
-      "status": "VEHICLE_ASSIGNED",
-      "updatedAt": "2026-07-28T07:39:08.655Z",
-      "comment": "معرفی کامیون جفت جهت بارگیری فردا صبح"
-    },
-    {
-      "id": 8,
-      "orderId": "ord-103",
-      "status": "PENDING_APPROVAL",
-      "updatedAt": "2026-07-28T08:26:58.655Z",
-      "comment": "ثبت سیستم شد"
-    },
-    {
-      "id": 9,
-      "orderId": "ord-103",
-      "status": "APPROVED_BY_SALES",
-      "updatedAt": "2026-07-28T08:27:08.655Z",
-      "comment": "مدیریت فروش سفارش را به کارخانه ارجاع داد."
-    },
-    {
-      "id": 10,
-      "orderId": "ord-104",
-      "status": "PENDING_APPROVAL",
-      "updatedAt": "2026-07-28T11:27:08.655Z",
-      "comment": "در انتظار بررسی بخش مدیریت مالی و فروش"
-    }
-  ],
+  "orders": [],
+  "order_history": [],
   "app_users": [
     {
       "id": "usr-0",
@@ -433,6 +263,52 @@
       "shippingCompanyId": null,
       "isEnabled": 1,
       "password": "123456"
+    }
+  ],
+  "permanent_drivers": [
+    {
+      "id": "drv-1",
+      "driverName": "کریم قنبری",
+      "driverPhone": "09117772222",
+      "licensePlate": "۵۴ ع ۸۹۲ ایران ۷۲",
+      "vehicleType": "تریلی ۱۸ چرخ لبه‌دار",
+      "shippingAgency": "باربری ترانزیت شمال",
+      "nationalCode": "2081234567",
+      "smartCardNumber": "3849201",
+      "isEnabled": 1
+    },
+    {
+      "id": "drv-2",
+      "driverName": "غلامرضا صادقی",
+      "driverPhone": "09139998888",
+      "licensePlate": "۷۲ ب ۵۵۱ ایران ۵۳",
+      "vehicleType": "کامیون جفت ۱۰ تن",
+      "shippingAgency": "باربری زاینده‌رود",
+      "nationalCode": "1289876543",
+      "smartCardNumber": "4920183",
+      "isEnabled": 1
+    },
+    {
+      "id": "drv-3",
+      "driverName": "مرتضی حسینی",
+      "driverPhone": "09112223344",
+      "licensePlate": "۳۶ ج ۱۴۵ ایران ۶۲",
+      "vehicleType": "خاور مسقف",
+      "shippingAgency": "باربری کاسپین",
+      "nationalCode": "2093344556",
+      "smartCardNumber": "1092837",
+      "isEnabled": 1
+    },
+    {
+      "id": "drv-4",
+      "driverName": "جواد علوی",
+      "driverPhone": "09112523456",
+      "licensePlate": "۶۲ ع ۴۸۱ ایران ۷۲",
+      "vehicleType": "تریلی ۱۸ چرخ لبه‌دار",
+      "shippingAgency": "باربری ترانزیت طبرستان",
+      "nationalCode": "2089988771",
+      "smartCardNumber": "5544332",
+      "isEnabled": 1
     }
   ]
 }

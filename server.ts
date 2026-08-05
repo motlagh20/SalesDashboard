@@ -4,7 +4,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import os from "os";
-import { bootstrapDatabase, getDbPool, getRedisClient, writeServerErrorLog, logUserActivity, getUserActivityLogs } from "./server/database";
+import { bootstrapDatabase, getDbPool, getRedisClient, writeServerErrorLog, logUserActivity, getUserActivityLogs, clearInMemoryActivityLogs } from "./server/database";
 
 // Load environment variables
 dotenv.config();
@@ -1982,6 +1982,8 @@ async function startServer() {
         connection.release();
       }
 
+      clearInMemoryActivityLogs();
+
       // Clear order-related Redis caches
       const redis = getRedisClient();
       if (redis) {
@@ -1995,6 +1997,28 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("Error in POST /api/system/clear-transactions:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // CLEAR ONLY USER ACTIVITY LOGS
+  app.post("/api/system/clear-activity-logs", async (req, res) => {
+    try {
+      const db = getDbPool();
+      await db.query("DELETE FROM user_activity_logs");
+      clearInMemoryActivityLogs();
+
+      const redis = getRedisClient();
+      if (redis) {
+        await redis.del("activity_logs_list");
+      }
+
+      res.json({
+        success: true,
+        message: "لاگ‌های فعالیت سیستم با موفقیت پاکسازی شدند."
+      });
+    } catch (err: any) {
+      console.error("Error in POST /api/system/clear-activity-logs:", err);
       res.status(500).json({ error: err.message });
     }
   });

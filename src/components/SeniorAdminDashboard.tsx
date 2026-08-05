@@ -138,6 +138,7 @@ export default function SeniorAdminDashboard({
               showToast(d.error || 'خطا در پاکسازی تراکنش‌ها', 'error');
             }
           }
+          setActivityLogs([]);
           if ('caches' in window) {
             try { await caches.delete('tabarestan-api-cache-v1'); } catch {}
           }
@@ -146,6 +147,28 @@ export default function SeniorAdminDashboard({
           showToast('خطا در ارتباط با سرور جهت پاکسازی تراکنش‌ها', 'error');
         } finally {
           setIsClearingTransactions(false);
+        }
+      }
+    );
+  };
+
+  const handleClearActivityLogs = async () => {
+    askConfirm(
+      'پاکسازی لاگ‌های فعالیت کاربران',
+      'آیا از حذف تمام لاگ‌های ثبت‌شده فعالیت کاربران در سیستم اطمینان دارید؟',
+      async () => {
+        try {
+          const res = await fetch('/api/system/clear-activity-logs', { method: 'POST' });
+          const data = await res.json();
+          if (data.success) {
+            setActivityLogs([]);
+            showToast('لاگ‌های فعالیت سیستم با موفقیت پاکسازی شدند.', 'success');
+            fetchSystemLogsAndStats();
+          } else {
+            showToast(data.error || 'خطا در پاکسازی لاگ‌ها', 'error');
+          }
+        } catch (err) {
+          showToast('خطای شبکه در پاکسازی لاگ‌ها', 'error');
         }
       }
     );
@@ -795,6 +818,17 @@ export default function SeniorAdminDashboard({
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
               <span>خروجی اکسل</span>
+            </button>
+
+            {/* Clear Activity Logs */}
+            <button
+              type="button"
+              onClick={handleClearActivityLogs}
+              className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+              title="پاکسازی تمام لاگ‌های ثبت‌شده فعالیت کاربران"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>حذف لاگ‌ها</span>
             </button>
           </div>
         </div>
