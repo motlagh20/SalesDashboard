@@ -13,9 +13,9 @@
   "dir": "rtl",
   "icons": [
     {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any"
     },
     {
@@ -35,6 +35,12 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
   "shortcuts": [
@@ -43,14 +49,14 @@
       "short_name": "ثبت سفارش",
       "description": "ورود سریع به صفحه ثبت سفارش جدید نماینده",
       "url": "/?shortcut=new-order",
-      "icons": [{ "src": "/pwa-192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "/logo.png", "sizes": "512x512" }]
     },
     {
       "name": "پیگیری حواله",
       "short_name": "پیگیری حواله",
       "description": "استعلام وضعیت حواله بارگیری",
       "url": "/?shortcut=track",
-      "icons": [{ "src": "/pwa-192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "/logo.png", "sizes": "512x512" }]
     }
   ]
 }
