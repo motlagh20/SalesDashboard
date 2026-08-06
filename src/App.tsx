@@ -472,18 +472,12 @@ export default function App() {
     }
   };
 
-  // Load data from production Express API instead of localstorage mock
+  // Load data from production Express API
   const refreshAllData = async (bypassCache: boolean = false) => {
     const fetchWithFallback = async (url: string, setter: (data: any) => void) => {
       try {
-        const fetchUrl = bypassCache ? `${url}?_t=${Date.now()}` : `${url}?_v=${Date.now()}`;
-        const res = await fetch(fetchUrl, {
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache'
-          },
-          cache: 'no-store'
-        });
+        const fetchUrl = bypassCache ? `${url}?_t=${Date.now()}` : url;
+        const res = await fetch(fetchUrl);
         if (res.ok) {
           const parsed = await safeParseResponse(res, []);
           setter(parsed);
@@ -506,10 +500,11 @@ export default function App() {
 
   useEffect(() => {
     refreshAllData();
-    // Periodic synchronization every 10 seconds to keep multi-role users in sync
-    const interval = setInterval(refreshAllData, 10000);
+    // Periodic background sync only when a user is actively logged in
+    if (!currentUser) return;
+    const interval = setInterval(() => refreshAllData(false), 12000);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentUser]);
 
   // Permanent Drivers Management Handlers
   const handleAddPermanentDriver = async (driverData: Partial<PermanentDriver>): Promise<boolean> => {

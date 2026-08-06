@@ -1,4 +1,5 @@
 import express from "express";
+import compression from "compression";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
@@ -6,12 +7,38 @@ import dotenv from "dotenv";
 import os from "os";
 import { bootstrapDatabase, getDbPool, getRedisClient, writeServerErrorLog, logUserActivity, getUserActivityLogs, clearInMemoryActivityLogs } from "./server/database";
 
+// In-memory fast cache layer for read endpoints
+const inMemoryRouteCache = new Map<string, { data: any; expiresAt: number }>();
+
+function getCachedRouteData(key: string): any | null {
+  const cached = inMemoryRouteCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+  return null;
+}
+
+function setCachedRouteData(key: string, data: any, ttlSeconds = 15) {
+  inMemoryRouteCache.set(key, { data, expiresAt: Date.now() + ttlSeconds * 1000 });
+}
+
+function clearCachedRoute(key: string) {
+  inMemoryRouteCache.delete(key);
+}
+
+function clearAllRouteCaches() {
+  inMemoryRouteCache.clear();
+}
+
 // Load environment variables
 dotenv.config();
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Response Compression for fast mobile transfers
+  app.use(compression());
 
   // Initialize and check database tables
   await bootstrapDatabase();
@@ -2050,21 +2077,20 @@ async function startServer() {
   app.post("/api/system/clear-transactions", async (req, res) => {
     try {
       const db = getDbPool();
-      const connection = await db.getConnection();
       try {
-        await connection.beginTransaction();
-        await connection.query("DELETE FROM order_history");
-        await connection.query("DELETE FROM orders");
-        await connection.query("DELETE FROM user_activity_logs");
-        await connection.commit();
-      } catch (txErr) {
-        await connection.rollback();
-        throw txErr;
-      } finally {
-        connection.release();
+        await db.query("SET FOREIGN_KEY_CHECKS = 0");
+        await db.query("TRUNCATE TABLE order_history");
+        await db.query("TRUNCATE TABLE orders");
+        await db.query("TRUNCATE TABLE user_activity_logs");
+        await db.query("SET FOREIGN_KEY_CHECKS = 1");
+      } catch (truncErr) {
+        await db.query("DELETE FROM order_history");
+        await db.query("DELETE FROM orders");
+        await db.query("DELETE FROM user_activity_logs");
       }
 
       clearInMemoryActivityLogs();
+      clearAllRouteCaches();
 
       // Clear order-related Redis caches
       const redis = getRedisClient();
@@ -2075,7 +2101,7 @@ async function startServer() {
 
       res.json({ 
         success: true, 
-        message: "کلیه سفارشات، سوابق فاکتورها و لاگ‌های سیستم با موفقیت پاکسازی شدند. اطلاعات پایه کاربران، باربری‌ها و محصولات حفظ گردید." 
+        message: "کلیه سفارشات، سوابق فاکتورها و لاگ‌های سیستم با موفقیت و سرعت بالا پاکسازی شدند. اطلاعات پایه کاربران، باربری‌ها و محصولات حفظ گردید." 
       });
     } catch (err: any) {
       console.error("Error in POST /api/system/clear-transactions:", err);
@@ -2087,8 +2113,14 @@ async function startServer() {
   app.post("/api/system/clear-activity-logs", async (req, res) => {
     try {
       const db = getDbPool();
-      await db.query("DELETE FROM user_activity_logs");
+      try {
+        await db.query("TRUNCATE TABLE user_activity_logs");
+      } catch {
+        await db.query("DELETE FROM user_activity_logs");
+      }
+
       clearInMemoryActivityLogs();
+      clearAllRouteCaches();
 
       const redis = getRedisClient();
       if (redis) {
@@ -2097,7 +2129,7 @@ async function startServer() {
 
       res.json({
         success: true,
-        message: "لاگ‌های فعالیت سیستم با موفقیت پاکسازی شدند."
+        message: "لاگ‌های فعالیت سیستم با موفقیت و سرعت بالا پاکسازی شدند."
       });
     } catch (err: any) {
       console.error("Error in POST /api/system/clear-activity-logs:", err);

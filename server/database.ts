@@ -1092,6 +1092,19 @@ async function ensureColumnExists(db: mysql.Pool, tableName: string, columnName:
   }
 }
 
+async function ensureIndexExists(db: mysql.Pool, tableName: string, indexName: string, columnsSql: string) {
+  try {
+    const [indexes] = await db.query(`SHOW INDEX FROM ${tableName} WHERE Key_name = ?`, [indexName]);
+    if ((indexes as any[]).length === 0) {
+      console.log(`⚡ [Index Migration] Creating index '${indexName}' on table '${tableName}'...`);
+      await db.query(`CREATE INDEX ${indexName} ON ${tableName} (${columnsSql})`);
+      console.log(`✅ [Index Migration] Index '${indexName}' added.`);
+    }
+  } catch (err: any) {
+    // Ignore index errors on mock/unsupported environments
+  }
+}
+
 /**
  * Utility to test database readiness and create tables if they do not exist.
  * This is perfect for initial bootstrapping on Ubuntu.
@@ -1311,6 +1324,14 @@ export async function bootstrapDatabase() {
     } catch (alterErr: any) {
       console.log("ℹ️ [Migration Note] Modify products columns:", alterErr.message);
     }
+
+    // High performance database indexes
+    await ensureIndexExists(db, "user_activity_logs", "idx_ual_created", "createdAt DESC");
+    await ensureIndexExists(db, "orders", "idx_orders_created", "createdAt DESC");
+    await ensureIndexExists(db, "orders", "idx_orders_priority", "priorityIndex ASC");
+    await ensureIndexExists(db, "order_history", "idx_oh_orderid", "orderId");
+    await ensureIndexExists(db, "app_users", "idx_users_username", "username");
+    await ensureIndexExists(db, "app_users", "idx_users_phone", "phoneNumber");
 
     console.log("✅ [Bootstrap] MariaDB tables checked and synchronized successfully!");
 
