@@ -74,6 +74,8 @@ interface ManagerDashboardProps {
   initialPartnerSubTab?: 'AGENTS' | 'SHIPPING' | 'USERS' | 'DRIVERS';
   onApproveOrder: (orderId: string) => void;
   onRejectOrder: (orderId: string, reason: string) => void;
+  onApproveOrderEdit?: (orderId: string) => void;
+  onRejectOrderEdit?: (orderId: string) => void;
   onDispatchToFactory: (orderId: string, comment?: string) => void;
   onUpdateAllOrders: (updatedOrders: Order[]) => void;
   onAddProduct: (newProduct: Product) => Promise<boolean>;
@@ -112,6 +114,8 @@ export default function ManagerDashboard({
   initialPartnerSubTab,
   onApproveOrder,
   onRejectOrder,
+  onApproveOrderEdit,
+  onRejectOrderEdit,
   onDispatchToFactory,
   onUpdateAllOrders,
   onAddProduct,
@@ -146,6 +150,7 @@ export default function ManagerDashboard({
   const [archiveStatusFilter, setArchiveStatusFilter] = useState<string>('ALL');
   const [archiveAgentFilter, setArchiveAgentFilter] = useState<string>('ALL');
   const [selectedOrderForHistory, setSelectedOrderForHistory] = useState<Order | null>(null);
+  const [reviewingEditOrder, setReviewingEditOrder] = useState<Order | null>(null);
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -604,7 +609,7 @@ export default function ManagerDashboard({
 
   // Metrics calculations
   const totalVolume = orders.reduce((sum, o) => o.status !== 'REJECTED' ? sum + o.quantity : sum, 0);
-  const totalPending = orders.filter((o) => o.status === 'PENDING_APPROVAL').length;
+  const totalPending = orders.filter((o) => o.status === 'PENDING_APPROVAL' || o.hasPendingEdit).length;
   const approvedButPendingDispatch = orders.filter((o) => o.status === 'APPROVED_BY_SALES');
   const sentToFactoryCount = orders.filter((o) => o.status === 'SENT_TO_FACTORY').length;
   const inTransitCount = orders.filter((o) => o.status === 'VEHICLE_ASSIGNED' || o.status === 'LOADED_AND_DISPATCHED').length;
@@ -910,11 +915,11 @@ export default function ManagerDashboard({
     return orders.filter((order) => {
       // Basic Tab status matches
       if (activeTab === 'PENDING_APPROVAL') {
-        if (order.status !== 'PENDING_APPROVAL') return false;
+        if (order.status !== 'PENDING_APPROVAL' && !order.hasPendingEdit) return false;
       } else if (activeTab === 'APPROVED_PRIORITIES') {
         if (order.status !== 'APPROVED_BY_SALES') return false;
       } else if (activeTab === 'ARCHIVAL_ORDERS') {
-        if (order.status === 'PENDING_APPROVAL' || order.status === 'APPROVED_BY_SALES') return false;
+        if ((order.status === 'PENDING_APPROVAL' || order.status === 'APPROVED_BY_SALES') && !order.hasPendingEdit) return false;
         
         // اعمال فیلتر هوشمند زیرشاخه آرشیو
         if (archiveStatusFilter !== 'ALL') {
@@ -1161,6 +1166,42 @@ export default function ManagerDashboard({
 
           </div>
 
+          {/* Top Pending Edit Notification Banner */}
+          {orders.some(o => o.hasPendingEdit) && (
+            <div className="bg-gradient-to-r from-amber-500/15 via-amber-100/80 to-amber-50 border-2 border-amber-400 rounded-2xl p-3.5 shadow-sm flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-500 text-slate-950 rounded-xl font-bold text-lg shadow-xs shrink-0 animate-bounce">
+                  ⚠️
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-slate-900 text-xs md:text-sm flex items-center gap-2">
+                    <span>درخواست اصلاحیه سفارش از سوی نمایندگی فروش</span>
+                    <span className="bg-amber-500 text-slate-950 font-mono text-xs px-2 py-0.5 rounded-full font-black">
+                      {orders.filter(o => o.hasPendingEdit).length} مورد
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-amber-900 mt-0.5">
+                    تغییراتی در مشخصات سفارش (مقدار، خریدار، آدرس، باربری و...) توسط نمایندگی ثبت شده و در انتظار بررسی و تایید شماست. (نوبت سفارش در کارخانه ثابت است)
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {orders.filter(o => o.hasPendingEdit).map(ord => (
+                  <button
+                    key={ord.id}
+                    type="button"
+                    onClick={() => setReviewingEditOrder(ord)}
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-black text-xs px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5 animate-pulse"
+                  >
+                    <Edit className="w-3.5 h-3.5" />
+                    <span>بررسی اصلاحیه سفارش #{ord.orderNumber}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Quick query filter (only for order views) */}
           {(activeTab === 'PENDING_APPROVAL' || activeTab === 'APPROVED_PRIORITIES' || activeTab === 'ARCHIVAL_ORDERS') && (
             <div className="relative w-full" id="manager-tab-search">
@@ -1299,6 +1340,16 @@ export default function ManagerDashboard({
                       <span className="text-[10px] bg-slate-100 text-slate-500 font-mono py-0.5 px-2 rounded">کد نماینده: {order.agentCode}</span>
                       {order.buyerName && (
                         <span className="text-[10.5px] bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 py-0.5 px-2 rounded">خریدار: {order.buyerName}</span>
+                      )}
+                      {order.hasPendingEdit && (
+                        <button
+                          type="button"
+                          onClick={() => setReviewingEditOrder(order)}
+                          className="text-[10.5px] bg-amber-500 hover:bg-amber-600 text-white font-bold py-1 px-3 rounded-full flex items-center gap-1.5 shadow-xs transition-all cursor-pointer animate-pulse"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                          <span>⚠️ بررسی و تایید ویرایش سفارش</span>
+                        </button>
                       )}
                       {order.isExportOrder && (
                         <span className="text-[10px] bg-sky-100 text-sky-900 font-bold border border-sky-300/80 py-0.5 px-2.5 rounded-full flex items-center gap-1">
@@ -1655,6 +1706,16 @@ export default function ManagerDashboard({
                           <span className="text-[9px] bg-slate-100 text-slate-500 font-mono py-0.5 px-1.5 rounded">{order.orderNumber}</span>
                           {order.buyerName && (
                             <span className="text-[9px] bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 py-0.5 px-1.5 rounded">خریدار: {order.buyerName}</span>
+                          )}
+                          {order.hasPendingEdit && (
+                            <button
+                              type="button"
+                              onClick={() => setReviewingEditOrder(order)}
+                              className="text-[9px] bg-amber-500 hover:bg-amber-600 text-white font-bold py-0.5 px-2 rounded-full flex items-center gap-1 shadow-xs transition-all cursor-pointer animate-pulse"
+                            >
+                              <Edit className="w-3 h-3" />
+                              <span>⚠️ اصلاحیه جدید</span>
+                            </button>
                           )}
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-1">
@@ -4181,6 +4242,234 @@ export default function ManagerDashboard({
           </div>
         </div>
       )}
+
+      {/* Review Edit Comparison Modal */}
+      {reviewingEditOrder && (() => {
+        const pendingData = (() => {
+          try {
+            return JSON.parse(reviewingEditOrder.pendingEditData || '{}');
+          } catch {
+            return {};
+          }
+        })();
+
+        let currentItems: any[] = [];
+        if (reviewingEditOrder.itemsJson) {
+          try { currentItems = JSON.parse(reviewingEditOrder.itemsJson); } catch {}
+        }
+        if (currentItems.length === 0) {
+          currentItems = [{ productName: reviewingEditOrder.productName, quantity: reviewingEditOrder.quantity, unit: reviewingEditOrder.unit }];
+        }
+
+        let pendingItems: any[] = [];
+        if (pendingData.itemsJson) {
+          try { pendingItems = JSON.parse(pendingData.itemsJson); } catch {}
+        }
+        if (pendingItems.length === 0 && pendingData.productName) {
+          pendingItems = [{ productName: pendingData.productName, quantity: pendingData.quantity, unit: pendingData.unit }];
+        }
+
+        const isDiff = (currVal: any, newVal: any) => {
+          if (newVal === undefined) return false;
+          return String(currVal || '').trim() !== String(newVal || '').trim();
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 overflow-y-auto">
+            <div className="bg-white rounded-2xl max-w-3xl w-full p-5 space-y-4 shadow-2xl border border-slate-200 animate-scale-up max-h-[90vh] overflow-y-auto">
+              
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-amber-100 text-amber-800 rounded-xl">
+                    <Edit className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-base">
+                      بررسی درخواست ویرایش سفارش #{reviewingEditOrder.orderNumber}
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      ثبت شده توسط نمایندگی: <strong>{reviewingEditOrder.customerName}</strong> ({reviewingEditOrder.agentCode})
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReviewingEditOrder(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-lg text-lg cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Informational Box */}
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-950 text-xs space-y-1">
+                <span className="font-bold block text-sm">📌 راهنمای مدیر بازرگانی:</span>
+                <p>تایید این ویرایش، <strong>هیچ‌گونه تاثیری روی اولویت صف بارگیری یا نوبت سفارش در فروشگاه و کارخانه ندارد</strong>. در صورت تایید، مشخصات جدید جایگزین فاکتور خواهد شد.</p>
+              </div>
+
+              {/* Side by Side Comparison Table */}
+              <div className="overflow-x-auto rounded-xl border border-slate-200 text-xs">
+                <table className="w-full text-right divide-y divide-slate-200">
+                  <thead className="bg-slate-100 text-slate-700 font-bold">
+                    <tr>
+                      <th className="p-3">عنوان فیلد</th>
+                      <th className="p-3 bg-slate-100">مشخصات فعلی فاکتور (قبلی)</th>
+                      <th className="p-3 bg-amber-100/70 text-amber-900">مشخصات جدید پیشنهادی (ویرایش شده)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-800">
+                    
+                    {/* Buyer Name */}
+                    <tr className={isDiff(reviewingEditOrder.buyerName, pendingData.buyerName) ? 'bg-emerald-50/70' : ''}>
+                      <td className="p-2.5 font-bold text-slate-600">نام خریدار / پروژه:</td>
+                      <td className="p-2.5">{reviewingEditOrder.buyerName || '—'}</td>
+                      <td className="p-2.5 font-bold text-emerald-900">
+                        {pendingData.buyerName || '—'}
+                        {isDiff(reviewingEditOrder.buyerName, pendingData.buyerName) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
+                      </td>
+                    </tr>
+
+                    {/* Phone Number */}
+                    <tr className={isDiff(reviewingEditOrder.phoneNumber, pendingData.phoneNumber) ? 'bg-emerald-50/70' : ''}>
+                      <td className="p-2.5 font-bold text-slate-600">شماره تماس:</td>
+                      <td className="p-2.5 font-mono">{reviewingEditOrder.phoneNumber || '—'}</td>
+                      <td className="p-2.5 font-mono font-bold text-emerald-900">
+                        {pendingData.phoneNumber || '—'}
+                        {isDiff(reviewingEditOrder.phoneNumber, pendingData.phoneNumber) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
+                      </td>
+                    </tr>
+
+                    {/* Destination City */}
+                    <tr className={isDiff(reviewingEditOrder.destinationCity, pendingData.destinationCity) ? 'bg-emerald-50/70' : ''}>
+                      <td className="p-2.5 font-bold text-slate-600">شهر مقصد:</td>
+                      <td className="p-2.5">{reviewingEditOrder.destinationCity || '—'}</td>
+                      <td className="p-2.5 font-bold text-emerald-900">
+                        {pendingData.destinationCity || '—'}
+                        {isDiff(reviewingEditOrder.destinationCity, pendingData.destinationCity) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
+                      </td>
+                    </tr>
+
+                    {/* Vehicle Type */}
+                    <tr className={isDiff(reviewingEditOrder.vehicleDetails?.vehicleType, pendingData.vehicleType) ? 'bg-emerald-50/70' : ''}>
+                      <td className="p-2.5 font-bold text-slate-600">نوع ناوگان باربری:</td>
+                      <td className="p-2.5">{reviewingEditOrder.vehicleDetails?.vehicleType || 'تریلی'}</td>
+                      <td className="p-2.5 font-bold text-emerald-900">
+                        {pendingData.vehicleType || '—'}
+                        {isDiff(reviewingEditOrder.vehicleDetails?.vehicleType, pendingData.vehicleType) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
+                      </td>
+                    </tr>
+
+                    {/* Address */}
+                    <tr className={isDiff(reviewingEditOrder.exactAddress, pendingData.exactAddress) ? 'bg-emerald-50/70' : ''}>
+                      <td className="p-2.5 font-bold text-slate-600">آدرس دقیق تخلیه:</td>
+                      <td className="p-2.5">{reviewingEditOrder.exactAddress || '—'}</td>
+                      <td className="p-2.5 font-bold text-emerald-900">
+                        {pendingData.exactAddress || '—'}
+                        {isDiff(reviewingEditOrder.exactAddress, pendingData.exactAddress) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
+                      </td>
+                    </tr>
+
+                    {/* Delivery Location Map URL */}
+                    <tr className={isDiff(reviewingEditOrder.deliveryLocationUrl, pendingData.deliveryLocationUrl) ? 'bg-emerald-50/70' : ''}>
+                      <td className="p-2.5 font-bold text-slate-600">موقعیت نقشه:</td>
+                      <td className="p-2.5 font-mono text-[11px] truncate max-w-[150px]">{reviewingEditOrder.deliveryLocationUrl || 'ثبت نشده'}</td>
+                      <td className="p-2.5 font-mono text-[11px] font-bold text-emerald-900 truncate max-w-[150px]">
+                        {pendingData.deliveryLocationUrl || 'ثبت نشده'}
+                        {isDiff(reviewingEditOrder.deliveryLocationUrl, pendingData.deliveryLocationUrl) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
+                      </td>
+                    </tr>
+
+                    {/* Payment Tracking Code */}
+                    <tr className={isDiff(reviewingEditOrder.paymentTrackingCode, pendingData.paymentTrackingCode) ? 'bg-emerald-50/70' : ''}>
+                      <td className="p-2.5 font-bold text-slate-600">کد فیش واریزی:</td>
+                      <td className="p-2.5 font-mono">{reviewingEditOrder.paymentTrackingCode || '—'}</td>
+                      <td className="p-2.5 font-mono font-bold text-emerald-900">
+                        {pendingData.paymentTrackingCode || '—'}
+                        {isDiff(reviewingEditOrder.paymentTrackingCode, pendingData.paymentTrackingCode) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
+                      </td>
+                    </tr>
+
+                    {/* Products / Items */}
+                    <tr className="bg-slate-50/50">
+                      <td className="p-2.5 font-bold text-slate-600">اقلام و مقادیر سبد خرید:</td>
+                      <td className="p-2.5 space-y-1">
+                        {currentItems.map((it: any, idx: number) => (
+                          <div key={idx} className="font-semibold">
+                            • {it.productName}: <strong>{it.quantity?.toLocaleString()}</strong> {it.unit}
+                          </div>
+                        ))}
+                      </td>
+                      <td className="p-2.5 space-y-1 font-bold text-emerald-900 bg-emerald-50/40">
+                        {pendingItems.length > 0 ? (
+                          pendingItems.map((it: any, idx: number) => (
+                            <div key={idx} className="font-bold">
+                              • {it.productName}: <strong>{it.quantity?.toLocaleString()}</strong> {it.unit}
+                            </div>
+                          ))
+                        ) : (
+                          '— بدون تغییر —'
+                        )}
+                      </td>
+                    </tr>
+
+                    {/* Notes */}
+                    <tr className={isDiff(reviewingEditOrder.notes, pendingData.notes) ? 'bg-emerald-50/70' : ''}>
+                      <td className="p-2.5 font-bold text-slate-600">توضیحات و یادداشت:</td>
+                      <td className="p-2.5">{reviewingEditOrder.notes || '—'}</td>
+                      <td className="p-2.5 font-bold text-emerald-900">
+                        {pendingData.notes || '—'}
+                        {isDiff(reviewingEditOrder.notes, pendingData.notes) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
+                      </td>
+                    </tr>
+
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Actions Footer */}
+              <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onRejectOrderEdit) {
+                      onRejectOrderEdit(reviewingEditOrder.id);
+                      setReviewingEditOrder(null);
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                >
+                  ❌ عدم موافقت و رد ویرایش
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setReviewingEditOrder(null)}
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+                  >
+                    بستن
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onApproveOrderEdit) {
+                        onApproveOrderEdit(reviewingEditOrder.id);
+                        setReviewingEditOrder(null);
+                      }
+                    }}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>تایید موافقت و اعمال تغییرات روی فاکتور</span>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
       </div>
   );

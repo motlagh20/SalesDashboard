@@ -47,10 +47,14 @@ export interface Order {
   isExportOrder?: boolean;    // آیا سفارش صادراتی است
   destinationCountry?: string; // کشور مقصد صادراتی
   deliveryLocationUrl?: string; // لینک یا مختصات نقشه تخلیه بار (گوگل مپ، نشان، بلد)
+  vehicleType?: string;        // نوع ناوگان درخواستی
+  hasPendingEdit?: boolean;    // آیا سفارش ویرایش شده و در انتظار تایید مدیر بازرگانی است
+  pendingEditData?: string;    // اطلاعات متنی/JSON ویرایش شده در انتظار تایید
 }
 
 export interface Product {
   id: string;
+  code?: string;
   name: string;
   category: string;
   pricePerUnit: number;

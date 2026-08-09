@@ -704,6 +704,62 @@ export default function App() {
     }
   };
 
+  // 1c. Edit Order Request (Called by Representative at any stage)
+  const handleEditOrder = async (orderId: string, editData: Partial<Order>) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/edit`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editData)
+      });
+      if (response.ok) {
+        showToast('اصلاحیه سفارش با موفقیت ارسال شد و جهت تایید در کارتابل مدیر بازرگانی قرار گرفت. نوبت سفارش محفوظ است.', 'success');
+        refreshAllData();
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت ویرایش سفارش');
+        showToast(`خطا: ${errorMsg}`, 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ثبت ویرایش سفارش', 'error');
+    }
+  };
+
+  // 1d. Approve Order Edit (Called by Sales Manager)
+  const handleApproveOrderEdit = async (orderId: string) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/approve-edit`, {
+        method: 'PATCH'
+      });
+      if (response.ok) {
+        showToast('تغییرات و اصلاحیه سفارش با موفقیت تایید و اعمال شد. نوبت سفارش ثابت ماند.', 'success');
+        refreshAllData();
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در تایید ویرایش سفارش');
+        showToast(`خطا: ${errorMsg}`, 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در تایید ویرایش سفارش', 'error');
+    }
+  };
+
+  // 1e. Reject Order Edit (Called by Sales Manager)
+  const handleRejectOrderEdit = async (orderId: string) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/reject-edit`, {
+        method: 'PATCH'
+      });
+      if (response.ok) {
+        showToast('درخواست ویرایش سفارش رد شد و اطلاعات قبلی فاکتور حفظ گردید.', 'info');
+        refreshAllData();
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در رد ویرایش سفارش');
+        showToast(`خطا: ${errorMsg}`, 'error');
+      }
+    } catch (err) {
+      showToast('خطای شبکه در رد ویرایش سفارش', 'error');
+    }
+  };
+
   // 2. Approve Order (Called by Sales Manager)
   const handleApproveOrder = async (orderId: string) => {
     try {
@@ -1549,6 +1605,7 @@ export default function App() {
                 agents={agents}
                 onCreateOrder={handleCreateOrder}
                 onCancelOrder={handleCancelOrder}
+                onEditOrder={handleEditOrder}
                 onUpdatePaymentTracking={handleUpdatePaymentTracking}
                 onSaveLocation={handleUpdateOrderLocation}
                 selectedAgent={selectedAgent}
@@ -1570,6 +1627,8 @@ export default function App() {
                 permanentDrivers={permanentDrivers}
                 onApproveOrder={handleApproveOrder}
                 onRejectOrder={handleRejectOrder}
+                onApproveOrderEdit={handleApproveOrderEdit}
+                onRejectOrderEdit={handleRejectOrderEdit}
                 onDispatchToFactory={handleDispatchToFactory}
                 onUpdateAllOrders={handleUpdateAllOrders}
                 onAddProduct={handleCreateProduct}

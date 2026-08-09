@@ -44,8 +44,8 @@ async function startServer() {
   await bootstrapDatabase();
 
   // Middleware for parsing JSON & URL-encoded request bodies
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Prevent client and browser HTTP caching on all API endpoints
   app.use("/api", (req, res, next) => {
@@ -847,6 +847,9 @@ async function startServer() {
           isExportOrder: !!o.isExportOrder,
           destinationCountry: o.destinationCountry,
           deliveryLocationUrl: o.deliveryLocationUrl || null,
+          vehicleType: o.vehicleType || null,
+          hasPendingEdit: !!o.hasPendingEdit,
+          pendingEditData: o.pendingEditData || null,
           statusHistory: historyMap[o.id] || []
         };
 
@@ -1034,6 +1037,164 @@ async function startServer() {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/payment-tracking:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Representative edits order at any stage (requires Sales Manager re-approval)
+  app.patch("/api/orders/:id/edit", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const editData = req.body; // updated proposed values
+      const updatedAt = new Date().toISOString();
+
+      const pendingEditData = JSON.stringify({
+        ...editData,
+        editedAt: updatedAt
+      });
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        const [ordRows] = await connection.query("SELECT status FROM orders WHERE id = ?", [id]) as any[];
+        const currentStatus = ordRows[0]?.status || 'PENDING_APPROVAL';
+
+        if (currentStatus === 'LOADED_AND_DISPATCHED' || currentStatus === 'REJECTED') {
+          await connection.rollback();
+          connection.release();
+          return res.status(400).json({ error: 'امکان ویرایش سفارش پس از صدور ترخیص یا لغو سفارش وجود ندارد.' });
+        }
+
+        await connection.query(
+          "UPDATE orders SET hasPendingEdit = 1, pendingEditData = ? WHERE id = ?",
+          [pendingEditData, id]
+        );
+
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          VALUES (?, ?, ?, 'ثبت اصلاحیه و ویرایش مشخصات سفارش توسط نمایندگی فروش (در انتظار بررسی و تایید مدیر بازرگانی)')
+        `, [id, currentStatus, updatedAt]);
+
+        await connection.commit();
+        clearAllRouteCaches();
+        res.json({ success: true });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/edit:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Sales Manager approves pending edits (applies changes, retains priority & status)
+  app.patch("/api/orders/:id/approve-edit", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const updatedAt = new Date().toISOString();
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        const [rows] = await connection.query("SELECT * FROM orders WHERE id = ?", [id]) as any[];
+        if (rows.length === 0) {
+          await connection.rollback();
+          return res.status(404).json({ error: "سفارش یافت نشد" });
+        }
+
+        const order = rows[0];
+        if (!order.pendingEditData) {
+          await connection.rollback();
+          return res.status(400).json({ error: "اطلاعات اصلاحیه جهت تایید یافت نشد" });
+        }
+
+        const edits = JSON.parse(order.pendingEditData);
+
+        const updateFields: string[] = [];
+        const updateParams: any[] = [];
+
+        if (edits.buyerName !== undefined) { updateFields.push("buyerName = ?"); updateParams.push(edits.buyerName || null); }
+        if (edits.phoneNumber !== undefined) { updateFields.push("phoneNumber = ?"); updateParams.push(edits.phoneNumber || null); }
+        if (edits.destinationCity !== undefined) { updateFields.push("destinationCity = ?"); updateParams.push(edits.destinationCity || null); }
+        if (edits.exactAddress !== undefined) { updateFields.push("exactAddress = ?"); updateParams.push(edits.exactAddress || null); }
+        if (edits.deliveryLocationUrl !== undefined) { updateFields.push("deliveryLocationUrl = ?"); updateParams.push(edits.deliveryLocationUrl || null); }
+        if (edits.itemsJson !== undefined) { updateFields.push("itemsJson = ?"); updateParams.push(edits.itemsJson || null); }
+        if (edits.quantity !== undefined) { updateFields.push("quantity = ?"); updateParams.push(edits.quantity); }
+        if (edits.productName !== undefined) { updateFields.push("productName = ?"); updateParams.push(edits.productName || null); }
+        if (edits.productId !== undefined) { updateFields.push("productId = ?"); updateParams.push(edits.productId || null); }
+        if (edits.unit !== undefined) { updateFields.push("unit = ?"); updateParams.push(edits.unit || null); }
+        if (edits.notes !== undefined) { updateFields.push("notes = ?"); updateParams.push(edits.notes || null); }
+        if (edits.vehicleType !== undefined) { updateFields.push("vehicleType = ?"); updateParams.push(edits.vehicleType || null); }
+        if (edits.paymentTrackingCode !== undefined) { updateFields.push("paymentTrackingCode = ?"); updateParams.push(edits.paymentTrackingCode || null); }
+        if (edits.isExportOrder !== undefined) { updateFields.push("isExportOrder = ?"); updateParams.push(edits.isExportOrder ? 1 : 0); }
+        if (edits.destinationCountry !== undefined) { updateFields.push("destinationCountry = ?"); updateParams.push(edits.destinationCountry || null); }
+
+        updateFields.push("hasPendingEdit = 0");
+        updateFields.push("pendingEditData = NULL");
+
+        updateParams.push(id);
+
+        await connection.query(`UPDATE orders SET ${updateFields.join(", ")} WHERE id = ?`, updateParams);
+
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          VALUES (?, ?, ?, 'تغییرات و اصلاحیه مشخصات سفارش توسط مدیر بازرگانی تایید و بر روی فاکتور اعمال گردید (نوبت سفارش ثابت ماند)')
+        `, [id, order.status, updatedAt]);
+
+        await connection.commit();
+        clearAllRouteCaches();
+        res.json({ success: true });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/approve-edit:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Sales Manager rejects pending edits
+  app.patch("/api/orders/:id/reject-edit", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const updatedAt = new Date().toISOString();
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        const [ordRows] = await connection.query("SELECT status FROM orders WHERE id = ?", [id]) as any[];
+        const currentStatus = ordRows[0]?.status || 'PENDING_APPROVAL';
+
+        await connection.query("UPDATE orders SET hasPendingEdit = 0, pendingEditData = NULL WHERE id = ?", [id]);
+
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          VALUES (?, ?, ?, 'درخواست ویرایش سفارش توسط مدیر بازرگانی رد شد (مشخصات قبلی فاکتور حفظ گردید)')
+        `, [id, currentStatus, updatedAt]);
+
+        await connection.commit();
+        clearAllRouteCaches();
+        res.json({ success: true });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/reject-edit:", err);
       res.status(500).json({ error: err.message });
     }
   });

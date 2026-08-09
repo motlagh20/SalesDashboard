@@ -32,7 +32,9 @@ import {
   Send,
   Map,
   Search,
-  X
+  X,
+  Edit,
+  Check
 } from 'lucide-react';
 
 import { SendLocationModal } from './SendLocationModal';
@@ -44,6 +46,7 @@ interface RepresentativeDashboardProps {
   agents: Agent[];
   onCreateOrder: (orderData: Partial<Order>) => void;
   onCancelOrder: (orderId: string) => void;
+  onEditOrder?: (orderId: string, editData: Partial<Order>) => void;
   onUpdatePaymentTracking: (orderId: string, paymentTrackingCode: string) => void;
   onSaveLocation?: (orderId: string, deliveryLocationUrl: string) => Promise<void>;
   selectedAgent: string;
@@ -61,6 +64,7 @@ export default function RepresentativeDashboard({
   agents,
   onCreateOrder,
   onCancelOrder,
+  onEditOrder,
   onUpdatePaymentTracking,
   onSaveLocation,
   selectedAgent,
@@ -95,6 +99,119 @@ export default function RepresentativeDashboard({
   const [successMessage, setSuccessMessage] = useState('');
   const [selectedLocationOrder, setSelectedLocationOrder] = useState<Order | null>(null);
   const [isFormMapPickerOpen, setIsFormMapPickerOpen] = useState(false);
+
+  // Edit Order Modal States
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [isEditMapPickerOpen, setIsEditMapPickerOpen] = useState(false);
+  const [editBuyerName, setEditBuyerName] = useState('');
+  const [editPhoneNumber, setEditPhoneNumber] = useState('');
+  const [editDestinationCity, setEditDestinationCity] = useState('');
+  const [editExactAddress, setEditExactAddress] = useState('');
+  const [editDeliveryLocationUrl, setEditDeliveryLocationUrl] = useState('');
+  const [editVehicleType, setEditVehicleType] = useState('تریلی');
+  const [editPaymentTrackingCode, setEditPaymentTrackingCode] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editIsExportOrder, setEditIsExportOrder] = useState(false);
+  const [editDestinationCountry, setEditDestinationCountry] = useState('');
+  const [editItems, setEditItems] = useState<InvoiceItem[]>([]);
+
+  const handleOpenEditModal = (ord: Order) => {
+    if (ord.status === 'LOADED_AND_DISPATCHED' || ord.status === 'REJECTED') {
+      showToast('امکان ویرایش سفارش‌های ترخیص شده یا لغو شده وجود ندارد.', 'error');
+      return;
+    }
+    setEditingOrder(ord);
+
+    let pendingData: any = null;
+    if (ord.hasPendingEdit && ord.pendingEditData) {
+      try {
+        pendingData = JSON.parse(ord.pendingEditData);
+      } catch (e) {}
+    }
+
+    setEditBuyerName(pendingData?.buyerName ?? ord.buyerName ?? '');
+    setEditPhoneNumber(pendingData?.phoneNumber ?? ord.phoneNumber ?? '');
+    setEditDestinationCity(pendingData?.destinationCity ?? ord.destinationCity ?? '');
+    setEditExactAddress(pendingData?.exactAddress ?? ord.exactAddress ?? '');
+    setEditDeliveryLocationUrl(pendingData?.deliveryLocationUrl ?? ord.deliveryLocationUrl ?? '');
+    setEditNotes(pendingData?.notes ?? ord.notes ?? '');
+    setEditPaymentTrackingCode(pendingData?.paymentTrackingCode ?? ord.paymentTrackingCode ?? '');
+    setEditVehicleType(pendingData?.vehicleType ?? ord.vehicleDetails?.vehicleType ?? ord.vehicleType ?? 'تریلی');
+    setEditIsExportOrder(pendingData?.isExportOrder !== undefined ? !!pendingData.isExportOrder : !!ord.isExportOrder);
+    setEditDestinationCountry(pendingData?.destinationCountry ?? ord.destinationCountry ?? '');
+
+    let itemsList: InvoiceItem[] = [];
+    const rawItemsJson = pendingData?.itemsJson || ord.itemsJson;
+    if (rawItemsJson) {
+      try {
+        const parsed = JSON.parse(rawItemsJson);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          itemsList = parsed.map((it: any, idx: number) => ({
+            id: `edit-item-${idx}-${Date.now()}`,
+            productId: it.productId || 'prod-1',
+            productName: it.productName || 'محصول',
+            quantity: Number(it.quantity) || 1,
+            unit: it.unit || 'عدد',
+            pricePerUnit: it.pricePerUnit || 0
+          }));
+        }
+      } catch (e) {}
+    }
+    if (itemsList.length === 0) {
+      itemsList = [{
+        id: `edit-item-single-${Date.now()}`,
+        productId: pendingData?.productId || ord.productId,
+        productName: pendingData?.productName || ord.productName,
+        quantity: Number(pendingData?.quantity || ord.quantity) || 1,
+        unit: pendingData?.unit || ord.unit,
+        pricePerUnit: 0
+      }];
+    }
+    setEditItems(itemsList);
+  };
+
+  const handleSaveOrderEdit = () => {
+    if (!editingOrder) return;
+    if (editingOrder.status === 'LOADED_AND_DISPATCHED' || editingOrder.status === 'REJECTED') {
+      showToast('امکان ویرایش این سفارش به علت ترخیص/خروج وجود ندارد.', 'error');
+      return;
+    }
+    if (!onEditOrder) {
+      showToast('سرویس ثبت ویرایش سفارش در دسترس نیست.', 'error');
+      return;
+    }
+
+    const totalQuantity = editItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+    const firstItem = editItems[0] || {
+      productId: editingOrder.productId,
+      productName: editingOrder.productName,
+      quantity: editingOrder.quantity,
+      unit: editingOrder.unit
+    };
+
+    const payload: Partial<Order> = {
+      buyerName: editBuyerName.trim(),
+      phoneNumber: editPhoneNumber.trim(),
+      destinationCity: editDestinationCity.trim(),
+      exactAddress: editExactAddress.trim(),
+      deliveryLocationUrl: editDeliveryLocationUrl.trim(),
+      notes: editNotes.trim(),
+      paymentTrackingCode: editPaymentTrackingCode.trim(),
+      vehicleType: editVehicleType,
+      isExportOrder: editIsExportOrder,
+      destinationCountry: editIsExportOrder ? editDestinationCountry : '',
+      productId: firstItem.productId,
+      productName: editItems.length > 1 
+        ? editItems.map(i => `${i.productName} (${i.quantity} ${i.unit})`).join(' + ')
+        : firstItem.productName,
+      quantity: totalQuantity,
+      unit: firstItem.unit,
+      itemsJson: JSON.stringify(editItems)
+    };
+
+    onEditOrder(editingOrder.id, payload);
+    setEditingOrder(null);
+  };
 
   const handleGetCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -1081,6 +1198,20 @@ export default function RepresentativeDashboard({
                   } catch (e) {}
                 }
 
+                if (order.hasPendingEdit && order.pendingEditData) {
+                  try {
+                    const pData = JSON.parse(order.pendingEditData);
+                    let pQty = pData.quantity;
+                    if (!pQty && pData.itemsJson) {
+                      const pItems = JSON.parse(pData.itemsJson);
+                      pQty = pItems.reduce((s: number, i: any) => s + (Number(i.quantity) || 0), 0);
+                    }
+                    if (pQty && pQty !== order.quantity) {
+                      productSummaryText += ` ⬅️ [مقدار اصلاحی جدید: ${pQty.toLocaleString()} ${order.unit}]`;
+                    }
+                  } catch (e) {}
+                }
+
                 return (
                   <div 
                     key={order.id} 
@@ -1126,9 +1257,34 @@ export default function RepresentativeDashboard({
                           </span>
                         )}
 
+                        {order.hasPendingEdit && (
+                          <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 py-0.5 px-2 rounded-full font-bold flex items-center gap-1 animate-pulse">
+                            ⚠️ اصلاحیه در انتظار تایید
+                          </span>
+                        )}
+
                         <span className={`text-[10px] font-bold border py-0.5 px-2.5 rounded-full ${statusDetails.badge}`}>
                           {statusDetails.text}
                         </span>
+
+                        {order.status !== 'REJECTED' && order.status !== 'LOADED_AND_DISPATCHED' ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEditModal(order);
+                            }}
+                            className="bg-amber-50 hover:bg-amber-100 text-amber-900 text-[11px] font-bold px-2 py-1 rounded-lg border border-amber-200/80 flex items-center gap-1 transition-all cursor-pointer"
+                            title="ویرایش مشخصات این سفارش قبل از صدور ترخیص"
+                          >
+                            <Edit className="w-3.5 h-3.5 text-amber-700" />
+                            <span>ویرایش</span>
+                          </button>
+                        ) : order.status === 'LOADED_AND_DISPATCHED' ? (
+                          <span className="text-[10px] bg-slate-100 text-slate-500 font-medium py-0.5 px-2 rounded-lg border border-slate-200" title="امکان ویرایش پس از ترخیص وجود ندارد">
+                            🔒 ترخیص‌شده
+                          </span>
+                        ) : null}
 
                         <button
                           type="button"
@@ -1148,6 +1304,39 @@ export default function RepresentativeDashboard({
                     {isExpanded && (
                       <div className="pt-3 border-t border-slate-100 space-y-4 animate-fade-in">
                         
+                        {/* Banner if order has pending edit */}
+                        {order.hasPendingEdit && (() => {
+                          let pendingInfo: any = null;
+                          try {
+                            pendingInfo = JSON.parse(order.pendingEditData || '{}');
+                          } catch (e) {}
+
+                          let requestedQty = pendingInfo?.quantity;
+                          if (!requestedQty && pendingInfo?.itemsJson) {
+                            try {
+                              const items = JSON.parse(pendingInfo.itemsJson);
+                              requestedQty = items.reduce((sum: number, it: any) => sum + (Number(it.quantity) || 0), 0);
+                            } catch (e) {}
+                          }
+
+                          return (
+                            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-950 text-xs flex items-start gap-2.5">
+                              <span className="text-base mt-0.5">⚠️</span>
+                              <div className="space-y-1">
+                                <span className="font-bold block text-slate-900">اصلاحیه جدید جهت تایید مدیر بازرگانی ارسال شده است:</span>
+                                {requestedQty && requestedQty !== order.quantity ? (
+                                  <p className="text-amber-900 font-bold text-[11.5px]">
+                                    مقدار قبلی: <span className="line-through text-slate-500 font-mono">{order.quantity?.toLocaleString()}</span> ⬅️ مقدار جدید اصلاحی درخواستی: <span className="text-emerald-800 font-mono text-xs bg-emerald-100 px-1.5 py-0.5 rounded font-black">{requestedQty?.toLocaleString()}</span> {order.unit}
+                                  </p>
+                                ) : null}
+                                <p className="text-[11px] text-amber-800 leading-relaxed">
+                                  تغییرات فوق در کارتابل مدیر بازرگانی قرار دارد و به محض تایید ایشان، فاکتور نهایی ویرایش خواهد شد. نوبت و اولویت صف سفارش کاملاً محفوظ است.
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
                         {/* Header line inside expanded view with cancel button */}
                         <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                           <div className="flex items-center gap-1.5 flex-wrap">
@@ -1159,6 +1348,16 @@ export default function RepresentativeDashboard({
                                 <Globe className="w-3 h-3 text-sky-600" />
                                 سفارش صادراتی ({order.destinationCountry || 'خارجی'})
                               </span>
+                            )}
+                            {order.status !== 'REJECTED' && order.status !== 'LOADED_AND_DISPATCHED' && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditModal(order)}
+                                className="bg-amber-50 hover:bg-amber-100 text-amber-800 text-[10px] py-1 px-2.5 rounded font-bold transition-all border border-amber-200/80 flex items-center gap-1 cursor-pointer"
+                              >
+                                <Edit className="w-3 h-3 text-amber-700" />
+                                <span>ویرایش مشخصات سفارش</span>
+                              </button>
                             )}
                             {['PENDING_APPROVAL', 'APPROVED_BY_SALES'].includes(order.status) && (
                               <button
@@ -1480,6 +1679,230 @@ export default function RepresentativeDashboard({
         onConfirmLocation={(url) => {
           setDeliveryLocationUrl(url);
           showToast('موقعیت مکانی جدید روی نقشه انتخاب شد.', 'success');
+        }}
+      />
+
+      {/* Edit Order Modal */}
+      {editingOrder && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl border border-slate-200 animate-scale-up max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Edit className="w-5 h-5 text-amber-600" />
+                <h3 className="font-bold text-slate-800 text-base">
+                  ویرایش مشخصات سفارش شماره #{editingOrder.orderNumber}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingOrder(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg text-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-950 text-xs leading-relaxed space-y-1">
+              <span className="font-bold block">📌 راهنمای ویرایش سفارش:</span>
+              <p>ویرایش سفارش در هر مرحله‌ای قابل انجام است و هیچ‌گونه تاثیری در نوبت، اولویت صف بارگیری یا شماره سفارش ندارد.</p>
+              <p className="text-amber-800 font-semibold">تغییرات شما پس از ثبت، به کارتابل مدیر بازرگانی ارسال شده و پس از تایید ایشان اعمال خواهد شد.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">نام خریدار / تحویل گیرنده:</label>
+                <input
+                  type="text"
+                  value={editBuyerName}
+                  onChange={e => setEditBuyerName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-800 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">شماره تماس تحویل گیرنده:</label>
+                <input
+                  type="text"
+                  value={editPhoneNumber}
+                  onChange={e => setEditPhoneNumber(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-800 focus:outline-none focus:border-amber-500 font-mono dir-ltr text-right"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">شهر مقصد:</label>
+                <input
+                  type="text"
+                  value={editDestinationCity}
+                  onChange={e => setEditDestinationCity(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-800 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">نوع ناوگان باربری درخواستی:</label>
+                <select
+                  value={editVehicleType}
+                  onChange={e => setEditVehicleType(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-800 focus:outline-none focus:border-amber-500 font-bold"
+                >
+                  <option value="تریلی">تریلی کفی / کانتینر</option>
+                  <option value="کامیون جفت">کامیون جفت (۱۰ چرخ)</option>
+                  <option value="کامیون تک">کامیون تک (۶ چرخ)</option>
+                  <option value="خاور">خاور / نیسان / مسقف</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-slate-700 font-bold mb-1">آدرس دقیق تخلیه بار:</label>
+                <textarea
+                  value={editExactAddress}
+                  onChange={e => setEditExactAddress(e.target.value)}
+                  rows={2}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-800 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-700 font-bold">لینک یا مختصات دقیق روی نقشه:</label>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditMapPickerOpen(true)}
+                    className="text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer"
+                  >
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>انتخاب روی نقشه</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={editDeliveryLocationUrl}
+                  onChange={e => setEditDeliveryLocationUrl(e.target.value)}
+                  placeholder="https://maps.google.com/..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-800 focus:outline-none focus:border-amber-500 font-mono text-left dir-ltr"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-slate-700 font-bold mb-1">شماره فیش / کد پیگیری پرداخت:</label>
+                <input
+                  type="text"
+                  value={editPaymentTrackingCode}
+                  onChange={e => setEditPaymentTrackingCode(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-800 focus:outline-none focus:border-amber-500 font-mono"
+                />
+              </div>
+
+              <div className="md:col-span-2 space-y-2 border-t border-slate-100 pt-3 mt-1">
+                <span className="font-bold text-slate-800 block">اقلام و مقادیر سفارش:</span>
+                {editItems.map((item, index) => (
+                  <div key={item.id} className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
+                    <select
+                      value={item.productId}
+                      onChange={e => {
+                        const prod = products.find(p => p.id === e.target.value);
+                        const next = [...editItems];
+                        next[index].productId = e.target.value;
+                        if (prod) {
+                          next[index].productName = prod.name;
+                          next[index].unit = prod.unit;
+                        }
+                        setEditItems(next);
+                      }}
+                      className="bg-white border border-slate-300 rounded-lg p-1.5 text-xs font-bold flex-1"
+                    >
+                      {products.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} {p.code ? `(${p.code})` : ''}</option>
+                      ))}
+                    </select>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <input
+                        type="number"
+                        min="1"
+                        value={item.quantity}
+                        onChange={e => {
+                          const next = [...editItems];
+                          next[index].quantity = Math.max(1, parseInt(e.target.value) || 1);
+                          setEditItems(next);
+                        }}
+                        className="w-20 bg-white border border-slate-300 rounded-lg p-1.5 text-xs text-center font-bold"
+                      />
+                      <span className="text-[11px] text-slate-500">{item.unit}</span>
+                    </div>
+
+                    {editItems.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setEditItems(editItems.filter((_, idx) => idx !== index))}
+                        className="text-rose-600 hover:text-rose-800 p-1 text-sm font-bold cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstProd = products[0];
+                    setEditItems([...editItems, {
+                      id: `edit-item-${Date.now()}`,
+                      productId: firstProd?.id || 'prod-1',
+                      productName: firstProd?.name || 'محصول',
+                      quantity: 10,
+                      unit: firstProd?.unit || 'عدد',
+                      pricePerUnit: 0
+                    }]);
+                  }}
+                  className="text-sky-700 bg-sky-50 hover:bg-sky-100 text-[11px] font-bold px-3 py-1.5 rounded-lg border border-sky-200 cursor-pointer"
+                >
+                  + افزودن قلم جدید به سفارش
+                </button>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-slate-700 font-bold mb-1">یادداشت / توضیحات تکمیلی:</label>
+                <textarea
+                  value={editNotes}
+                  onChange={e => setEditNotes(e.target.value)}
+                  rows={2}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-800 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setEditingOrder(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveOrderEdit}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl cursor-pointer flex items-center gap-1.5 shadow-md shadow-amber-600/20"
+              >
+                <Check className="w-4 h-4" />
+                <span>ثبت اصلاحیه و ارسال برای مدیر بازرگانی</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Map Picker Modal */}
+      <InteractiveMapPicker
+        isOpen={isEditMapPickerOpen}
+        onClose={() => setIsEditMapPickerOpen(false)}
+        cityHint={editDestinationCity}
+        onConfirmLocation={(url) => {
+          setEditDeliveryLocationUrl(url);
+          showToast('موقعیت مکانی اصلاحیه روی نقشه ثبت شد.', 'success');
         }}
       />
     </div>

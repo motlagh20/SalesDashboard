@@ -737,74 +737,45 @@ function executeQuery(sql: string, values: any[] = []): any {
 
   // 20. UPDATE orders updates
   if (/UPDATE\s+orders\s+SET/i.test(cleanSql)) {
-    if (/status\s+=\s+\?,\s+rejectionReason/i.test(cleanSql)) {
-      const [status, rejectionReason, id] = values;
+    const setMatch = cleanSql.match(/UPDATE\s+orders\s+SET\s+(.*?)\s+WHERE\s+id\s*=\s*(\?|'[^']+'|"[^"]+");?/i);
+    if (setMatch) {
+      const setClause = setMatch[1];
+      const idMatch = setMatch[2];
+      const id = idMatch === '?' ? values[values.length - 1] : idMatch.replace(/['"]/g, '');
       const ord = jsonData.orders.find((o: any) => o.id === id);
       if (ord) {
-        ord.status = status;
-        ord.rejectionReason = rejectionReason;
+        const assignments = setClause.split(',').map(s => s.trim());
+        let valIdx = 0;
+        assignments.forEach(assign => {
+          const parts = assign.split('=').map(s => s.trim());
+          const colName = parts[0];
+          const valExpr = parts[1];
+          if (colName) {
+            let finalVal: any = undefined;
+            if (valExpr === '?') {
+              finalVal = values[valIdx++];
+            } else if (valExpr === 'NULL' || valExpr === 'null') {
+              finalVal = null;
+            } else if (valExpr === '0') {
+              finalVal = 0;
+            } else if (valExpr === '1') {
+              finalVal = 1;
+            }
+
+            if (finalVal !== undefined) {
+              if (colName === 'quantity' || colName === 'priorityIndex') {
+                ord[colName] = finalVal !== null ? Number(finalVal) : 0;
+              } else if (colName === 'hasPendingEdit' || colName === 'isExportOrder') {
+                ord[colName] = finalVal ? 1 : 0;
+              } else {
+                ord[colName] = finalVal;
+              }
+            }
+          }
+        });
         saveJsonData(jsonData);
       }
-    } else if (/status\s+=\s+\?,\s+sentToFactoryAt/i.test(cleanSql)) {
-      const [status, sentToFactoryAt, id] = values;
-      const ord = jsonData.orders.find((o: any) => o.id === id);
-      if (ord) {
-        ord.status = status;
-        ord.sentToFactoryAt = sentToFactoryAt;
-        saveJsonData(jsonData);
-      }
-    } else if (/status\s+=\s+\?\s+WHERE\s+id/i.test(cleanSql)) {
-      const [status, id] = values;
-      const ord = jsonData.orders.find((o: any) => o.id === id);
-      if (ord) {
-        ord.status = status;
-        saveJsonData(jsonData);
-      }
-    } else if (/priorityIndex\s+=\s+\?/i.test(cleanSql)) {
-      const [priorityIndex, id] = values;
-      const ord = jsonData.orders.find((o: any) => o.id === id);
-      if (ord) {
-        ord.priorityIndex = Number(priorityIndex);
-        saveJsonData(jsonData);
-      }
-    } else if (/vehicleType\s+=\s+\?/i.test(cleanSql)) {
-      if (values.length >= 10) {
-        const [status, vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, billOfLadingNumber, shippingCompanyId, id] = values;
-        const ord = jsonData.orders.find((o: any) => o.id === id);
-        if (ord) {
-          ord.status = status;
-          ord.vehicleType = vehicleType;
-          ord.driverName = driverName;
-          ord.driverPhone = driverPhone;
-          ord.licensePlate = licensePlate;
-          ord.shippingAgency = shippingAgency;
-          ord.estimatedArrival = estimatedArrival;
-          ord.billOfLadingNumber = billOfLadingNumber;
-          ord.shippingCompanyId = shippingCompanyId;
-          saveJsonData(jsonData);
-        }
-      } else {
-        const [status, vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, id] = values;
-        const ord = jsonData.orders.find((o: any) => o.id === id);
-        if (ord) {
-          ord.status = status;
-          ord.vehicleType = vehicleType;
-          ord.driverName = driverName;
-          ord.driverPhone = driverPhone;
-          ord.licensePlate = licensePlate;
-          ord.shippingAgency = shippingAgency;
-          ord.estimatedArrival = estimatedArrival;
-          saveJsonData(jsonData);
-        }
-      }
-    } else if (/shippingCompanyId\s+=\s+\?/i.test(cleanSql)) {
-      const [shippingCompanyId, shippingAgency, id] = values;
-      const ord = jsonData.orders.find((o: any) => o.id === id);
-      if (ord) {
-        ord.shippingCompanyId = shippingCompanyId;
-        ord.shippingAgency = shippingAgency;
-        saveJsonData(jsonData);
-      }
+      return [{ affectedRows: 1 }];
     }
     return [{ affectedRows: 1 }];
   }
@@ -1309,6 +1280,8 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "orders", "isExportOrder", "TINYINT(1) DEFAULT 0");
     await ensureColumnExists(db, "orders", "destinationCountry", "VARCHAR(100) NULL");
     await ensureColumnExists(db, "orders", "deliveryLocationUrl", "TEXT NULL");
+    await ensureColumnExists(db, "orders", "hasPendingEdit", "TINYINT(1) DEFAULT 0");
+    await ensureColumnExists(db, "orders", "pendingEditData", "TEXT NULL");
 
     // products primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, imageUrl
     await ensureColumnExists(db, "products", "primaryUnit", "VARCHAR(50) NULL");
