@@ -6,6 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { reverseGeocode } from '../utils/reverseGeocode';
 import {
   X,
   MapPin,
@@ -14,13 +15,14 @@ import {
   Search,
   Compass,
   Crosshair,
-  Layers
+  Layers,
+  FileText
 } from 'lucide-react';
 
 interface InteractiveMapPickerProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirmLocation: (locationUrl: string, lat: number, lng: number) => void;
+  onConfirmLocation: (locationUrl: string, lat: number, lng: number, addressText?: string) => void;
   initialLat?: number;
   initialLng?: number;
   cityHint?: string;
@@ -62,6 +64,23 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
   const [currentLng, setCurrentLng] = useState<number>(initialLng);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLocatingGps, setIsLocatingGps] = useState(false);
+
+  // Address state for reverse geocoding
+  const [fetchedAddress, setFetchedAddress] = useState<string>('');
+  const [isFetchingAddress, setIsFetchingAddress] = useState<boolean>(false);
+  const [autoFillAddress, setAutoFillAddress] = useState<boolean>(true);
+
+  // Fetch address automatically when coordinates change
+  useEffect(() => {
+    if (!isOpen) return;
+    setIsFetchingAddress(true);
+    const timer = setTimeout(async () => {
+      const addr = await reverseGeocode(currentLat, currentLng);
+      setFetchedAddress(addr);
+      setIsFetchingAddress(false);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [currentLat, currentLng, isOpen]);
 
   // Custom DivIcon for high-visibility pulse red pin
   const createCustomPinIcon = () => {
@@ -202,7 +221,7 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
 
   const handleConfirm = () => {
     const generatedUrl = `https://maps.google.com/?q=${currentLat},${currentLng}`;
-    onConfirmLocation(generatedUrl, currentLat, currentLng);
+    onConfirmLocation(generatedUrl, currentLat, currentLng, autoFillAddress ? fetchedAddress : undefined);
     onClose();
   };
 
@@ -279,12 +298,37 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
           </div>
         </div>
 
+        {/* Reverse Geocoded Address Bar */}
+        <div className="bg-sky-50 border-t border-sky-200 px-3.5 py-2.5 flex items-center justify-between gap-3 text-xs shrink-0">
+          <div className="flex items-center gap-2 overflow-hidden flex-1">
+            <FileText className="w-4 h-4 text-sky-700 shrink-0" />
+            <span className="font-bold text-sky-950 shrink-0">آدرس متنی نقطه انتخابی:</span>
+            <span className="text-slate-800 font-medium truncate">
+              {isFetchingAddress ? (
+                <span className="text-sky-600 animate-pulse">در حال تبدیل لوکیشن نقشه به آدرس متنی...</span>
+              ) : (
+                fetchedAddress || 'آدرسی یافت نشد'
+              )}
+            </span>
+          </div>
+
+          <label className="flex items-center gap-1.5 cursor-pointer text-slate-800 font-bold shrink-0 bg-white px-2.5 py-1 rounded-lg border border-sky-200 text-[11px] hover:bg-sky-100/50 transition-colors">
+            <input
+              type="checkbox"
+              checked={autoFillAddress}
+              onChange={(e) => setAutoFillAddress(e.target.checked)}
+              className="w-3.5 h-3.5 text-emerald-600 rounded focus:ring-emerald-500 accent-emerald-600"
+            />
+            <span>قرار دادن آدرس در قسمت آدرس تخلیه</span>
+          </label>
+        </div>
+
         {/* Footer Confirmation Bar */}
         <div className="bg-white border-t border-slate-200 p-3 sm:p-4 flex items-center justify-between gap-3 shrink-0">
-          <div className="hidden sm:block text-xs text-slate-600">
-            <strong>لینک تولیدی:</strong>{' '}
+          <div className="hidden md:block text-xs text-slate-600">
+            <strong>مختصات:</strong>{' '}
             <span className="font-mono text-sky-700 text-[11px] dir-ltr inline-block">
-              https://maps.google.com/?q={currentLat},{currentLng}
+              {currentLat}, {currentLng}
             </span>
           </div>
 

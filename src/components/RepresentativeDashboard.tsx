@@ -9,6 +9,7 @@ import { PRESET_AGENTS } from '../data';
 import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary, EXPORT_COUNTRIES, getBordersForCountry } from '../data/iranLocations';
 import { toEnglishDigits } from '../utils/numberUtils';
 import { serializeItemsJson, parseAndHydrateItemsJson } from '../utils/itemsJsonHelper';
+import { reverseGeocode, extractCoordsFromUrl } from '../utils/reverseGeocode';
 import { 
   PlusCircle, 
   Clock, 
@@ -220,18 +221,42 @@ export default function RepresentativeDashboard({
     }
     showToast('در حال دریافت موقعیت مکانی GPS...', 'info');
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = pos.coords.latitude.toFixed(6);
-        const lng = pos.coords.longitude.toFixed(6);
+      async (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
         const generatedUrl = `https://maps.google.com/?q=${lat},${lng}`;
         setDeliveryLocationUrl(generatedUrl);
-        showToast('موقعیت GPS کنونی شما با موفقیت ثبت گردید.', 'success');
+        
+        showToast('در حال تبدیل لوکیشن GPS به آدرس متنی...', 'info');
+        const addressText = await reverseGeocode(lat, lng);
+        if (addressText) {
+          setExactAddress(addressText);
+          showToast('موقعیت GPS و آدرس متنی آن در قسمت آدرس ثبت شد.', 'success');
+        } else {
+          showToast('موقعیت GPS کنونی شما با موفقیت ثبت گردید.', 'success');
+        }
       },
       () => {
         showToast('خطا در دسترسی به GPS. لطفاً دسترسی موقعیت مکانی را تأیید کنید.', 'error');
       },
       { enableHighAccuracy: true, timeout: 8000 }
     );
+  };
+
+  const handleConvertUrlToAddress = async (url: string, targetSetter: (addr: string) => void) => {
+    const coords = extractCoordsFromUrl(url);
+    if (!coords) {
+      showToast('مختصات معتبری در لینک لوکیشن یافت نشد.', 'error');
+      return;
+    }
+    showToast('در حال دریافت آدرس متنی از روی لوکیشن...', 'info');
+    const addr = await reverseGeocode(coords.lat, coords.lng);
+    if (addr) {
+      targetSetter(addr);
+      showToast('آدرس متنی با موفقیت در فیلد آدرس جایگذاری شد.', 'success');
+    } else {
+      showToast('امکان دریافت آدرس متنی برای این نقطه وجود نداشت.', 'error');
+    }
   };
 
   // Territory-based location filtering
@@ -980,7 +1005,19 @@ export default function RepresentativeDashboard({
                 )}
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">آدرس دقیق کارگاهی جهت تخلیه بار:</label>
+                  <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                    <label className="block text-xs font-bold text-slate-700">آدرس دقیق کارگاهی جهت تخلیه بار:</label>
+                    {deliveryLocationUrl && (
+                      <button
+                        type="button"
+                        onClick={() => handleConvertUrlToAddress(deliveryLocationUrl, setExactAddress)}
+                        className="text-[10px] bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-300 px-2 py-0.5 rounded-md flex items-center gap-1 font-bold transition-all shadow-2xs"
+                      >
+                        <MapPin className="w-3 h-3 text-sky-600" />
+                        <span>📍 استخراج آدرس متنی از لوکیشن ثبت‌شده</span>
+                      </button>
+                    )}
+                  </div>
                   <textarea
                     rows={2}
                     required
@@ -1672,9 +1709,14 @@ export default function RepresentativeDashboard({
         isOpen={isFormMapPickerOpen}
         onClose={() => setIsFormMapPickerOpen(false)}
         cityHint={destinationCity}
-        onConfirmLocation={(url) => {
+        onConfirmLocation={(url, lat, lng, addressText) => {
           setDeliveryLocationUrl(url);
-          showToast('موقعیت مکانی جدید روی نقشه انتخاب شد.', 'success');
+          if (addressText) {
+            setExactAddress(addressText);
+            showToast('موقعیت مکانی روی نقشه و آدرس متنی آن با موفقیت در فرم جایگذاری شد.', 'success');
+          } else {
+            showToast('موقعیت مکانی جدید روی نقشه انتخاب شد.', 'success');
+          }
         }}
       />
 
@@ -1750,7 +1792,19 @@ export default function RepresentativeDashboard({
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-slate-700 font-bold mb-1">آدرس دقیق تخلیه بار:</label>
+                <div className="flex items-center justify-between mb-1 flex-wrap gap-1">
+                  <label className="block text-slate-700 font-bold">آدرس دقیق تخلیه بار:</label>
+                  {editDeliveryLocationUrl && (
+                    <button
+                      type="button"
+                      onClick={() => handleConvertUrlToAddress(editDeliveryLocationUrl, setEditExactAddress)}
+                      className="text-[10px] bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-300 px-2 py-0.5 rounded-md flex items-center gap-1 font-bold transition-all shadow-2xs"
+                    >
+                      <MapPin className="w-3 h-3 text-sky-600" />
+                      <span>📍 استخراج آدرس متنی از لوکیشن</span>
+                    </button>
+                  )}
+                </div>
                 <textarea
                   value={editExactAddress}
                   onChange={e => setEditExactAddress(e.target.value)}
@@ -1896,9 +1950,14 @@ export default function RepresentativeDashboard({
         isOpen={isEditMapPickerOpen}
         onClose={() => setIsEditMapPickerOpen(false)}
         cityHint={editDestinationCity}
-        onConfirmLocation={(url) => {
+        onConfirmLocation={(url, lat, lng, addressText) => {
           setEditDeliveryLocationUrl(url);
-          showToast('موقعیت مکانی اصلاحیه روی نقشه ثبت شد.', 'success');
+          if (addressText) {
+            setEditExactAddress(addressText);
+            showToast('موقعیت مکانی و آدرس متنی اصلاحیه روی نقشه ثبت شد.', 'success');
+          } else {
+            showToast('موقعیت مکانی اصلاحیه روی نقشه ثبت شد.', 'success');
+          }
         }}
       />
     </div>
