@@ -9,7 +9,7 @@ import { PRESET_AGENTS } from '../data';
 import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary, EXPORT_COUNTRIES, getBordersForCountry } from '../data/iranLocations';
 import { toEnglishDigits } from '../utils/numberUtils';
 import { serializeItemsJson, parseAndHydrateItemsJson } from '../utils/itemsJsonHelper';
-import { reverseGeocode, extractCoordsFromUrl } from '../utils/reverseGeocode';
+import { reverseGeocode, extractCoordsFromUrl, checkCityInTerritory } from '../utils/reverseGeocode';
 import { 
   PlusCircle, 
   Clock, 
@@ -228,12 +228,26 @@ export default function RepresentativeDashboard({
         setDeliveryLocationUrl(generatedUrl);
         
         showToast('در حال تبدیل لوکیشن GPS به آدرس متنی...', 'info');
-        const addressText = await reverseGeocode(lat, lng);
-        if (addressText) {
-          setExactAddress(addressText);
-          showToast('موقعیت GPS و آدرس متنی آن در قسمت آدرس ثبت شد.', 'success');
+        const geoResult = await reverseGeocode(lat, lng);
+        if (geoResult.addressText) {
+          setExactAddress(geoResult.addressText);
+          showToast('موقعیت GPS و آدرس متنی آن (بدون نام کشور) ثبت گردید.', 'success');
         } else {
           showToast('موقعیت GPS کنونی شما با موفقیت ثبت گردید.', 'success');
+        }
+
+        if (geoResult.city || geoResult.province) {
+          const tCheck = checkCityInTerritory(geoResult.city || '', geoResult.province, agentTerritories);
+          if (!tCheck.isAllowed) {
+            showToast(`⚠️ هشدار محدوده: ${tCheck.message}`, 'error');
+          } else if (tCheck.matchedProvince && tCheck.matchedCity) {
+            if (allowedProvinces.some(p => p.name === tCheck.matchedProvince)) {
+              setSelectedProvince(tCheck.matchedProvince);
+              if (allowedCities.includes(tCheck.matchedCity)) {
+                setSelectedCity(tCheck.matchedCity);
+              }
+            }
+          }
         }
       },
       () => {
@@ -250,12 +264,19 @@ export default function RepresentativeDashboard({
       return;
     }
     showToast('در حال دریافت آدرس متنی از روی لوکیشن...', 'info');
-    const addr = await reverseGeocode(coords.lat, coords.lng);
-    if (addr) {
-      targetSetter(addr);
+    const geoResult = await reverseGeocode(coords.lat, coords.lng);
+    if (geoResult.addressText) {
+      targetSetter(geoResult.addressText);
       showToast('آدرس متنی با موفقیت در فیلد آدرس جایگذاری شد.', 'success');
     } else {
       showToast('امکان دریافت آدرس متنی برای این نقطه وجود نداشت.', 'error');
+    }
+
+    if (geoResult.city || geoResult.province) {
+      const tCheck = checkCityInTerritory(geoResult.city || '', geoResult.province, agentTerritories);
+      if (!tCheck.isAllowed) {
+        showToast(`⚠️ هشدار محدوده: ${tCheck.message}`, 'error');
+      }
     }
   };
 
@@ -520,6 +541,14 @@ export default function RepresentativeDashboard({
     if (!exactAddress) {
       showToast('لطفاً آدرس دقیق تخلیه را وارد نمایید.', 'error');
       return;
+    }
+
+    if (!isExportOrder && agentTerritories.length > 0) {
+      const tCheck = checkCityInTerritory(selectedCity, selectedProvince, agentTerritories);
+      if (!tCheck.isAllowed) {
+        showToast(`⛔ خطا در ثبت سفارش: ${tCheck.message}`, 'error');
+        return;
+      }
     }
 
     setIsSubmitting(true);

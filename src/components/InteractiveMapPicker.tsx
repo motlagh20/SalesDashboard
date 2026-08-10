@@ -6,7 +6,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { reverseGeocode } from '../utils/reverseGeocode';
+import { reverseGeocode, checkCityInTerritory, ReverseGeocodeResult } from '../utils/reverseGeocode';
+import { TerritoryAssignment } from '../types';
 import {
   X,
   MapPin,
@@ -16,16 +17,25 @@ import {
   Compass,
   Crosshair,
   Layers,
-  FileText
+  FileText,
+  AlertTriangle
 } from 'lucide-react';
 
 interface InteractiveMapPickerProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirmLocation: (locationUrl: string, lat: number, lng: number, addressText?: string) => void;
+  onConfirmLocation: (
+    locationUrl: string,
+    lat: number,
+    lng: number,
+    addressText?: string,
+    detectedCity?: string,
+    detectedProvince?: string
+  ) => void;
   initialLat?: number;
   initialLng?: number;
   cityHint?: string;
+  agentTerritories?: TerritoryAssignment[];
 }
 
 // Major cities coordinates in Iran for quick navigation
@@ -54,7 +64,8 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
   onConfirmLocation,
   initialLat = 35.6892,
   initialLng = 51.3890,
-  cityHint = ''
+  cityHint = '',
+  agentTerritories = []
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -65,18 +76,25 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [isLocatingGps, setIsLocatingGps] = useState(false);
 
-  // Address state for reverse geocoding
+  // Address and Location state for reverse geocoding
+  const [geocodeResult, setGeocodeResult] = useState<ReverseGeocodeResult | null>(null);
   const [fetchedAddress, setFetchedAddress] = useState<string>('');
   const [isFetchingAddress, setIsFetchingAddress] = useState<boolean>(false);
   const [autoFillAddress, setAutoFillAddress] = useState<boolean>(true);
+
+  // Check territory limit
+  const territoryCheck = geocodeResult
+    ? checkCityInTerritory(geocodeResult.city || '', geocodeResult.province, agentTerritories)
+    : { isAllowed: true };
 
   // Fetch address automatically when coordinates change
   useEffect(() => {
     if (!isOpen) return;
     setIsFetchingAddress(true);
     const timer = setTimeout(async () => {
-      const addr = await reverseGeocode(currentLat, currentLng);
-      setFetchedAddress(addr);
+      const result = await reverseGeocode(currentLat, currentLng);
+      setGeocodeResult(result);
+      setFetchedAddress(result.addressText);
       setIsFetchingAddress(false);
     }, 400);
     return () => clearTimeout(timer);
@@ -221,7 +239,14 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
 
   const handleConfirm = () => {
     const generatedUrl = `https://maps.google.com/?q=${currentLat},${currentLng}`;
-    onConfirmLocation(generatedUrl, currentLat, currentLng, autoFillAddress ? fetchedAddress : undefined);
+    onConfirmLocation(
+      generatedUrl,
+      currentLat,
+      currentLng,
+      autoFillAddress ? fetchedAddress : undefined,
+      geocodeResult?.city,
+      geocodeResult?.province
+    );
     onClose();
   };
 
@@ -322,6 +347,14 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
             <span>قرار دادن آدرس در قسمت آدرس تخلیه</span>
           </label>
         </div>
+
+        {/* Territory Limit Warning Banner */}
+        {!territoryCheck.isAllowed && (
+          <div className="bg-rose-50 border-t border-rose-200 px-3.5 py-2 flex items-center gap-2 text-rose-800 text-xs font-bold shrink-0">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 animate-bounce" />
+            <span>⚠️ <strong>هشدار محدوده نمایندگی:</strong> {territoryCheck.message}</span>
+          </div>
+        )}
 
         {/* Footer Confirmation Bar */}
         <div className="bg-white border-t border-slate-200 p-3 sm:p-4 flex items-center justify-between gap-3 shrink-0">
