@@ -1294,8 +1294,12 @@ export async function bootstrapDatabase() {
     try {
       await db.query("ALTER TABLE products MODIFY COLUMN imageUrl LONGTEXT NULL");
       await db.query("ALTER TABLE products MODIFY COLUMN description LONGTEXT NULL");
+      await db.query("ALTER TABLE orders MODIFY COLUMN itemsJson LONGTEXT NULL");
+      await db.query("ALTER TABLE orders MODIFY COLUMN pendingEditData LONGTEXT NULL");
+      await db.query("ALTER TABLE orders MODIFY COLUMN exactAddress LONGTEXT NULL");
+      await db.query("ALTER TABLE orders MODIFY COLUMN notes LONGTEXT NULL");
     } catch (alterErr: any) {
-      console.log("ℹ️ [Migration Note] Modify products columns:", alterErr.message);
+      console.log("ℹ️ [Migration Note] Modify columns:", alterErr.message);
     }
 
     // High performance database indexes

@@ -4,6 +4,7 @@
  */
 
 import { Order, Product, Agent } from '../types';
+import { parseAndHydrateItemsJson } from './itemsJsonHelper';
 
 /**
  * Generates an elegant, consolidated single-page printable list of orders
@@ -63,24 +64,20 @@ export function printOrders(orders: Order[], products: Product[], agents: Agent[
     // 2. Resolve Product details (showing items separately "به تفکیک")
     let productDetailsText = '';
     if (order.itemsJson) {
-      try {
-        const parsedItems = JSON.parse(order.itemsJson);
-        if (Array.isArray(parsedItems)) {
-          productDetailsText = parsedItems.map((item, idx) => {
-            const qty = item.quantity || 0;
-            totalQuantitySum += qty;
-            return `
-              <div style="padding: 4px 0; border-bottom: ${idx < parsedItems.length - 1 ? '1px dashed #e2e8f0' : 'none'}; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-                <span style="font-weight: bold; color: #1e3a8a;">${item.productName || 'کالا'}</span>
-                <span style="background-color: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-weight: bold; color: #0f172a; font-family: 'Tahoma', sans-serif;">
-                  ${qty.toLocaleString('fa-IR')} ${item.unit || order.unit || 'عدد'}
-                </span>
-              </div>
-            `;
-          }).join('');
-        }
-      } catch (e) {
-        // Fallback below
+      const parsedItems = parseAndHydrateItemsJson(order.itemsJson, products);
+      if (parsedItems.length > 0) {
+        productDetailsText = parsedItems.map((item, idx) => {
+          const qty = item.quantity || 0;
+          totalQuantitySum += qty;
+          return `
+            <div style="padding: 4px 0; border-bottom: ${idx < parsedItems.length - 1 ? '1px dashed #e2e8f0' : 'none'}; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+              <span style="font-weight: bold; color: #1e3a8a;">${item.productName || 'کالا'}</span>
+              <span style="background-color: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-weight: bold; color: #0f172a; font-family: 'Tahoma', sans-serif;">
+                ${qty.toLocaleString('fa-IR')} ${item.unit || order.unit || 'عدد'}
+              </span>
+            </div>
+          `;
+        }).join('');
       }
     }
 

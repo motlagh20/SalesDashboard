@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { Order, VehicleDetails, ShippingCompany, Product, AppUser, PermanentDriver } from '../types';
+import { parseAndHydrateItemsJson } from '../utils/itemsJsonHelper';
 import { SendLocationModal } from './SendLocationModal';
 import { 
   Truck, 
@@ -462,17 +463,15 @@ export default function ShippingCompanyDashboard({
                         {order.itemsJson ? (
                           <div className="space-y-1.5 mt-1 bg-indigo-50/50 p-2 rounded-lg border border-indigo-100">
                             {(() => {
-                              try {
-                                const parsed = JSON.parse(order.itemsJson);
-                                if (Array.isArray(parsed)) {
-                                  return parsed.map((item: any, i: number) => (
-                                    <div key={i} className="flex justify-between items-center text-[10.5px] text-slate-800">
-                                      <strong className="text-right text-indigo-950">{item.productName}</strong>
-                                      <span className="font-mono text-indigo-700 bg-white px-1.5 py-0.5 rounded border border-indigo-100/50 font-bold">{item.quantity.toLocaleString('fa-IR')} {item.unit || order.unit}</span>
-                                    </div>
-                                  ));
-                                }
-                              } catch(e) {}
+                              const parsed = parseAndHydrateItemsJson(order.itemsJson, products);
+                              if (parsed.length > 0) {
+                                return parsed.map((item, i) => (
+                                  <div key={i} className="flex justify-between items-center text-[10.5px] text-slate-800">
+                                    <strong className="text-right text-indigo-950">{item.productName}</strong>
+                                    <span className="font-mono text-indigo-700 bg-white px-1.5 py-0.5 rounded border border-indigo-100/50 font-bold">{item.quantity.toLocaleString('fa-IR')} {item.unit || order.unit}</span>
+                                  </div>
+                                ));
+                              }
                               return <p className="text-xs text-slate-700">{order.productName}</p>;
                             })()}
                           </div>

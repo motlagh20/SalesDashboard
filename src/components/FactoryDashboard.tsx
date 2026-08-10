@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { Order, VehicleDetails, OrderStatus, ShippingCompany, Product, PermanentDriver } from '../types';
 import { toEnglishDigits } from '../utils/numberUtils';
+import { parseAndHydrateItemsJson } from '../utils/itemsJsonHelper';
 import { 
   Truck, 
   CheckSquare, 
@@ -373,17 +374,15 @@ export default function FactoryDashboard({
                     <div className="col-span-2 bg-indigo-50/50 p-2.5 rounded-lg border border-indigo-100 space-y-1.5 text-right">
                       <span className="text-indigo-900 font-bold block text-[10px] border-b border-indigo-100 pb-1 mb-1">اقلام تفکیکی سفارش جهت بارگیری:</span>
                       {(() => {
-                        try {
-                          const parsed = JSON.parse(order.itemsJson);
-                          if (Array.isArray(parsed)) {
-                            return parsed.map((item: any, i: number) => (
-                              <div key={i} className="flex justify-between text-[11px] text-slate-800 font-medium">
-                                <strong className="text-indigo-950">{item.productName}</strong>
-                                <span className="font-mono text-slate-950 font-bold bg-white px-2 py-0.5 rounded border border-indigo-100">{item.quantity.toLocaleString()} {item.unit || order.unit}</span>
-                              </div>
-                            ));
-                          }
-                        } catch (e) {}
+                        const parsed = parseAndHydrateItemsJson(order.itemsJson, products);
+                        if (parsed.length > 0) {
+                          return parsed.map((item, i) => (
+                            <div key={i} className="flex justify-between text-[11px] text-slate-800 font-medium">
+                              <strong className="text-indigo-950">{item.productName}</strong>
+                              <span className="font-mono text-slate-950 font-bold bg-white px-2 py-0.5 rounded border border-indigo-100">{item.quantity.toLocaleString()} {item.unit || order.unit}</span>
+                            </div>
+                          ));
+                        }
                         return <strong className="text-slate-800">{order.productName}</strong>;
                       })()}
                     </div>

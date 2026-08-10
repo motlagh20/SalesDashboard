@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 
 import React, { useState, useEffect } from 'react';
 import { Order, OrderStatus, Product, Agent, ShippingCompany, PermanentDriver, AppUser, UserRole, TerritoryAssignment, PersonType } from '../types';
+import { parseAndHydrateItemsJson, serializeItemsJson } from '../utils/itemsJsonHelper';
 import PermanentDriversManager from './PermanentDriversManager';
 import CommercialAnalyticsDashboard from './CommercialAnalyticsDashboard';
 import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary } from '../data/iranLocations';
@@ -1378,12 +1379,10 @@ export default function ManagerDashboard({
                       <strong className="text-slate-700">
                         {(() => {
                           if (order.itemsJson) {
-                            try {
-                              const parsed = JSON.parse(order.itemsJson);
-                              if (Array.isArray(parsed) && parsed.length > 0) {
-                                return parsed.map((item: any) => `${item.productName} (${item.quantity?.toLocaleString()} ${item.unit || order.unit})`).join(' + ');
-                              }
-                            } catch (e) {}
+                            const parsed = parseAndHydrateItemsJson(order.itemsJson, products);
+                            if (parsed.length > 0) {
+                              return parsed.map((item) => `${item.productName} (${item.quantity?.toLocaleString()} ${item.unit || order.unit})`).join(' + ');
+                            }
                           }
                           return `${order.productName} به میزان ${order.quantity.toLocaleString()} ${order.unit}`;
                         })()}
@@ -1404,9 +1403,8 @@ export default function ManagerDashboard({
                     {order.itemsJson ? (
                       <div className="space-y-2">
                         {(() => {
-                          try {
-                            const parsed = JSON.parse(order.itemsJson);
-                            if (Array.isArray(parsed) && parsed.length > 0) {
+                          const parsed = parseAndHydrateItemsJson(order.itemsJson, products);
+                          if (parsed.length > 0) {
                               let totalSum = 0;
                               return (
                                 <>
@@ -1467,9 +1465,6 @@ export default function ManagerDashboard({
                                 </>
                               );
                             }
-                          } catch (e) {
-                            console.error("Error parsing itemsJson", e);
-                          }
                           return null;
                         })()}
                       </div>
@@ -1721,20 +1716,18 @@ export default function ManagerDashboard({
                         <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-1">
                           {(() => {
                             if (order.itemsJson) {
-                              try {
-                                const parsed = JSON.parse(order.itemsJson);
-                                if (Array.isArray(parsed) && parsed.length > 0) {
-                                  return (
-                                    <div className="flex flex-wrap gap-1.5 mt-1">
-                                      {parsed.map((item: any, i: number) => (
-                                        <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 py-0.5 px-2 rounded-md font-medium text-[10px]">
-                                          {item.productName}: <strong className="font-mono text-slate-950">{item.quantity?.toLocaleString()} {item.unit || order.unit}</strong>
-                                        </span>
-                                      ))}
-                                    </div>
-                                  );
-                                }
-                              } catch (e) {}
+                              const parsed = parseAndHydrateItemsJson(order.itemsJson, products);
+                              if (parsed.length > 0) {
+                                return (
+                                  <div className="flex flex-wrap gap-1.5 mt-1">
+                                    {parsed.map((item, i) => (
+                                      <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 py-0.5 px-2 rounded-md font-medium text-[10px]">
+                                        {item.productName}: <strong className="font-mono text-slate-950">{item.quantity?.toLocaleString()} {item.unit || order.unit}</strong>
+                                      </span>
+                                    ))}
+                                  </div>
+                                );
+                              }
                             }
                             return (
                               <p className="flex flex-wrap items-center gap-1">
@@ -3797,12 +3790,10 @@ export default function ManagerDashboard({
                   // Product summary string
                   let productSummaryText = `${order.productName} (${order.quantity.toLocaleString()} ${order.unit})`;
                   if (order.itemsJson) {
-                    try {
-                      const parsed = JSON.parse(order.itemsJson);
-                      if (Array.isArray(parsed) && parsed.length > 0) {
-                        productSummaryText = parsed.map((item: any) => `${item.productName}: ${item.quantity?.toLocaleString()} ${item.unit || order.unit}`).join(' | ');
-                      }
-                    } catch (e) {}
+                    const parsed = parseAndHydrateItemsJson(order.itemsJson, products);
+                    if (parsed.length > 0) {
+                      productSummaryText = parsed.map((item) => `${item.productName}: ${item.quantity?.toLocaleString()} ${item.unit || order.unit}`).join(' | ');
+                    }
                   }
 
                   return (
@@ -3881,21 +3872,19 @@ export default function ManagerDashboard({
                               <div className="text-xs text-slate-700">
                                 {(() => {
                                   if (order.itemsJson) {
-                                    try {
-                                      const parsed = JSON.parse(order.itemsJson);
-                                      if (Array.isArray(parsed) && parsed.length > 0) {
-                                        return (
-                                          <div className="flex flex-wrap gap-1.5">
-                                            <span className="font-bold text-slate-500">📦 اقلام سبد سفارش:</span>
-                                            {parsed.map((item: any, i: number) => (
-                                              <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-800 py-0.5 px-2 rounded-lg font-bold text-[11px]">
-                                                {item.productName}: <strong className="font-mono text-indigo-700">{item.quantity?.toLocaleString()} {item.unit || order.unit}</strong>
-                                              </span>
-                                            ))}
-                                          </div>
-                                        );
-                                      }
-                                    } catch (e) {}
+                                    const parsed = parseAndHydrateItemsJson(order.itemsJson, products);
+                                    if (parsed.length > 0) {
+                                      return (
+                                        <div className="flex flex-wrap gap-1.5">
+                                          <span className="font-bold text-slate-500">📦 اقلام سبد سفارش:</span>
+                                          {parsed.map((item, i) => (
+                                            <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-800 py-0.5 px-2 rounded-lg font-bold text-[11px]">
+                                              {item.productName}: <strong className="font-mono text-indigo-700">{item.quantity?.toLocaleString()} {item.unit || order.unit}</strong>
+                                            </span>
+                                          ))}
+                                        </div>
+                                      );
+                                    }
                                   }
                                   return (
                                     <p className="text-xs text-slate-700">
@@ -4255,7 +4244,7 @@ export default function ManagerDashboard({
 
         let currentItems: any[] = [];
         if (reviewingEditOrder.itemsJson) {
-          try { currentItems = JSON.parse(reviewingEditOrder.itemsJson); } catch {}
+          currentItems = parseAndHydrateItemsJson(reviewingEditOrder.itemsJson, products);
         }
         if (currentItems.length === 0) {
           currentItems = [{ productName: reviewingEditOrder.productName, quantity: reviewingEditOrder.quantity, unit: reviewingEditOrder.unit }];
@@ -4263,7 +4252,7 @@ export default function ManagerDashboard({
 
         let pendingItems: any[] = [];
         if (pendingData.itemsJson) {
-          try { pendingItems = JSON.parse(pendingData.itemsJson); } catch {}
+          pendingItems = parseAndHydrateItemsJson(pendingData.itemsJson, products);
         }
         if (pendingItems.length === 0 && pendingData.productName) {
           pendingItems = [{ productName: pendingData.productName, quantity: pendingData.quantity, unit: pendingData.unit }];

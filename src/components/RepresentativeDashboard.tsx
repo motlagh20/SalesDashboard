@@ -8,6 +8,7 @@ import { Order, Product, OrderStatus, Agent, AppUser } from '../types';
 import { PRESET_AGENTS } from '../data';
 import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary, EXPORT_COUNTRIES, getBordersForCountry } from '../data/iranLocations';
 import { toEnglishDigits } from '../utils/numberUtils';
+import { serializeItemsJson, parseAndHydrateItemsJson } from '../utils/itemsJsonHelper';
 import { 
   PlusCircle, 
   Clock, 
@@ -143,19 +144,17 @@ export default function RepresentativeDashboard({
     let itemsList: InvoiceItem[] = [];
     const rawItemsJson = pendingData?.itemsJson || ord.itemsJson;
     if (rawItemsJson) {
-      try {
-        const parsed = JSON.parse(rawItemsJson);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          itemsList = parsed.map((it: any, idx: number) => ({
-            id: `edit-item-${idx}-${Date.now()}`,
-            productId: it.productId || 'prod-1',
-            productName: it.productName || 'محصول',
-            quantity: Number(it.quantity) || 1,
-            unit: it.unit || 'عدد',
-            pricePerUnit: it.pricePerUnit || 0
-          }));
-        }
-      } catch (e) {}
+      const hydrated = parseAndHydrateItemsJson(rawItemsJson, products);
+      if (hydrated.length > 0) {
+        itemsList = hydrated.map((it, idx) => ({
+          id: `edit-item-${idx}-${Date.now()}`,
+          productId: it.productId || 'prod-1',
+          productName: it.productName || 'محصول',
+          quantity: it.quantity || 1,
+          unit: it.unit || 'عدد',
+          pricePerUnit: it.pricePerUnit || 0
+        }));
+      }
     }
     if (itemsList.length === 0) {
       itemsList = [{
@@ -189,6 +188,7 @@ export default function RepresentativeDashboard({
       unit: editingOrder.unit
     };
 
+    const cleanedEditItems = editItems.map(({ imageUrl, ...rest }) => rest);
     const payload: Partial<Order> = {
       buyerName: editBuyerName.trim(),
       phoneNumber: editPhoneNumber.trim(),
@@ -206,7 +206,7 @@ export default function RepresentativeDashboard({
         : firstItem.productName,
       quantity: totalQuantity,
       unit: firstItem.unit,
-      itemsJson: JSON.stringify(editItems)
+      itemsJson: serializeItemsJson(editItems)
     };
 
     onEditOrder(editingOrder.id, payload);
@@ -508,6 +508,8 @@ export default function RepresentativeDashboard({
       const rootQuantity = finalItems.reduce((acc, item) => acc + item.quantity, 0);
       const rootUnit = finalItems[0].unit;
 
+      const cleanedFinalItems = finalItems.map(({ imageUrl, ...rest }) => rest);
+
       onCreateOrder({
         customerName: currentAgentObj.alias,
         agentCode: currentAgentObj.agentCode,
@@ -520,7 +522,7 @@ export default function RepresentativeDashboard({
         phoneNumber,
         buyerName,
         notes,
-        itemsJson: JSON.stringify(finalItems),
+        itemsJson: serializeItemsJson(finalItems),
         paymentTrackingCode: paymentTrackingCode.trim() || undefined,
         isExportOrder: isExportAllowed ? isExportOrder : false,
         destinationCountry: (isExportAllowed && isExportOrder) ? selectedCountry : undefined,
@@ -797,8 +799,8 @@ export default function RepresentativeDashboard({
                     {invoiceItems.map((item, index) => (
                       <div key={item.id} className="flex justify-between items-center text-[10px] bg-white border border-slate-100 px-3 py-1.5 rounded shadow-sm gap-2">
                         <div className="flex items-center gap-1.5 min-w-0">
-                          {item.imageUrl && (
-                            <img src={item.imageUrl} alt={item.productName} className="w-6 h-6 object-cover rounded border border-slate-200 shrink-0" referrerPolicy="no-referrer" />
+                          {(item.imageUrl || products.find(p => p.id === item.productId)?.imageUrl) && (
+                            <img src={item.imageUrl || products.find(p => p.id === item.productId)?.imageUrl} alt={item.productName} className="w-6 h-6 object-cover rounded border border-slate-200 shrink-0" referrerPolicy="no-referrer" />
                           )}
                           <strong className="text-slate-800 truncate">{item.productName}</strong>
                         </div>
@@ -1190,12 +1192,10 @@ export default function RepresentativeDashboard({
                 // Product summary string
                 let productSummaryText = `${order.productName} (${order.quantity.toLocaleString()} ${order.unit})`;
                 if (order.itemsJson) {
-                  try {
-                    const parsed = JSON.parse(order.itemsJson);
-                    if (Array.isArray(parsed) && parsed.length > 0) {
-                      productSummaryText = parsed.map((item: any) => `${item.productName}: ${item.quantity?.toLocaleString()} ${item.unit || order.unit}`).join(' | ');
-                    }
-                  } catch (e) {}
+                  const parsed = parseAndHydrateItemsJson(order.itemsJson, products);
+                  if (parsed.length > 0) {
+                    productSummaryText = parsed.map((item) => `${item.productName}: ${item.quantity?.toLocaleString()} ${item.unit || order.unit}`).join(' | ');
+                  }
                 }
 
                 if (order.hasPendingEdit && order.pendingEditData) {
@@ -1203,8 +1203,8 @@ export default function RepresentativeDashboard({
                     const pData = JSON.parse(order.pendingEditData);
                     let pQty = pData.quantity;
                     if (!pQty && pData.itemsJson) {
-                      const pItems = JSON.parse(pData.itemsJson);
-                      pQty = pItems.reduce((s: number, i: any) => s + (Number(i.quantity) || 0), 0);
+                      const pItems = parseAndHydrateItemsJson(pData.itemsJson, products);
+                      pQty = pItems.reduce((s, i) => s + (Number(i.quantity) || 0), 0);
                     }
                     if (pQty && pQty !== order.quantity) {
                       productSummaryText += ` ⬅️ [مقدار اصلاحی جدید: ${pQty.toLocaleString()} ${order.unit}]`;
@@ -1313,10 +1313,8 @@ export default function RepresentativeDashboard({
 
                           let requestedQty = pendingInfo?.quantity;
                           if (!requestedQty && pendingInfo?.itemsJson) {
-                            try {
-                              const items = JSON.parse(pendingInfo.itemsJson);
-                              requestedQty = items.reduce((sum: number, it: any) => sum + (Number(it.quantity) || 0), 0);
-                            } catch (e) {}
+                            const items = parseAndHydrateItemsJson(pendingInfo.itemsJson, products);
+                            requestedQty = items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
                           }
 
                           return (
@@ -1389,17 +1387,15 @@ export default function RepresentativeDashboard({
                             <div className="md:col-span-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-right space-y-1">
                               <span className="text-slate-400 font-bold block text-[9.5px] border-b border-slate-200 pb-1 mb-1">اقلام سبد خرید فاکتور چندمحصولی:</span>
                               {(() => {
-                                try {
-                                  const parsed = JSON.parse(order.itemsJson);
-                                  if (Array.isArray(parsed)) {
-                                    return parsed.map((item: any, i: number) => (
-                                      <div key={i} className="flex justify-between text-[11px] text-slate-700">
-                                        <strong className="text-slate-800">{item.productName}</strong>
-                                        <span className="font-mono">{item.quantity.toLocaleString()} {item.unit} × {item.pricePerUnit.toLocaleString()} تومان</span>
-                                      </div>
-                                    ));
-                                  }
-                                } catch(e) {}
+                                const parsed = parseAndHydrateItemsJson(order.itemsJson, products);
+                                if (parsed.length > 0) {
+                                  return parsed.map((item, i) => (
+                                    <div key={i} className="flex justify-between text-[11px] text-slate-700">
+                                      <strong className="text-slate-800">{item.productName}</strong>
+                                      <span className="font-mono">{item.quantity.toLocaleString()} {item.unit} × {item.pricePerUnit.toLocaleString()} تومان</span>
+                                    </div>
+                                  ));
+                                }
                                 return <strong className="text-slate-800">{order.productName}</strong>;
                               })()}
                             </div>

@@ -874,11 +874,44 @@ async function startServer() {
     }
   });
 
+// Helper to compact itemsJson before storing to database
+function compactItemsJson(itemsInput: any): string | null {
+  if (!itemsInput) return null;
+  let itemsArray: any[] = [];
+  if (typeof itemsInput === 'string') {
+    try {
+      itemsArray = JSON.parse(itemsInput);
+    } catch {
+      return itemsInput;
+    }
+  } else if (Array.isArray(itemsInput)) {
+    itemsArray = itemsInput;
+  } else {
+    return null;
+  }
+
+  if (!Array.isArray(itemsArray) || itemsArray.length === 0) return null;
+
+  const compact = itemsArray.map((item: any) => {
+    const pid = item.productId || item.id || item.prodId || '';
+    const qty = Number(item.quantity ?? item.q ?? 0);
+    const price = item.pricePerUnit ?? item.p;
+    const entry: any = { id: String(pid), q: qty };
+    if (price !== undefined && price !== null && !isNaN(Number(price))) {
+      entry.p = Number(price);
+    }
+    return entry;
+  });
+
+  return JSON.stringify(compact);
+}
+
   app.post("/api/orders", async (req, res) => {
     try {
       const db = getDbPool();
       const { customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName, notes, itemsJson, paymentTrackingCode, isExportOrder, destinationCountry, deliveryLocationUrl } = req.body;
       
+      const formattedItemsJson = compactItemsJson(itemsJson);
       const id = `ord-${Date.now()}`;
       
       // Generate meaningful order number based on Jalali Date & Time (e.g. TCL-14030507-142508)
@@ -917,7 +950,7 @@ async function startServer() {
             destinationCity, exactAddress, phoneNumber, buyerName, notes, createdAt, status, priorityIndex,
             itemsJson, paymentTrackingCode, isExportOrder, destinationCountry, deliveryLocationUrl
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
-        `, [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName || null, notes || null, createdAt, status, itemsJson || null, paymentTrackingCode || null, isExportOrder ? 1 : 0, destinationCountry || null, deliveryLocationUrl || null]);
+        `, [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName || null, notes || null, createdAt, status, formattedItemsJson || null, paymentTrackingCode || null, isExportOrder ? 1 : 0, destinationCountry || null, deliveryLocationUrl || null]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
@@ -1047,6 +1080,9 @@ async function startServer() {
       const db = getDbPool();
       const { id } = req.params;
       const editData = req.body; // updated proposed values
+      if (editData && editData.itemsJson) {
+        editData.itemsJson = compactItemsJson(editData.itemsJson);
+      }
       const updatedAt = new Date().toISOString();
 
       const pendingEditData = JSON.stringify({
