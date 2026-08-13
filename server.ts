@@ -843,6 +843,8 @@ async function startServer() {
           rejectionReason: o.rejectionReason,
           itemsJson: o.itemsJson,
           paymentTrackingCode: o.paymentTrackingCode,
+          paymentReceiptUrl: o.paymentReceiptUrl || null,
+          paymentReceiptName: o.paymentReceiptName || null,
           shippingCompanyId: o.shippingCompanyId,
           isExportOrder: !!o.isExportOrder,
           destinationCountry: o.destinationCountry,
@@ -909,7 +911,7 @@ function compactItemsJson(itemsInput: any): string | null {
   app.post("/api/orders", async (req, res) => {
     try {
       const db = getDbPool();
-      const { customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName, notes, itemsJson, paymentTrackingCode, isExportOrder, destinationCountry, deliveryLocationUrl } = req.body;
+      const { customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName, notes, itemsJson, paymentTrackingCode, paymentReceiptUrl, paymentReceiptName, isExportOrder, destinationCountry, deliveryLocationUrl } = req.body;
       
       const formattedItemsJson = compactItemsJson(itemsJson);
       const id = `ord-${Date.now()}`;
@@ -948,9 +950,9 @@ function compactItemsJson(itemsInput: any): string | null {
           INSERT INTO orders (
             id, orderNumber, customerName, agentCode, productId, productName, quantity, unit,
             destinationCity, exactAddress, phoneNumber, buyerName, notes, createdAt, status, priorityIndex,
-            itemsJson, paymentTrackingCode, isExportOrder, destinationCountry, deliveryLocationUrl
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
-        `, [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName || null, notes || null, createdAt, status, formattedItemsJson || null, paymentTrackingCode || null, isExportOrder ? 1 : 0, destinationCountry || null, deliveryLocationUrl || null]);
+            itemsJson, paymentTrackingCode, paymentReceiptUrl, paymentReceiptName, isExportOrder, destinationCountry, deliveryLocationUrl
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
+        `, [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName || null, notes || null, createdAt, status, formattedItemsJson || null, paymentTrackingCode || null, paymentReceiptUrl || null, paymentReceiptName || null, isExportOrder ? 1 : 0, destinationCountry || null, deliveryLocationUrl || null]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
@@ -1074,6 +1076,42 @@ function compactItemsJson(itemsInput: any): string | null {
     }
   });
 
+  app.patch("/api/orders/:id/payment-receipt", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const { paymentReceiptUrl, paymentReceiptName, paymentTrackingCode } = req.body;
+      const updatedAt = new Date().toISOString();
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        await connection.query(
+          "UPDATE orders SET paymentReceiptUrl = ?, paymentReceiptName = ?, paymentTrackingCode = COALESCE(?, paymentTrackingCode) WHERE id = ?",
+          [paymentReceiptUrl || null, paymentReceiptName || null, paymentTrackingCode || null, id]
+        );
+
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          SELECT status, ?, ?, ? FROM orders WHERE id = ?
+        `, [updatedAt, `الصاق/ویرایش فیش واریزی بانک${paymentReceiptName ? ` (${paymentReceiptName})` : ''}`, id]);
+
+        await connection.commit();
+        clearAllRouteCaches();
+        res.json({ success: true });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/payment-receipt:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Representative edits order at any stage (requires Sales Manager re-approval)
   app.patch("/api/orders/:id/edit", async (req, res) => {
     try {
@@ -1169,6 +1207,8 @@ function compactItemsJson(itemsInput: any): string | null {
         if (edits.notes !== undefined) { updateFields.push("notes = ?"); updateParams.push(edits.notes || null); }
         if (edits.vehicleType !== undefined) { updateFields.push("vehicleType = ?"); updateParams.push(edits.vehicleType || null); }
         if (edits.paymentTrackingCode !== undefined) { updateFields.push("paymentTrackingCode = ?"); updateParams.push(edits.paymentTrackingCode || null); }
+        if (edits.paymentReceiptUrl !== undefined) { updateFields.push("paymentReceiptUrl = ?"); updateParams.push(edits.paymentReceiptUrl || null); }
+        if (edits.paymentReceiptName !== undefined) { updateFields.push("paymentReceiptName = ?"); updateParams.push(edits.paymentReceiptName || null); }
         if (edits.isExportOrder !== undefined) { updateFields.push("isExportOrder = ?"); updateParams.push(edits.isExportOrder ? 1 : 0); }
         if (edits.destinationCountry !== undefined) { updateFields.push("destinationCountry = ?"); updateParams.push(edits.destinationCountry || null); }
 

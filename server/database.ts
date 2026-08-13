@@ -1274,6 +1274,8 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "orders", "estimatedArrival", "VARCHAR(100) NULL");
     await ensureColumnExists(db, "orders", "itemsJson", "TEXT NULL");
     await ensureColumnExists(db, "orders", "paymentTrackingCode", "VARCHAR(150) NULL");
+    await ensureColumnExists(db, "orders", "paymentReceiptUrl", "LONGTEXT NULL");
+    await ensureColumnExists(db, "orders", "paymentReceiptName", "VARCHAR(255) NULL");
     await ensureColumnExists(db, "orders", "buyerName", "VARCHAR(255) NULL");
     await ensureColumnExists(db, "orders", "billOfLadingNumber", "VARCHAR(100) NULL");
     await ensureColumnExists(db, "orders", "shippingCompanyId", "VARCHAR(150) NULL");

@@ -53,6 +53,8 @@ import {
   Printer,
   Globe,
   Check,
+  Paperclip,
+  Eye,
   CheckSquare,
   Square,
   ChevronUp,
@@ -152,6 +154,7 @@ export default function ManagerDashboard({
   const [archiveAgentFilter, setArchiveAgentFilter] = useState<string>('ALL');
   const [selectedOrderForHistory, setSelectedOrderForHistory] = useState<Order | null>(null);
   const [reviewingEditOrder, setReviewingEditOrder] = useState<Order | null>(null);
+  const [viewReceiptModalUrl, setViewReceiptModalUrl] = useState<{ url: string; name: string } | null>(null);
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -1448,11 +1451,33 @@ export default function ManagerDashboard({
                                         <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-100 py-1 px-2.5 rounded">
                                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                                           <span>فیش واریزی: {order.paymentTrackingCode}</span>
+                                          {order.paymentReceiptUrl && (
+                                            <button
+                                              type="button"
+                                              onClick={() => setViewReceiptModalUrl({ url: order.paymentReceiptUrl!, name: order.paymentReceiptName || 'فیش_واریزی.jpg' })}
+                                              className="mr-2 inline-flex items-center gap-1 text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 py-0.5 px-2 rounded cursor-pointer shrink-0"
+                                            >
+                                              <Paperclip className="w-3 h-3" />
+                                              <span>مشاهده فیش</span>
+                                            </button>
+                                          )}
                                         </div>
                                       ) : (
-                                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-100 py-1 px-2.5 rounded">
-                                          ⚠️ فاقد کد پیگیری پیش‌پرداخت (بدون ثبت فیش)
-                                        </span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-100 py-1 px-2.5 rounded">
+                                            ⚠️ فاقد کد پیگیری پیش‌پرداخت (بدون ثبت فیش)
+                                          </span>
+                                          {order.paymentReceiptUrl && (
+                                            <button
+                                              type="button"
+                                              onClick={() => setViewReceiptModalUrl({ url: order.paymentReceiptUrl!, name: order.paymentReceiptName || 'فیش_واریزی.jpg' })}
+                                              className="inline-flex items-center gap-1 text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 py-0.5 px-2 rounded cursor-pointer shrink-0"
+                                            >
+                                              <Paperclip className="w-3 h-3" />
+                                              <span>مشاهده فیش</span>
+                                            </button>
+                                          )}
+                                        </div>
                                       )}
                                     </div>
                                     <div className="text-left font-sans sm:text-left self-stretch sm:self-auto flex items-center justify-between sm:justify-end gap-3">
@@ -1527,11 +1552,33 @@ export default function ManagerDashboard({
                                     <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-100 py-1 px-2.5 rounded">
                                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                                       <span>فیش واریزی: {order.paymentTrackingCode}</span>
+                                      {order.paymentReceiptUrl && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setViewReceiptModalUrl({ url: order.paymentReceiptUrl!, name: order.paymentReceiptName || 'فیش_واریزی.jpg' })}
+                                          className="mr-2 inline-flex items-center gap-1 text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 py-0.5 px-2 rounded cursor-pointer shrink-0"
+                                        >
+                                          <Paperclip className="w-3 h-3" />
+                                          <span>مشاهده فیش</span>
+                                        </button>
+                                      )}
                                     </div>
                                   ) : (
-                                    <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-100 py-1 px-2.5 rounded">
-                                      ⚠️ فاقد کد پیگیری پیش‌پرداخت (بدون ثبت فیش)
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-100 py-1 px-2.5 rounded">
+                                        ⚠️ فاقد کد پیگیری پیش‌پرداخت (بدون ثبت فیش)
+                                      </span>
+                                      {order.paymentReceiptUrl && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setViewReceiptModalUrl({ url: order.paymentReceiptUrl!, name: order.paymentReceiptName || 'فیش_واریزی.jpg' })}
+                                          className="inline-flex items-center gap-1 text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 py-0.5 px-2 rounded cursor-pointer shrink-0"
+                                        >
+                                          <Paperclip className="w-3 h-3" />
+                                          <span>مشاهده فیش</span>
+                                        </button>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
                                 <div className="text-left font-sans sm:text-left self-stretch sm:self-auto flex items-center justify-between sm:justify-end gap-3">
@@ -4459,6 +4506,66 @@ export default function ManagerDashboard({
           </div>
         );
       })()}
+
+      {/* Full Preview View Receipt Modal for Manager */}
+      {viewReceiptModalUrl && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-150 pb-2">
+              <h4 className="font-extrabold text-slate-900 text-xs flex items-center gap-2">
+                <Paperclip className="w-4 h-4 text-emerald-600" />
+                <span>بررسی فیش واریزی ({viewReceiptModalUrl.name})</span>
+              </h4>
+              <button
+                type="button"
+                onClick={() => setViewReceiptModalUrl(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="max-h-[75vh] overflow-auto flex items-center justify-center bg-slate-900 rounded-xl p-2">
+              {viewReceiptModalUrl.url.startsWith('data:image') || viewReceiptModalUrl.url.startsWith('http') ? (
+                <img src={viewReceiptModalUrl.url} alt="فیش واریزی" className="max-w-full max-h-[70vh] object-contain rounded-lg" />
+              ) : (
+                <div className="text-center py-10 space-y-3 text-white">
+                  <FileText className="w-12 h-12 text-slate-400 mx-auto" />
+                  <p className="text-xs font-bold">فایل پیوست شده تصویر مستقیم نیست.</p>
+                  <a
+                    href={viewReceiptModalUrl.url}
+                    download={viewReceiptModalUrl.name}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"
+                  >
+                    <span>دانلود یا مشاهده فایل</span>
+                  </a>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-150 text-xs">
+              <a
+                href={viewReceiptModalUrl.url}
+                download={viewReceiptModalUrl.name}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-all"
+              >
+                <span>دانلود اصل تصویر</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => setViewReceiptModalUrl(null)}
+                className="px-4 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+              >
+                بستن
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       </div>
   );

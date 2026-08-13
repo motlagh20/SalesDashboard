@@ -628,6 +628,8 @@ export default function App() {
           notes: orderData.notes || '',
           itemsJson: orderData.itemsJson || null,
           paymentTrackingCode: orderData.paymentTrackingCode || null,
+          paymentReceiptUrl: orderData.paymentReceiptUrl || null,
+          paymentReceiptName: orderData.paymentReceiptName || null,
           isExportOrder: orderData.isExportOrder || false,
           destinationCountry: orderData.destinationCountry || null,
           deliveryLocationUrl: orderData.deliveryLocationUrl || null
@@ -701,6 +703,29 @@ export default function App() {
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
+    }
+  };
+
+  // 1b2. Update Payment Receipt File & Tracking Code (Called by Representative)
+  const handleUpdatePaymentReceipt = async (orderId: string, receiptData: { paymentReceiptUrl?: string; paymentReceiptName?: string; paymentTrackingCode?: string }) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/payment-receipt`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(receiptData)
+      });
+      if (response.ok) {
+        showToast('تصویر فیش واریزی و کد رهگیری با موفقیت بروزرسانی شد.', 'success');
+        refreshAllData();
+        return true;
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت فیش واریزی');
+        showToast(`خطا: ${errorMsg}`, 'error');
+        return false;
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+      return false;
     }
   };
 
@@ -1607,6 +1632,7 @@ export default function App() {
                 onCancelOrder={handleCancelOrder}
                 onEditOrder={handleEditOrder}
                 onUpdatePaymentTracking={handleUpdatePaymentTracking}
+                onUpdatePaymentReceipt={handleUpdatePaymentReceipt}
                 onSaveLocation={handleUpdateOrderLocation}
                 selectedAgent={selectedAgent}
                 setSelectedAgent={setSelectedAgent}

@@ -4,3 +4,27 @@
   --font-sans: "Vazirmatn", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 }
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .printable-area, .printable-area * {
+    visibility: visible !important;
+  }
+  .printable-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 15px !important;
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
