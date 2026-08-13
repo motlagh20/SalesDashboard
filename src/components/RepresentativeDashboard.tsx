@@ -1864,13 +1864,14 @@ export default function RepresentativeDashboard({
                           <span>جزئیات کامل</span>
                         </button>
 
-                        {onEditOrder && (order.status === 'PENDING_APPROVAL' || order.status === 'APPROVED_BY_SALES') && (
+                        {onEditOrder && order.status !== 'LOADED_AND_DISPATCHED' && order.status !== 'REJECTED' && (
                           <button
                             type="button"
                             onClick={() => handleOpenEditModal(order)}
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer border border-slate-200"
+                            className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
+                            title="ویرایش و اصلاح اطلاعات این سفارش"
                           >
-                            <Edit className="w-3.5 h-3.5 text-slate-600" />
+                            <Edit className="w-3.5 h-3.5 text-amber-700" />
                             <span>ویرایش</span>
                           </button>
                         )}
@@ -2652,7 +2653,22 @@ export default function RepresentativeDashboard({
               )}
 
               {/* Footer Actions */}
-              <div className="pt-3 border-t border-slate-200 flex items-center justify-end">
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
+                {onEditOrder && selectedOrderDetails.status !== 'LOADED_AND_DISPATCHED' && selectedOrderDetails.status !== 'REJECTED' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ord = selectedOrderDetails;
+                      setSelectedOrderDetails(null);
+                      handleOpenEditModal(ord);
+                    }}
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold px-4 py-2 rounded-xl text-xs transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+                  >
+                    <Edit className="w-4 h-4 text-white" />
+                    <span>ویرایش اطلاعات این سفارش</span>
+                  </button>
+                ) : <div />}
+
                 <button
                   type="button"
                   onClick={() => setSelectedOrderDetails(null)}
