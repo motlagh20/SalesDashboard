@@ -146,6 +146,7 @@ export default function RepresentativeDashboard({
   const [notes, setNotes] = useState('');
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
   const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   
   const modalScrollRef = useRef<HTMLDivElement>(null);
 
@@ -1144,7 +1145,7 @@ export default function RepresentativeDashboard({
                       </div>
                     )}
 
-                    {/* Product Select Dropdown (Clean, high-contrast selection) */}
+                    {/* Product Select Dropdown (Custom, clean, bug-free selection) */}
                     <div>
                       <label className="block text-xs font-black text-slate-800 mb-1.5 flex items-center justify-between">
                         <span>انتخاب نوع کالا:</span>
@@ -1153,18 +1154,54 @@ export default function RepresentativeDashboard({
                         </span>
                       </label>
                       <div className="relative">
-                        <select
-                          value={productId || selectedProduct.id}
-                          onChange={(e) => setProductId(e.target.value)}
-                          className="w-full bg-white border-2 border-emerald-600/60 hover:border-emerald-600 rounded-xl py-2.5 px-3 text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-3 focus:ring-emerald-500/20 font-sans cursor-pointer font-black shadow-xs transition-all"
+                        <button
+                          type="button"
                           id="modal-form-product-select"
+                          onClick={() => setIsProductDropdownOpen(!isProductDropdownOpen)}
+                          className="w-full bg-white border-2 border-emerald-600 hover:border-emerald-700 rounded-xl py-2.5 px-3.5 text-xs sm:text-sm text-slate-900 font-black shadow-xs transition-all flex items-center justify-between gap-2 text-right cursor-pointer"
                         >
-                          {products.filter(p => p.isEnabled !== false).map((prod) => (
-                            <option key={prod.id} value={prod.id}>
-                              {prod.name}
-                            </option>
-                          ))}
-                        </select>
+                          <span className="truncate">{selectedProduct.name}</span>
+                          <ChevronDown className={`w-4 h-4 text-emerald-700 shrink-0 transition-transform ${isProductDropdownOpen ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {isProductDropdownOpen && (
+                          <>
+                            {/* Backdrop to close dropdown on click outside */}
+                            <div 
+                              className="fixed inset-0 z-20" 
+                              onClick={() => setIsProductDropdownOpen(false)} 
+                            />
+                            
+                            <div className="absolute z-30 top-full mt-1.5 w-full bg-white border-2 border-emerald-600 rounded-2xl shadow-xl overflow-hidden py-1 max-h-60 overflow-y-auto divide-y divide-slate-100 animate-fadeIn">
+                              {products.filter(p => p.isEnabled !== false).map((prod) => {
+                                const isSelected = (productId || selectedProduct.id) === prod.id;
+                                return (
+                                  <button
+                                    key={prod.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setProductId(prod.id);
+                                      setIsProductDropdownOpen(false);
+                                    }}
+                                    className={`w-full text-right px-3.5 py-3 text-xs sm:text-sm font-black transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                                      isSelected
+                                        ? 'bg-emerald-50 text-emerald-950 font-black border-r-4 border-r-emerald-600'
+                                        : 'text-slate-800 hover:bg-slate-50 hover:text-emerald-900'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 truncate">
+                                      {isSelected && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+                                      <span className="truncate">{prod.name}</span>
+                                    </div>
+                                    <span className="text-[11px] font-mono font-black text-emerald-800 shrink-0 bg-emerald-100/90 border border-emerald-200 px-2 py-0.5 rounded-md">
+                                      {prod.pricePerUnit.toLocaleString()} تومان
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
                       </div>
 
                       {/* Separate Price Badge & Description Toggle directly under the select dropdown */}
