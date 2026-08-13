@@ -2072,7 +2072,7 @@ export default function App() {
                     value={profilePhone}
                     onChange={(e) => setProfilePhone(e.target.value)}
                     disabled={isProfileSubmitting}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-emerald-400 text-left font-mono focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-950 border-2 border-emerald-500/60 rounded-xl px-3 py-2 text-xs text-emerald-300 placeholder:text-slate-500 text-left font-mono font-bold focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20 shadow-inner transition-all"
                     required
                   />
                   <p className="text-[10px] text-slate-400 mt-1">این شماره جهت هماهنگی بارهای سفال طبرستان، تماس رانندگان و صدور حواله استفاده می‌شود.</p>
@@ -2086,7 +2086,7 @@ export default function App() {
                     value={profileAddress}
                     onChange={(e) => setProfileAddress(e.target.value)}
                     disabled={isProfileSubmitting}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white text-right font-sans focus:outline-none focus:border-emerald-500 leading-relaxed"
+                    className="w-full bg-slate-950 border-2 border-emerald-500/60 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 text-right font-sans font-bold focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20 leading-relaxed shadow-inner transition-all"
                   />
                   <p className="text-[10px] text-slate-400 mt-1">آدرس دقیق جهت درج در برگ ترخیص، حواله انبار و بارنامه صادر شده توسط کارخانه ثبت می‌گردد.</p>
                 </div>

@@ -5,6 +5,17 @@
   --font-mono: "JetBrains Mono", monospace;
 }
 
+input[type="text"],
+input[type="number"],
+input[type="tel"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+select,
+textarea {
+  transition: all 0.15s ease-in-out;
+}
+
 @media print {
   body * {
     visibility: hidden !important;

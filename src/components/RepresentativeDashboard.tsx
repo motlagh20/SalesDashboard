@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Order, Product, OrderStatus, Agent, AppUser } from '../types';
 import { PRESET_AGENTS } from '../data';
 import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary, EXPORT_COUNTRIES, getBordersForCountry } from '../data/iranLocations';
@@ -146,6 +146,33 @@ export default function RepresentativeDashboard({
   const [notes, setNotes] = useState('');
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
   const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
+  
+  const modalScrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll modal to top and auto-focus first input when step changes or modal opens
+  useEffect(() => {
+    if (isCreateModalOpen) {
+      if (modalScrollRef.current) {
+        modalScrollRef.current.scrollTop = 0;
+      }
+      const focusTimer = setTimeout(() => {
+        if (modalScrollRef.current) {
+          modalScrollRef.current.scrollTop = 0;
+        }
+        if (formStep === 1) {
+          const el = document.getElementById('modal-form-product-select') || document.getElementById('modal-form-quantity-input');
+          el?.focus({ preventScroll: false });
+        } else if (formStep === 2) {
+          const el = document.getElementById('modal-step2-country-select') || document.getElementById('modal-step2-province-select') || document.getElementById('modal-step2-address-textarea');
+          el?.focus({ preventScroll: false });
+        } else if (formStep === 3) {
+          const el = document.getElementById('modal-step3-buyer-input');
+          el?.focus({ preventScroll: false });
+        }
+      }, 100);
+      return () => clearTimeout(focusTimer);
+    }
+  }, [formStep, isCreateModalOpen]);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -1067,7 +1094,7 @@ export default function RepresentativeDashboard({
             </div>
 
             {/* Modal Body - Scrollable content area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 font-sans">
+            <div ref={modalScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 font-sans">
               <form onSubmit={handleSubmit} className="space-y-4">
                 {/* STEP 1: PRODUCT SELECTION & QUANTITY */}
                 {formStep === 1 && (
@@ -1082,6 +1109,41 @@ export default function RepresentativeDashboard({
                       </span>
                     </div>
 
+                    {/* Current Invoice Items List - Prominently at the top */}
+                    {invoiceItems.length > 0 && (
+                      <div className="bg-emerald-50/60 p-3 rounded-2xl border-2 border-emerald-500/80 space-y-2 shadow-xs animate-fadeIn">
+                        <div className="flex items-center justify-between text-xs font-black border-b border-emerald-200/80 pb-2">
+                          <span className="flex items-center gap-1.5 text-emerald-950 font-black">
+                            <ShoppingBag className="w-4 h-4 text-emerald-700 shrink-0" />
+                            <span>اقلام افزوده شده به فاکتور ({invoiceItems.length} کالا):</span>
+                          </span>
+                          <span className="text-[11px] font-mono text-emerald-900 bg-emerald-100/90 px-2.5 py-0.5 rounded-md border border-emerald-300 font-black">
+                            مجموع: {invoiceItems.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0).toLocaleString()} تومان
+                          </span>
+                        </div>
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+                          {invoiceItems.map((item, index) => (
+                            <div key={item.id} className="flex justify-between items-center text-xs bg-white border border-emerald-200 px-3 py-2 rounded-xl gap-2 shadow-2xs">
+                              <strong className="text-slate-900 font-black truncate text-xs">{item.productName}</strong>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-emerald-800 font-mono font-black text-xs bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-300">
+                                  {item.quantity.toLocaleString()} {item.unit}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setInvoiceItems(invoiceItems.filter((_, i) => i !== index))}
+                                  className="text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 p-1 rounded-lg border border-rose-200 transition-all cursor-pointer"
+                                  title="حذف کالا"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Product Select Dropdown (Clean, high-contrast selection) */}
                     <div>
                       <label className="block text-xs font-black text-slate-800 mb-1.5 flex items-center justify-between">
@@ -1094,54 +1156,41 @@ export default function RepresentativeDashboard({
                         <select
                           value={productId || selectedProduct.id}
                           onChange={(e) => setProductId(e.target.value)}
-                          className="w-full bg-white border-2 border-emerald-600/60 hover:border-emerald-600 rounded-xl py-3 px-3.5 text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-3 focus:ring-emerald-500/20 font-sans cursor-pointer font-black shadow-xs transition-all"
+                          className="w-full bg-white border-2 border-emerald-600/60 hover:border-emerald-600 rounded-xl py-2.5 px-3 text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-3 focus:ring-emerald-500/20 font-sans cursor-pointer font-black shadow-xs transition-all"
                           id="modal-form-product-select"
                         >
                           {products.filter(p => p.isEnabled !== false).map((prod) => (
                             <option key={prod.id} value={prod.id}>
-                              {prod.name} — ({prod.pricePerUnit.toLocaleString()} تومان / {prod.unit})
+                              {prod.name}
                             </option>
                           ))}
                         </select>
                       </div>
-                    </div>
 
-                    {/* Compact Product Bar & Collapsible Description Toggle */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
-                        <div className="flex items-center gap-2 truncate">
-                          {selectedProduct.imageUrl ? (
-                            <img 
-                              src={selectedProduct.imageUrl} 
-                              alt={selectedProduct.name} 
-                              className="w-7 h-7 object-cover rounded-md border border-slate-200 shrink-0 shadow-2xs"
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <div className="w-7 h-7 rounded-md bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0 text-amber-800 font-bold text-[10px]">
-                              سفال
-                            </div>
-                          )}
-                          <span className="font-extrabold text-slate-900 truncate text-xs">{selectedProduct.name}</span>
-                          <span className="text-[11px] text-emerald-700 font-black font-mono shrink-0">
-                            ({selectedProduct.pricePerUnit.toLocaleString()} تومان / {selectedProduct.unit})
+                      {/* Separate Price Badge & Description Toggle directly under the select dropdown */}
+                      <div className="flex items-center justify-between bg-emerald-50/80 border border-emerald-200/90 rounded-xl px-3 py-1.5 mt-1.5 text-xs">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-slate-600 font-bold text-[11px] shrink-0">قیمت واحد:</span>
+                          <span className="text-emerald-900 font-black font-mono text-xs sm:text-sm bg-white px-2 py-0.5 rounded-md border border-emerald-300 shadow-2xs truncate">
+                            {selectedProduct.pricePerUnit.toLocaleString()} تومان / {selectedProduct.unit}
                           </span>
                         </div>
+
                         <button
                           type="button"
                           onClick={() => setIsProductDetailsOpen(!isProductDetailsOpen)}
-                          className="text-[11px] text-emerald-800 font-extrabold hover:text-emerald-950 flex items-center gap-1 cursor-pointer bg-emerald-100/80 hover:bg-emerald-200/90 border border-emerald-300/60 px-2.5 py-1 rounded-lg transition-all shrink-0 mr-1 active:scale-95"
+                          className="text-[11px] text-emerald-800 font-extrabold hover:text-emerald-950 flex items-center gap-1 cursor-pointer bg-emerald-100/90 hover:bg-emerald-200 border border-emerald-300 px-2 py-1 rounded-lg transition-all shrink-0 active:scale-95 mr-1"
                           title="نمایش یا مخفی‌سازی جزئیات کالا"
                         >
                           <Info className="w-3.5 h-3.5 text-emerald-700" />
-                          <span>{isProductDetailsOpen ? 'بستن مشخصات' : 'توضیحات و ابعاد'}</span>
+                          <span>{isProductDetailsOpen ? 'بستن' : 'توضیحات'}</span>
                           {isProductDetailsOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
                       </div>
 
                       {/* Collapsible Product Details Accordion */}
                       {isProductDetailsOpen && (
-                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-start gap-3 animate-fadeIn text-xs">
+                        <div className="bg-slate-50 p-3 mt-1.5 rounded-xl border border-slate-200 flex items-start gap-3 animate-fadeIn text-xs">
                           {selectedProduct.imageUrl ? (
                             <img 
                               src={selectedProduct.imageUrl} 
@@ -1167,46 +1216,40 @@ export default function RepresentativeDashboard({
                       )}
                     </div>
 
-                    {/* Quantity Input & Presets (Compact Layout) */}
-                    <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-slate-800">مقدار سفارش ({selectedProduct.unit}):</label>
-                        <span className="text-[10px] text-slate-500 font-bold">حداکثر ظرفیت تریلی: ۳۳۰</span>
+                    {/* Quantity Input & Add Button in a Single Inline Row for Instant Mobile Access */}
+                    <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+                        <span>مقدار سفارش ({selectedProduct.unit}):</span>
+                        <span className="text-[10px] text-slate-500">حداکثر تریلی: ۳۳۰</span>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min="1"
-                          step="any"
-                          placeholder="330"
-                          value={quantity || ''}
-                          onChange={(e) => setQuantity(Number(e.target.value))}
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl py-2 px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono font-bold text-center"
-                          id="modal-form-quantity-input"
-                        />
-                        <span className="text-xs font-bold text-slate-700 shrink-0 bg-slate-100 px-3 py-2 rounded-xl border border-slate-200">
+                        <div className="relative flex-1 min-w-[100px]">
+                          <input
+                            type="number"
+                            min="1"
+                            step="any"
+                            placeholder="330"
+                            value={quantity || ''}
+                            onChange={(e) => setQuantity(Number(e.target.value))}
+                            className="w-full bg-emerald-50/30 hover:bg-emerald-50/50 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 font-mono font-black text-center shadow-2xs transition-all"
+                            id="modal-form-quantity-input"
+                          />
+                        </div>
+
+                        <span className="text-xs font-bold text-slate-700 shrink-0 bg-slate-100 px-2.5 py-2 rounded-xl border-2 border-slate-300/90">
                           {selectedProduct.unit}
                         </span>
-                      </div>
 
-                      {/* Quantity Presets */}
-                      <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                        <span className="text-[10px] text-slate-500 font-black">میانبرهای پرکاربرد:</span>
-                        {dynamicQuantityPresets.map(val => (
-                          <button
-                            key={val}
-                            type="button"
-                            onClick={() => setQuantity(val)}
-                            className={`text-[11px] px-2.5 py-1 rounded-full border font-black font-mono transition-all cursor-pointer ${
-                              quantity === val
-                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs scale-105'
-                                : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
-                            }`}
-                          >
-                            {val.toLocaleString()} {val === 330 ? '(۱ تریلی)' : ''}
-                          </button>
-                        ))}
+                        <button
+                          type="button"
+                          onClick={handleAddProductToInvoice}
+                          className="shrink-0 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black py-2 px-3 sm:px-4 rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                          id="modal-form-add-to-invoice-btn"
+                        >
+                          <PlusCircle className="w-4 h-4 text-white" />
+                          <span>افزودن به فاکتور</span>
+                        </button>
                       </div>
 
                       {/* Mold Conversion Preview */}
@@ -1233,43 +1276,6 @@ export default function RepresentativeDashboard({
                         return null;
                       })()}
                     </div>
-
-                    {/* Add to multi-product invoice button */}
-                    <button
-                      type="button"
-                      onClick={handleAddProductToInvoice}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-2.5 px-3 rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-2 shadow-xs active:scale-98"
-                    >
-                      <PlusCircle className="w-4 h-4 text-white" />
-                      <span>➕ افزودن کالا به سبد پیش‌فاکتور (سفارش چندمحصولی)</span>
-                    </button>
-
-                    {/* Current Invoice Items List */}
-                    {invoiceItems.length > 0 && (
-                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-1.5">
-                        <span className="text-xs text-slate-800 font-black block">اقلام افزوده شده به فاکتور ({invoiceItems.length} کالا):</span>
-                        <div className="space-y-1">
-                          {invoiceItems.map((item, index) => (
-                            <div key={item.id} className="flex justify-between items-center text-xs bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-2xs gap-2">
-                              <strong className="text-slate-800 truncate">{item.productName}</strong>
-                              <div className="flex items-center gap-2 shrink-0">
-                                <span className="text-slate-700 font-mono font-bold text-[11px]">
-                                  {item.quantity.toLocaleString()} {item.unit}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setInvoiceItems(invoiceItems.filter((_, i) => i !== index))}
-                                  className="text-rose-500 hover:text-rose-700 font-bold p-0.5 cursor-pointer"
-                                  title="حذف کالا"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
 
                     {/* Cost Estimation */}
                     <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl flex items-center justify-between text-xs">
@@ -1327,17 +1333,18 @@ export default function RepresentativeDashboard({
 
                     {/* Export vs Domestic Selection */}
                     {isExportAllowed && isExportOrder ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-sky-50 p-3 rounded-xl border border-sky-200">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-sky-50/80 p-3 rounded-xl border border-sky-200">
                         <div>
                           <label className="block text-xs font-bold text-sky-900 mb-1">کشور مقصد:</label>
                           <select
+                            id="modal-step2-country-select"
                             value={selectedCountry}
                             onChange={(e) => {
                               setSelectedCountry(e.target.value);
                               const borders = getBordersForCountry(e.target.value);
                               setSelectedBorder(borders[0] || '');
                             }}
-                            className="w-full bg-white border border-sky-300 rounded-xl py-2 px-3 text-xs text-slate-800 font-bold"
+                            className="w-full bg-white border-2 border-sky-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-bold focus:outline-none focus:border-sky-600 focus:ring-2 focus:ring-sky-500/20 shadow-2xs cursor-pointer"
                           >
                             {EXPORT_COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
                           </select>
@@ -1347,7 +1354,7 @@ export default function RepresentativeDashboard({
                           <select
                             value={selectedBorder}
                             onChange={(e) => setSelectedBorder(e.target.value)}
-                            className="w-full bg-white border border-sky-300 rounded-xl py-2 px-3 text-xs text-slate-800 font-bold"
+                            className="w-full bg-white border-2 border-sky-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-bold focus:outline-none focus:border-sky-600 focus:ring-2 focus:ring-sky-500/20 shadow-2xs cursor-pointer"
                           >
                             {allowedBorders.map(b => <option key={b} value={b}>{b}</option>)}
                           </select>
@@ -1356,15 +1363,16 @@ export default function RepresentativeDashboard({
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1">استان مقصد:</label>
+                          <label className="block text-xs font-bold text-slate-800 mb-1">استان مقصد:</label>
                           <select
+                            id="modal-step2-province-select"
                             value={selectedProvince}
                             onChange={(e) => {
                               setSelectedProvince(e.target.value);
                               const cities = getCitiesForProvince(e.target.value);
                               setSelectedCity(cities[0] || e.target.value);
                             }}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs text-slate-800 font-bold cursor-pointer"
+                            className="w-full bg-emerald-50/30 hover:bg-emerald-50/50 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 font-black cursor-pointer focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
                           >
                             {allowedProvinces.map(p => (
                               <option key={p.name} value={p.name}>{p.name}</option>
@@ -1373,11 +1381,11 @@ export default function RepresentativeDashboard({
                         </div>
 
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1">شهر مقصد:</label>
+                          <label className="block text-xs font-bold text-slate-800 mb-1">شهر مقصد:</label>
                           <select
                             value={selectedCity}
                             onChange={(e) => setSelectedCity(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs text-slate-800 font-bold cursor-pointer"
+                            className="w-full bg-emerald-50/30 hover:bg-emerald-50/50 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 font-black cursor-pointer focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
                           >
                             {allowedCities.map(c => (
                               <option key={c} value={c}>{c}</option>
@@ -1449,19 +1457,20 @@ export default function RepresentativeDashboard({
                           <button
                             type="button"
                             onClick={() => handleConvertUrlToAddress(deliveryLocationUrl, setExactAddress)}
-                            className="text-[10px] bg-sky-50 text-sky-800 border border-sky-300 px-2 py-0.5 rounded-md font-bold hover:bg-sky-100 transition-all"
+                            className="text-[10px] bg-sky-50 text-sky-800 border border-sky-300 px-2 py-0.5 rounded-md font-bold hover:bg-sky-100 transition-all cursor-pointer"
                           >
                             📍 استخراج آدرس از لوکیشن
                           </button>
                         )}
                       </div>
                       <textarea
+                        id="modal-step2-address-textarea"
                         required
                         rows={2}
                         placeholder="مثال: کیلومتر ۵ جاده بابل، انبار مرکزی مصالح..."
                         value={exactAddress}
                         onChange={(e) => setExactAddress(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans"
+                        className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 font-sans shadow-2xs font-bold transition-all"
                       />
                     </div>
                   </div>
@@ -1482,20 +1491,21 @@ export default function RepresentativeDashboard({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                        <label className="block text-xs font-bold text-slate-800 mb-1">
                           مشخصات خریدار / خریدار پروژه:
                         </label>
                         <input
+                          id="modal-step3-buyer-input"
                           type="text"
                           placeholder="مثال: جناب آقای مهندس احمدی"
                           value={buyerName}
                           onChange={(e) => setBuyerName(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans"
+                          className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 font-sans shadow-2xs font-bold transition-all"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                        <label className="block text-xs font-bold text-slate-800 mb-1">
                           شماره تماس همراه تحویل‌گیرنده:
                         </label>
                         <input
@@ -1503,7 +1513,7 @@ export default function RepresentativeDashboard({
                           placeholder="0912..."
                           value={phoneNumber}
                           onChange={(e) => setPhoneNumber(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-left dir-ltr"
+                          className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 font-mono text-left dir-ltr shadow-2xs font-bold transition-all"
                         />
                       </div>
                     </div>
@@ -1523,13 +1533,13 @@ export default function RepresentativeDashboard({
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-600 mb-1">شماره / کد رهگیری فیش یا چک:</label>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1">شماره / کد رهگیری فیش یا چک:</label>
                           <input
                             type="text"
                             placeholder="مثال: ۱۲۳۴۵۶۷۸۹"
                             value={paymentTrackingCode}
                             onChange={(e) => setPaymentTrackingCode(e.target.value)}
-                            className="w-full bg-white border border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                            className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 font-mono shadow-2xs font-bold transition-all"
                           />
                         </div>
 
@@ -1580,13 +1590,13 @@ export default function RepresentativeDashboard({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">توضیحات و ملاحظات ویژه بارگیری:</label>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">توضیحات و ملاحظات ویژه بارگیری:</label>
                       <textarea
                         rows={2}
                         placeholder="نکات خاص در مورد تایم بارگیری یا هماهنگی خروجی..."
                         value={notes}
                         onChange={(e) => setNotes(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans"
+                        className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 font-sans shadow-2xs font-bold transition-all"
                       />
                     </div>
 
@@ -1780,9 +1790,9 @@ export default function RepresentativeDashboard({
                   placeholder="جستجو در کد، خریدار، شهر..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pr-9 pl-3 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 pr-9 pl-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 font-bold shadow-2xs transition-all"
                 />
-                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
+                <Search className="w-4 h-4 text-emerald-600 absolute right-3 top-2.5" />
               </div>
             </div>
           </div>
@@ -2075,37 +2085,37 @@ export default function RepresentativeDashboard({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-700 font-bold mb-1">نام خریدار:</label>
+                <label className="block text-slate-800 font-bold mb-1">نام خریدار:</label>
                 <input
                   type="text"
                   value={editBuyerName}
                   onChange={e => setEditBuyerName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-bold"
+                  className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">تلفن خریدار:</label>
+                <label className="block text-slate-800 font-bold mb-1">تلفن خریدار:</label>
                 <input
                   type="text"
                   value={editPhoneNumber}
                   onChange={e => setEditPhoneNumber(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-mono dir-ltr"
+                  className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 font-mono dir-ltr text-left font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">آدرس دقیق تخلیه بار:</label>
+                <label className="block text-slate-800 font-bold mb-1">آدرس دقیق تخلیه بار:</label>
                 <textarea
                   rows={2}
                   value={editExactAddress}
                   onChange={e => setEditExactAddress(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-sans"
+                  className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 font-sans font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
                 />
               </div>
 
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
-                <label className="block text-slate-700 font-bold mb-1 flex items-center justify-between">
+                <label className="block text-slate-800 font-bold mb-1 flex items-center justify-between">
                   <span>کد رهگیری واریز / چک:</span>
                   {editPaymentReceiptUrl && <span className="text-[10px] text-emerald-700 font-bold">✓ فیش الصاق شده</span>}
                 </label>
@@ -2113,7 +2123,7 @@ export default function RepresentativeDashboard({
                   type="text"
                   value={editPaymentTrackingCode}
                   onChange={e => setEditPaymentTrackingCode(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl p-2 font-mono text-xs"
+                  className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 font-mono text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
                 />
 
                 <div className="pt-1">
@@ -2202,13 +2212,13 @@ export default function RepresentativeDashboard({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-700 font-bold mb-1">کد رهگیری / شماره واریز / چک:</label>
+                <label className="block text-slate-800 font-bold mb-1">کد رهگیری / شماره واریز / چک:</label>
                 <input
                   type="text"
                   value={standaloneTrackingCode}
                   onChange={e => setStandaloneTrackingCode(e.target.value)}
                   placeholder="شماره فیش یا چک..."
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-mono text-xs"
+                  className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
                 />
               </div>
 
