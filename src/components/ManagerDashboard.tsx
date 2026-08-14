@@ -611,6 +611,55 @@ export default function ManagerDashboard({
     setNewUserSCId(user.shippingCompanyId || '');
   };
 
+  // Helper to extract specific changed fields in a pending edit
+  const getPendingEditChanges = (order: Order, _productsList: Product[]) => {
+    if (!order.hasPendingEdit || !order.pendingEditData) return [];
+    try {
+      const data = JSON.parse(order.pendingEditData);
+      const changes: { key: string; label: string; icon: string; oldVal?: string; newVal?: string }[] = [];
+      
+      const isDifferent = (a: any, b: any) => {
+        if (b === undefined) return false;
+        return String(a || '').trim() !== String(b || '').trim();
+      };
+
+      if (isDifferent(order.buyerName, data.buyerName)) {
+        changes.push({ key: 'buyerName', label: 'نام خریدار', icon: '👤', oldVal: order.buyerName || '—', newVal: data.buyerName || '—' });
+      }
+      if (isDifferent(order.phoneNumber, data.phoneNumber)) {
+        changes.push({ key: 'phoneNumber', label: 'شماره تماس', icon: '📞', oldVal: order.phoneNumber || '—', newVal: data.phoneNumber || '—' });
+      }
+      if (isDifferent(order.destinationCity, data.destinationCity)) {
+        changes.push({ key: 'destinationCity', label: 'شهر مقصد', icon: '📍', oldVal: order.destinationCity || '—', newVal: data.destinationCity || '—' });
+      }
+      const oldVehicle = order.vehicleDetails?.vehicleType || order.vehicleType || 'تریلی';
+      if (isDifferent(oldVehicle, data.vehicleType)) {
+        changes.push({ key: 'vehicleType', label: 'نوع باربری', icon: '🚛', oldVal: oldVehicle, newVal: data.vehicleType });
+      }
+      if (isDifferent(order.exactAddress, data.exactAddress)) {
+        changes.push({ key: 'exactAddress', label: 'آدرس تخلیه', icon: '🏠', oldVal: order.exactAddress || '—', newVal: data.exactAddress || '—' });
+      }
+      if (isDifferent(order.deliveryLocationUrl, data.deliveryLocationUrl)) {
+        changes.push({ key: 'deliveryLocationUrl', label: 'موقعیت نقشه', icon: '🗺️' });
+      }
+      if (isDifferent(order.paymentTrackingCode, data.paymentTrackingCode)) {
+        changes.push({ key: 'paymentTrackingCode', label: 'کد رهگیری واریزی', icon: '💳', oldVal: order.paymentTrackingCode || '—', newVal: data.paymentTrackingCode || '—' });
+      }
+      if (isDifferent(order.paymentReceiptUrl, data.paymentReceiptUrl)) {
+        changes.push({ key: 'paymentReceiptUrl', label: 'فیش بانکی پیوست', icon: '📎' });
+      }
+      if (data.itemsJson || (data.quantity !== undefined && data.quantity !== order.quantity) || (data.productName !== undefined && data.productName !== order.productName)) {
+        changes.push({ key: 'items', label: 'اقلام و متراژ سفارش', icon: '📦' });
+      }
+      if (isDifferent(order.notes, data.notes)) {
+        changes.push({ key: 'notes', label: 'یادداشت / توضیحات', icon: '📝', oldVal: order.notes || '—', newVal: data.notes || '—' });
+      }
+      return changes;
+    } catch {
+      return [{ key: 'unknown', label: 'مشخصات فاکتور', icon: '✏️' }];
+    }
+  };
+
   // Metrics calculations
   const totalVolume = orders.reduce((sum, o) => o.status !== 'REJECTED' ? sum + o.quantity : sum, 0);
   const totalPending = orders.filter((o) => o.status === 'PENDING_APPROVAL' || o.hasPendingEdit).length;
@@ -1191,17 +1240,26 @@ export default function ManagerDashboard({
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {orders.filter(o => o.hasPendingEdit).map(ord => (
-                  <button
-                    key={ord.id}
-                    type="button"
-                    onClick={() => setReviewingEditOrder(ord)}
-                    className="bg-amber-600 hover:bg-amber-700 text-white font-black text-xs px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5 animate-pulse"
-                  >
-                    <Edit className="w-3.5 h-3.5" />
-                    <span>بررسی اصلاحیه سفارش #{ord.orderNumber}</span>
-                  </button>
-                ))}
+                {orders.filter(o => o.hasPendingEdit).map(ord => {
+                  const chs = getPendingEditChanges(ord, products);
+                  return (
+                    <button
+                      key={ord.id}
+                      type="button"
+                      onClick={() => setReviewingEditOrder(ord)}
+                      className="bg-amber-600 hover:bg-amber-700 text-white font-black text-xs px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2 animate-pulse"
+                      title={chs.map(c => c.label).join('، ')}
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                      <span>بررسی اصلاحیه #{ord.orderNumber}</span>
+                      {chs.length > 0 && (
+                        <span className="bg-amber-900/40 text-amber-100 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                          {chs.length} مورد تغییر
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1345,16 +1403,20 @@ export default function ManagerDashboard({
                       {order.buyerName && (
                         <span className="text-[10.5px] bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 py-0.5 px-2 rounded">خریدار: {order.buyerName}</span>
                       )}
-                      {order.hasPendingEdit && (
-                        <button
-                          type="button"
-                          onClick={() => setReviewingEditOrder(order)}
-                          className="text-[10.5px] bg-amber-500 hover:bg-amber-600 text-white font-bold py-1 px-3 rounded-full flex items-center gap-1.5 shadow-xs transition-all cursor-pointer animate-pulse"
-                        >
-                          <Edit className="w-3.5 h-3.5" />
-                          <span>⚠️ بررسی و تایید ویرایش سفارش</span>
-                        </button>
-                      )}
+                      {order.hasPendingEdit && (() => {
+                        const chs = getPendingEditChanges(order, products);
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => setReviewingEditOrder(order)}
+                            className="text-[10.5px] bg-amber-500 hover:bg-amber-600 text-white font-bold py-1 px-3 rounded-full flex items-center gap-1.5 shadow-xs transition-all cursor-pointer animate-pulse ring-2 ring-amber-300"
+                            title={`موارد اصلاح‌شده: ${chs.map(c => c.label).join('، ')}`}
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                            <span>⚠️ بررسی و تمایز ویرایش ({chs.length} مورد تغییر)</span>
+                          </button>
+                        );
+                      })()}
                       {order.isExportOrder && (
                         <span className="text-[10px] bg-sky-100 text-sky-900 font-bold border border-sky-300/80 py-0.5 px-2.5 rounded-full flex items-center gap-1">
                           <Globe className="w-3 h-3 text-sky-600" />
@@ -1760,16 +1822,20 @@ export default function ManagerDashboard({
                           {order.buyerName && (
                             <span className="text-[9px] bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 py-0.5 px-1.5 rounded">خریدار: {order.buyerName}</span>
                           )}
-                          {order.hasPendingEdit && (
-                            <button
-                              type="button"
-                              onClick={() => setReviewingEditOrder(order)}
-                              className="text-[9px] bg-amber-500 hover:bg-amber-600 text-white font-bold py-0.5 px-2 rounded-full flex items-center gap-1 shadow-xs transition-all cursor-pointer animate-pulse"
-                            >
-                              <Edit className="w-3 h-3" />
-                              <span>⚠️ اصلاحیه جدید</span>
-                            </button>
-                          )}
+                          {order.hasPendingEdit && (() => {
+                            const chs = getPendingEditChanges(order, products);
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => setReviewingEditOrder(order)}
+                                className="text-[9.5px] bg-amber-500 hover:bg-amber-600 text-white font-bold py-0.5 px-2.5 rounded-full flex items-center gap-1 shadow-xs transition-all cursor-pointer animate-pulse ring-1 ring-amber-300"
+                                title={`موارد اصلاح‌شده: ${chs.map(c => c.label).join('، ')}`}
+                              >
+                                <Edit className="w-3 h-3" />
+                                <span>⚠️ اصلاحیه ({chs.length} مورد)</span>
+                              </button>
+                            );
+                          })()}
                           {order.paymentReceiptUrl && (
                             <button
                               type="button"
@@ -4342,7 +4408,7 @@ export default function ManagerDashboard({
           currentItems = parseAndHydrateItemsJson(reviewingEditOrder.itemsJson, products);
         }
         if (currentItems.length === 0) {
-          currentItems = [{ productName: reviewingEditOrder.productName, quantity: reviewingEditOrder.quantity, unit: reviewingEditOrder.unit }];
+          currentItems = [{ productId: reviewingEditOrder.productId || 'p-1', productName: reviewingEditOrder.productName, quantity: reviewingEditOrder.quantity, unit: reviewingEditOrder.unit, pricePerUnit: products.find(p => p.id === reviewingEditOrder.productId)?.pricePerUnit || 0 }];
         }
 
         let pendingItems: any[] = [];
@@ -4350,7 +4416,7 @@ export default function ManagerDashboard({
           pendingItems = parseAndHydrateItemsJson(pendingData.itemsJson, products);
         }
         if (pendingItems.length === 0 && pendingData.productName) {
-          pendingItems = [{ productName: pendingData.productName, quantity: pendingData.quantity, unit: pendingData.unit }];
+          pendingItems = [{ productId: pendingData.productId || reviewingEditOrder.productId || 'p-1', productName: pendingData.productName, quantity: pendingData.quantity, unit: pendingData.unit, pricePerUnit: products.find(p => p.id === (pendingData.productId || reviewingEditOrder.productId))?.pricePerUnit || 0 }];
         }
 
         const isDiff = (currVal: any, newVal: any) => {
@@ -4358,214 +4424,542 @@ export default function ManagerDashboard({
           return String(currVal || '').trim() !== String(newVal || '').trim();
         };
 
+        // Deep item comparison
+        const currentItemsMap = new Map<string, any>();
+        currentItems.forEach(it => {
+          const key = it.productId || it.productName;
+          currentItemsMap.set(key, it);
+        });
+
+        const pendingItemsMap = new Map<string, any>();
+        pendingItems.forEach(it => {
+          const key = it.productId || it.productName;
+          pendingItemsMap.set(key, it);
+        });
+
+        let hasItemsDiff = false;
+        if (currentItems.length !== pendingItems.length && pendingItems.length > 0) {
+          hasItemsDiff = true;
+        }
+
+        const allKeys = Array.from(new Set([...Array.from(currentItemsMap.keys()), ...Array.from(pendingItemsMap.keys())]));
+        const itemsDiffList = allKeys.map(key => {
+          const curr = currentItemsMap.get(key);
+          const pend = pendingItemsMap.get(key);
+
+          if (curr && pend) {
+            const qtyChanged = curr.quantity !== pend.quantity;
+            if (qtyChanged) hasItemsDiff = true;
+            return {
+              key,
+              productName: pend.productName || curr.productName,
+              unit: pend.unit || curr.unit || reviewingEditOrder.unit,
+              type: qtyChanged ? 'MODIFIED' : 'UNCHANGED',
+              oldQty: curr.quantity,
+              newQty: pend.quantity,
+              diffQty: pend.quantity - curr.quantity,
+              oldPrice: (curr.quantity || 0) * (curr.pricePerUnit || 0),
+              newPrice: (pend.quantity || 0) * (pend.pricePerUnit || 0),
+            };
+          } else if (curr && !pend) {
+            hasItemsDiff = true;
+            return {
+              key,
+              productName: curr.productName,
+              unit: curr.unit || reviewingEditOrder.unit,
+              type: 'REMOVED',
+              oldQty: curr.quantity,
+              newQty: 0,
+              diffQty: -curr.quantity,
+              oldPrice: (curr.quantity || 0) * (curr.pricePerUnit || 0),
+              newPrice: 0,
+            };
+          } else {
+            hasItemsDiff = true;
+            return {
+              key,
+              productName: pend.productName,
+              unit: pend.unit || reviewingEditOrder.unit,
+              type: 'ADDED',
+              oldQty: 0,
+              newQty: pend.quantity,
+              diffQty: pend.quantity,
+              oldPrice: 0,
+              newPrice: (pend.quantity || 0) * (pend.pricePerUnit || 0),
+            };
+          }
+        });
+
+        const totalOldQty = currentItems.reduce((s, it) => s + (it.quantity || 0), 0);
+        const totalNewQty = pendingItems.length > 0 ? pendingItems.reduce((s, it) => s + (it.quantity || 0), 0) : totalOldQty;
+        const totalOldPrice = currentItems.reduce((s, it) => s + ((it.quantity || 0) * (it.pricePerUnit || 0)), 0);
+        const totalNewPrice = pendingItems.length > 0 ? pendingItems.reduce((s, it) => s + ((it.quantity || 0) * (it.pricePerUnit || 0)), 0) : totalOldPrice;
+
+        // Build list of changed comparison rows and unchanged normal rows
+        type ComparisonRow = {
+          id: string;
+          label: string;
+          icon: string;
+          oldContent: React.ReactNode;
+          newContent: React.ReactNode;
+        };
+
+        const changedRows: ComparisonRow[] = [];
+        const unchangedNormalList: { label: string; icon: string; value: React.ReactNode }[] = [];
+
+        // 1. Buyer Name
+        if (isDiff(reviewingEditOrder.buyerName, pendingData.buyerName)) {
+          changedRows.push({
+            id: 'buyerName',
+            label: 'نام خریدار / پروژه',
+            icon: '👤',
+            oldContent: <span className="line-through text-slate-500">{reviewingEditOrder.buyerName || '— (ثبت نشده بود)'}</span>,
+            newContent: <span className="font-black text-emerald-950">{pendingData.buyerName || '— (حذف شد)'}</span>
+          });
+        } else {
+          unchangedNormalList.push({
+            label: 'خریدار / پروژه',
+            icon: '👤',
+            value: reviewingEditOrder.buyerName || '—'
+          });
+        }
+
+        // 2. Phone Number
+        if (isDiff(reviewingEditOrder.phoneNumber, pendingData.phoneNumber)) {
+          changedRows.push({
+            id: 'phoneNumber',
+            label: 'شماره تماس هماهنگی',
+            icon: '📞',
+            oldContent: <span className="line-through text-slate-500 font-mono">{reviewingEditOrder.phoneNumber || '—'}</span>,
+            newContent: <span className="font-black text-emerald-950 font-mono">{pendingData.phoneNumber || '—'}</span>
+          });
+        } else {
+          unchangedNormalList.push({
+            label: 'شماره تماس',
+            icon: '📞',
+            value: reviewingEditOrder.phoneNumber ? <span className="font-mono">{reviewingEditOrder.phoneNumber}</span> : '—'
+          });
+        }
+
+        // 3. Destination City
+        if (isDiff(reviewingEditOrder.destinationCity, pendingData.destinationCity)) {
+          changedRows.push({
+            id: 'destinationCity',
+            label: 'شهر و استان مقصد',
+            icon: '📍',
+            oldContent: <span className="line-through text-slate-500">{reviewingEditOrder.destinationCity || '—'}</span>,
+            newContent: <span className="font-black text-emerald-950">{pendingData.destinationCity || '—'}</span>
+          });
+        } else {
+          unchangedNormalList.push({
+            label: 'شهر مقصد',
+            icon: '📍',
+            value: reviewingEditOrder.destinationCity || '—'
+          });
+        }
+
+        // 4. Vehicle Type
+        const oldVehicle = reviewingEditOrder.vehicleDetails?.vehicleType || reviewingEditOrder.vehicleType || 'تریلی';
+        if (isDiff(oldVehicle, pendingData.vehicleType)) {
+          changedRows.push({
+            id: 'vehicleType',
+            label: 'نوع ناوگان باربری',
+            icon: '🚛',
+            oldContent: <span className="line-through text-slate-500">{oldVehicle}</span>,
+            newContent: <span className="font-black text-emerald-950">{pendingData.vehicleType || oldVehicle}</span>
+          });
+        } else {
+          unchangedNormalList.push({
+            label: 'نوع باربری',
+            icon: '🚛',
+            value: oldVehicle
+          });
+        }
+
+        // 5. Exact Address
+        if (isDiff(reviewingEditOrder.exactAddress, pendingData.exactAddress)) {
+          changedRows.push({
+            id: 'exactAddress',
+            label: 'آدرس دقیق تخلیه بار',
+            icon: '🏠',
+            oldContent: <span className="line-through text-slate-500">{reviewingEditOrder.exactAddress || '—'}</span>,
+            newContent: <span className="font-black text-emerald-950 leading-relaxed">{pendingData.exactAddress || '—'}</span>
+          });
+        } else {
+          unchangedNormalList.push({
+            label: 'آدرس تخلیه',
+            icon: '🏠',
+            value: reviewingEditOrder.exactAddress || '—'
+          });
+        }
+
+        // 6. Map Location URL
+        if (isDiff(reviewingEditOrder.deliveryLocationUrl, pendingData.deliveryLocationUrl)) {
+          changedRows.push({
+            id: 'deliveryLocationUrl',
+            label: 'لوکیشن موقعیت نقشه',
+            icon: '🗺️',
+            oldContent: reviewingEditOrder.deliveryLocationUrl ? (
+              <a href={reviewingEditOrder.deliveryLocationUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline inline-flex items-center gap-1 font-mono text-[11px]">
+                <span>موقعیت قبلی</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            ) : <span className="text-slate-400">ثبت نشده بود</span>,
+            newContent: pendingData.deliveryLocationUrl ? (
+              <a href={pendingData.deliveryLocationUrl} target="_blank" rel="noreferrer" className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-1 px-3 rounded-lg inline-flex items-center gap-1.5 shadow-2xs">
+                <span>🗺️ مشاهده لوکیشن جدید</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            ) : <span className="text-slate-400">حذف شد</span>
+          });
+        } else if (reviewingEditOrder.deliveryLocationUrl) {
+          unchangedNormalList.push({
+            label: 'لوکیشن نقشه',
+            icon: '🗺️',
+            value: (
+              <a href={reviewingEditOrder.deliveryLocationUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline inline-flex items-center gap-1 font-mono text-xs">
+                <span>مشاهده لوکیشن</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )
+          });
+        }
+
+        // 7. Payment Tracking Code
+        if (isDiff(reviewingEditOrder.paymentTrackingCode, pendingData.paymentTrackingCode)) {
+          changedRows.push({
+            id: 'paymentTrackingCode',
+            label: 'کد پیگیری پیش‌پرداخت',
+            icon: '💳',
+            oldContent: <span className="line-through text-slate-500 font-mono">{reviewingEditOrder.paymentTrackingCode || '—'}</span>,
+            newContent: <span className="font-black text-emerald-950 font-mono">{pendingData.paymentTrackingCode || '—'}</span>
+          });
+        } else if (reviewingEditOrder.paymentTrackingCode) {
+          unchangedNormalList.push({
+            label: 'کد پیگیری واریز',
+            icon: '💳',
+            value: <span className="font-mono font-bold text-emerald-900">{reviewingEditOrder.paymentTrackingCode}</span>
+          });
+        }
+
+        // 8. Payment Receipt Attachment
+        if (isDiff(reviewingEditOrder.paymentReceiptUrl, pendingData.paymentReceiptUrl)) {
+          changedRows.push({
+            id: 'paymentReceiptUrl',
+            label: 'فیش بانکی پیوست',
+            icon: '📎',
+            oldContent: reviewingEditOrder.paymentReceiptUrl ? (
+              <button
+                type="button"
+                onClick={() => setViewReceiptModalUrl({ url: reviewingEditOrder.paymentReceiptUrl!, name: reviewingEditOrder.paymentReceiptName || 'فیش_قبلی.jpg' })}
+                className="text-xs bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-1.5 px-3 rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Paperclip className="w-3.5 h-3.5" />
+                <span>مشاهده فیش قبلی</span>
+              </button>
+            ) : <span className="text-slate-400">فایلی پیوست نبود</span>,
+            newContent: pendingData.paymentReceiptUrl ? (
+              <button
+                type="button"
+                onClick={() => setViewReceiptModalUrl({ url: pendingData.paymentReceiptUrl, name: pendingData.paymentReceiptName || 'فیش_جدید.jpg' })}
+                className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-black py-1.5 px-3.5 rounded-xl inline-flex items-center gap-1.5 cursor-pointer shadow-md ring-2 ring-emerald-400"
+              >
+                <Paperclip className="w-4 h-4 text-emerald-100" />
+                <span>📎 مشاهده تصویر فیش جدید پیوست‌شده</span>
+              </button>
+            ) : <span className="text-slate-400">حذف فیش پیوست</span>
+          });
+        } else if (reviewingEditOrder.paymentReceiptUrl) {
+          unchangedNormalList.push({
+            label: 'فیش بانکی پیوست',
+            icon: '📎',
+            value: (
+              <button
+                type="button"
+                onClick={() => setViewReceiptModalUrl({ url: reviewingEditOrder.paymentReceiptUrl!, name: reviewingEditOrder.paymentReceiptName || 'فیش_واریزی.jpg' })}
+                className="text-xs bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 font-bold py-1 px-2.5 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+              >
+                <Paperclip className="w-3.5 h-3.5" />
+                <span>مشاهده فیش واریزی</span>
+              </button>
+            )
+          });
+        }
+
+        // 9. Items / Products & Quantities
+        if (hasItemsDiff) {
+          changedRows.push({
+            id: 'items',
+            label: 'اقلام و متراژ سفارش',
+            icon: '📦',
+            oldContent: (
+              <div className="space-y-1.5">
+                {currentItems.map((it: any, idx: number) => (
+                  <div key={idx} className="p-1.5 bg-slate-100/90 rounded-lg border border-slate-200 flex items-center justify-between text-xs">
+                    <span className="text-slate-600 line-through">• {it.productName}</span>
+                    <span className="font-mono text-slate-500 line-through">{it.quantity?.toLocaleString()} {it.unit || reviewingEditOrder.unit}</span>
+                  </div>
+                ))}
+                <div className="pt-1.5 border-t border-slate-200 text-[11px] text-slate-500 flex items-center justify-between">
+                  <span>مجموع متراژ قبلی:</span>
+                  <span className="font-mono font-bold line-through">{totalOldQty.toLocaleString()} {reviewingEditOrder.unit}</span>
+                </div>
+              </div>
+            ),
+            newContent: (
+              <div className="space-y-2">
+                {itemsDiffList.map((diffItem, idx) => {
+                  if (diffItem.type === 'MODIFIED') {
+                    const isIncrease = (diffItem.diffQty || 0) > 0;
+                    return (
+                      <div key={idx} className="p-2 bg-emerald-50 text-emerald-950 rounded-xl border border-emerald-300 space-y-1">
+                        <div className="flex items-center justify-between text-xs font-bold">
+                          <span>• {diffItem.productName}</span>
+                          <span className="bg-amber-500 text-slate-950 px-2 py-0.5 rounded text-[10px] font-black">مقدار تغییر یافته</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] pt-1 border-t border-emerald-200">
+                          <span className="text-slate-500 line-through font-mono">{diffItem.oldQty?.toLocaleString()}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-emerald-700 font-bold">➔</span>
+                            <strong className="font-mono text-emerald-950 text-xs font-black">{diffItem.newQty?.toLocaleString()} {diffItem.unit}</strong>
+                            <span className={`text-[10px] px-1.5 py-0.2 rounded font-black ${isIncrease ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
+                              {isIncrease ? `+${diffItem.diffQty?.toLocaleString()}` : `${diffItem.diffQty?.toLocaleString()}`}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  } else if (diffItem.type === 'ADDED') {
+                    return (
+                      <div key={idx} className="p-2 bg-emerald-50 text-emerald-950 rounded-xl border border-emerald-400 flex items-center justify-between text-xs font-bold">
+                        <span className="flex items-center gap-1">
+                          <span className="text-emerald-700 font-black">+</span>
+                          <span>{diffItem.productName}</span>
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-black">{diffItem.newQty?.toLocaleString()} {diffItem.unit}</span>
+                          <span className="bg-emerald-700 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">✨ قلم کالا جدید</span>
+                        </div>
+                      </div>
+                    );
+                  } else if (diffItem.type === 'REMOVED') {
+                    return (
+                      <div key={idx} className="p-2 bg-rose-50 text-rose-900 rounded-xl border border-rose-200 flex items-center justify-between text-xs line-through opacity-75">
+                        <span>- {diffItem.productName}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono">{diffItem.oldQty?.toLocaleString()} {diffItem.unit}</span>
+                          <span className="bg-rose-600 text-white text-[10px] px-2 py-0.5 rounded font-bold no-underline">حذف شده</span>
+                        </div>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div key={idx} className="p-1.5 bg-slate-50 text-slate-700 rounded-lg border border-slate-200 flex items-center justify-between text-xs">
+                        <span>• {diffItem.productName}</span>
+                        <span className="font-mono font-bold text-slate-800">{diffItem.newQty?.toLocaleString()} {diffItem.unit}</span>
+                      </div>
+                    );
+                  }
+                })}
+
+                <div className="pt-1.5 border-t border-emerald-200 flex items-center justify-between text-xs font-black text-emerald-950">
+                  <span>مجموع متراژ جدید فاکتور:</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-sm">{totalNewQty.toLocaleString()} {reviewingEditOrder.unit}</span>
+                    {totalNewQty !== totalOldQty && (
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${totalNewQty > totalOldQty ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
+                        {totalNewQty > totalOldQty ? `+${(totalNewQty - totalOldQty).toLocaleString()}` : `${(totalNewQty - totalOldQty).toLocaleString()}`}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          });
+        } else {
+          unchangedNormalList.push({
+            label: 'اقلام و متراژ سفارش',
+            icon: '📦',
+            value: (
+              <div className="space-y-1">
+                {currentItems.map((it: any, idx: number) => (
+                  <div key={idx} className="flex items-center justify-between text-xs font-medium text-slate-800">
+                    <span>• {it.productName}:</span>
+                    <strong className="font-mono">{it.quantity?.toLocaleString()} {it.unit || reviewingEditOrder.unit}</strong>
+                  </div>
+                ))}
+                <div className="pt-1 border-t border-slate-200 text-xs font-bold text-slate-900 flex justify-between">
+                  <span>مجموع متراژ:</span>
+                  <span className="font-mono">{totalOldQty.toLocaleString()} {reviewingEditOrder.unit}</span>
+                </div>
+              </div>
+            )
+          });
+        }
+
+        // 10. Notes
+        if (isDiff(reviewingEditOrder.notes, pendingData.notes)) {
+          changedRows.push({
+            id: 'notes',
+            label: 'توضیحات و یادداشت',
+            icon: '📝',
+            oldContent: <span className="line-through text-slate-500 leading-relaxed">{reviewingEditOrder.notes || '—'}</span>,
+            newContent: <span className="font-black text-emerald-950 leading-relaxed">{pendingData.notes || '—'}</span>
+          });
+        } else if (reviewingEditOrder.notes) {
+          unchangedNormalList.push({
+            label: 'توضیحات سفارش',
+            icon: '📝',
+            value: reviewingEditOrder.notes
+          });
+        }
+
         return (
-          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 overflow-y-auto">
-            <div className="bg-white rounded-2xl max-w-3xl w-full p-5 space-y-4 shadow-2xl border border-slate-200 animate-scale-up max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl max-w-4xl w-full p-5 sm:p-7 space-y-5 shadow-2xl border border-slate-200 animate-scale-up max-h-[92vh] overflow-y-auto text-right">
               
               {/* Header */}
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 bg-amber-100 text-amber-800 rounded-xl">
-                    <Edit className="w-5 h-5" />
+              <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 rounded-2xl shadow-md">
+                    <Edit className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-slate-800 text-base">
-                      بررسی درخواست ویرایش سفارش #{reviewingEditOrder.orderNumber}
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      ثبت شده توسط نمایندگی: <strong>{reviewingEditOrder.customerName}</strong> ({reviewingEditOrder.agentCode})
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-black text-slate-900 text-base sm:text-lg">
+                        بررسی و تایید ویرایش سفارش
+                      </h3>
+                      <span className="bg-slate-900 text-amber-400 font-mono text-xs px-2.5 py-0.5 rounded-full font-bold">
+                        #{reviewingEditOrder.orderNumber}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      درخواست اصلاحیه از: <strong className="text-slate-800 font-bold">{reviewingEditOrder.customerName}</strong> (کد نماینده: <span className="font-mono">{reviewingEditOrder.agentCode}</span>)
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setReviewingEditOrder(null)}
-                  className="text-slate-400 hover:text-slate-600 p-1 rounded-lg text-lg cursor-pointer"
+                  className="text-slate-400 hover:text-slate-700 p-2 rounded-xl text-xl cursor-pointer hover:bg-slate-100 transition-colors"
                 >
                   ✕
                 </button>
               </div>
 
-              {/* Informational Box */}
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-950 text-xs space-y-1">
-                <span className="font-bold block text-sm">📌 راهنمای مدیر بازرگانی:</span>
-                <p>تایید این ویرایش، <strong>هیچ‌گونه تاثیری روی اولویت صف بارگیری یا نوبت سفارش در فروشگاه و کارخانه ندارد</strong>. در صورت تایید، مشخصات جدید جایگزین فاکتور خواهد شد.</p>
-              </div>
+              {/* SECTION 1: ONLY CHANGED ITEMS COMPARISON */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                    <span className="p-1.5 bg-amber-500 text-slate-950 rounded-lg text-xs font-black">⚡</span>
+                    <span>موارد تغییر یافته (مقایسه قبل و بعد):</span>
+                    <span className="bg-amber-100 text-amber-900 border border-amber-300 font-mono text-xs px-2.5 py-0.5 rounded-full font-black">
+                      {changedRows.length} مورد ویرایش
+                    </span>
+                  </h4>
+                  <span className="text-[11px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-bold">
+                    نوبت سفارش در کارخانه بدون تغییر حفظ می‌گردد
+                  </span>
+                </div>
 
-              {/* Side by Side Comparison Table */}
-              <div className="overflow-x-auto rounded-xl border border-slate-200 text-xs">
-                <table className="w-full text-right divide-y divide-slate-200">
-                  <thead className="bg-slate-100 text-slate-700 font-bold">
-                    <tr>
-                      <th className="p-3">عنوان فیلد</th>
-                      <th className="p-3 bg-slate-100">مشخصات فعلی فاکتور (قبلی)</th>
-                      <th className="p-3 bg-amber-100/70 text-amber-900">مشخصات جدید پیشنهادی (ویرایش شده)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-800">
-                    
-                    {/* Buyer Name */}
-                    <tr className={isDiff(reviewingEditOrder.buyerName, pendingData.buyerName) ? 'bg-emerald-50/70' : ''}>
-                      <td className="p-2.5 font-bold text-slate-600">نام خریدار / پروژه:</td>
-                      <td className="p-2.5">{reviewingEditOrder.buyerName || '—'}</td>
-                      <td className="p-2.5 font-bold text-emerald-900">
-                        {pendingData.buyerName || '—'}
-                        {isDiff(reviewingEditOrder.buyerName, pendingData.buyerName) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
-                      </td>
-                    </tr>
-
-                    {/* Phone Number */}
-                    <tr className={isDiff(reviewingEditOrder.phoneNumber, pendingData.phoneNumber) ? 'bg-emerald-50/70' : ''}>
-                      <td className="p-2.5 font-bold text-slate-600">شماره تماس:</td>
-                      <td className="p-2.5 font-mono">{reviewingEditOrder.phoneNumber || '—'}</td>
-                      <td className="p-2.5 font-mono font-bold text-emerald-900">
-                        {pendingData.phoneNumber || '—'}
-                        {isDiff(reviewingEditOrder.phoneNumber, pendingData.phoneNumber) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
-                      </td>
-                    </tr>
-
-                    {/* Destination City */}
-                    <tr className={isDiff(reviewingEditOrder.destinationCity, pendingData.destinationCity) ? 'bg-emerald-50/70' : ''}>
-                      <td className="p-2.5 font-bold text-slate-600">شهر مقصد:</td>
-                      <td className="p-2.5">{reviewingEditOrder.destinationCity || '—'}</td>
-                      <td className="p-2.5 font-bold text-emerald-900">
-                        {pendingData.destinationCity || '—'}
-                        {isDiff(reviewingEditOrder.destinationCity, pendingData.destinationCity) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
-                      </td>
-                    </tr>
-
-                    {/* Vehicle Type */}
-                    <tr className={isDiff(reviewingEditOrder.vehicleDetails?.vehicleType, pendingData.vehicleType) ? 'bg-emerald-50/70' : ''}>
-                      <td className="p-2.5 font-bold text-slate-600">نوع ناوگان باربری:</td>
-                      <td className="p-2.5">{reviewingEditOrder.vehicleDetails?.vehicleType || 'تریلی'}</td>
-                      <td className="p-2.5 font-bold text-emerald-900">
-                        {pendingData.vehicleType || '—'}
-                        {isDiff(reviewingEditOrder.vehicleDetails?.vehicleType, pendingData.vehicleType) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
-                      </td>
-                    </tr>
-
-                    {/* Address */}
-                    <tr className={isDiff(reviewingEditOrder.exactAddress, pendingData.exactAddress) ? 'bg-emerald-50/70' : ''}>
-                      <td className="p-2.5 font-bold text-slate-600">آدرس دقیق تخلیه:</td>
-                      <td className="p-2.5">{reviewingEditOrder.exactAddress || '—'}</td>
-                      <td className="p-2.5 font-bold text-emerald-900">
-                        {pendingData.exactAddress || '—'}
-                        {isDiff(reviewingEditOrder.exactAddress, pendingData.exactAddress) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
-                      </td>
-                    </tr>
-
-                    {/* Delivery Location Map URL */}
-                    <tr className={isDiff(reviewingEditOrder.deliveryLocationUrl, pendingData.deliveryLocationUrl) ? 'bg-emerald-50/70' : ''}>
-                      <td className="p-2.5 font-bold text-slate-600">موقعیت نقشه:</td>
-                      <td className="p-2.5 font-mono text-[11px] truncate max-w-[150px]">{reviewingEditOrder.deliveryLocationUrl || 'ثبت نشده'}</td>
-                      <td className="p-2.5 font-mono text-[11px] font-bold text-emerald-900 truncate max-w-[150px]">
-                        {pendingData.deliveryLocationUrl || 'ثبت نشده'}
-                        {isDiff(reviewingEditOrder.deliveryLocationUrl, pendingData.deliveryLocationUrl) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
-                      </td>
-                    </tr>
-
-                    {/* Payment Tracking Code */}
-                    <tr className={isDiff(reviewingEditOrder.paymentTrackingCode, pendingData.paymentTrackingCode) ? 'bg-emerald-50/70' : ''}>
-                      <td className="p-2.5 font-bold text-slate-600">کد فیش واریزی:</td>
-                      <td className="p-2.5 font-mono">{reviewingEditOrder.paymentTrackingCode || '—'}</td>
-                      <td className="p-2.5 font-mono font-bold text-emerald-900">
-                        {pendingData.paymentTrackingCode || '—'}
-                        {isDiff(reviewingEditOrder.paymentTrackingCode, pendingData.paymentTrackingCode) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
-                      </td>
-                    </tr>
-
-                    {/* Payment Receipt Image/File Attachment */}
-                    <tr className={(reviewingEditOrder.paymentReceiptUrl || pendingData.paymentReceiptUrl) ? 'bg-slate-50/60' : ''}>
-                      <td className="p-2.5 font-bold text-slate-600">تصویر فیش بانکی پیوست:</td>
-                      <td className="p-2.5">
-                        {reviewingEditOrder.paymentReceiptUrl ? (
-                          <button
-                            type="button"
-                            onClick={() => setViewReceiptModalUrl({ url: reviewingEditOrder.paymentReceiptUrl!, name: reviewingEditOrder.paymentReceiptName || 'فیش_قبلی.jpg' })}
-                            className="text-[11px] bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-1 px-2.5 rounded-lg inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Paperclip className="w-3.5 h-3.5" />
-                            <span>مشاهده فیش قبلی</span>
-                          </button>
-                        ) : (
-                          <span className="text-slate-400">فایلی پیوست نبود</span>
-                        )}
-                      </td>
-                      <td className="p-2.5 font-bold text-emerald-900">
-                        {pendingData.paymentReceiptUrl ? (
-                          <button
-                            type="button"
-                            onClick={() => setViewReceiptModalUrl({ url: pendingData.paymentReceiptUrl, name: pendingData.paymentReceiptName || 'فیش_جدید.jpg' })}
-                            className="text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white font-black py-1 px-3 rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
-                          >
-                            <Paperclip className="w-3.5 h-3.5 text-emerald-100" />
-                            <span>📎 مشاهده فیش جدید پیوست‌شده ({pendingData.paymentReceiptName || 'فایل'})</span>
-                          </button>
-                        ) : (
-                          <span className="text-slate-500 font-normal">بدون تغییر در فایل پیوست</span>
-                        )}
-                      </td>
-                    </tr>
-
-                    {/* Products / Items */}
-                    <tr className="bg-slate-50/50">
-                      <td className="p-2.5 font-bold text-slate-600">اقلام و مقادیر سبد خرید:</td>
-                      <td className="p-2.5 space-y-1">
-                        {currentItems.map((it: any, idx: number) => (
-                          <div key={idx} className="font-semibold">
-                            • {it.productName}: <strong>{it.quantity?.toLocaleString()}</strong> {it.unit}
-                          </div>
+                {changedRows.length > 0 ? (
+                  <div className="overflow-hidden rounded-2xl border-2 border-amber-400/80 shadow-xs bg-white">
+                    <table className="w-full text-right divide-y divide-amber-200/80">
+                      <thead className="bg-amber-100/70 text-amber-950 font-bold text-xs">
+                        <tr>
+                          <th className="p-3 w-1/4 sm:w-1/5">عنوان مشخصه</th>
+                          <th className="p-3 w-[37.5%] sm:w-2/5 bg-slate-100/90 text-slate-600">
+                            📋 مقدار قبلی فاکتور (قبل از ویرایش)
+                          </th>
+                          <th className="p-3 w-[37.5%] sm:w-2/5 bg-emerald-100/80 text-emerald-950 font-black">
+                            ✨ مقدار جدید پیشنهادی (پس از ویرایش)
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 text-xs font-sans">
+                        {changedRows.map((row) => (
+                          <tr key={row.id} className="hover:bg-amber-50/40 transition-colors">
+                            <td className="p-3 font-bold text-slate-800 align-top">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">{row.icon}</span>
+                                <span>{row.label}:</span>
+                              </div>
+                            </td>
+                            <td className="p-3 align-top bg-slate-50/50">
+                              <div className="p-2.5 rounded-xl bg-slate-100 border border-slate-200/80 text-slate-600">
+                                {row.oldContent}
+                              </div>
+                            </td>
+                            <td className="p-3 align-top bg-emerald-50/30">
+                              <div className="p-2.5 rounded-xl bg-emerald-100/90 border-2 border-emerald-400 text-emerald-950 shadow-2xs">
+                                {row.newContent}
+                              </div>
+                            </td>
+                          </tr>
                         ))}
-                      </td>
-                      <td className="p-2.5 space-y-1 font-bold text-emerald-900 bg-emerald-50/40">
-                        {pendingItems.length > 0 ? (
-                          pendingItems.map((it: any, idx: number) => (
-                            <div key={idx} className="font-bold">
-                              • {it.productName}: <strong>{it.quantity?.toLocaleString()}</strong> {it.unit}
-                            </div>
-                          ))
-                        ) : (
-                          '— بدون تغییر —'
-                        )}
-                      </td>
-                    </tr>
-
-                    {/* Notes */}
-                    <tr className={isDiff(reviewingEditOrder.notes, pendingData.notes) ? 'bg-emerald-50/70' : ''}>
-                      <td className="p-2.5 font-bold text-slate-600">توضیحات و یادداشت:</td>
-                      <td className="p-2.5">{reviewingEditOrder.notes || '—'}</td>
-                      <td className="p-2.5 font-bold text-emerald-900">
-                        {pendingData.notes || '—'}
-                        {isDiff(reviewingEditOrder.notes, pendingData.notes) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
-                      </td>
-                    </tr>
-
-                  </tbody>
-                </table>
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-emerald-900 text-xs text-center font-bold">
+                    هیچ موردی نسبت به فاکتور قبلی تغییر نکرده است.
+                  </div>
+                )}
               </div>
+
+              {/* SECTION 2: UNCHANGED ITEMS (NORMAL STATE) */}
+              {unchangedNormalList.length > 0 && (
+                <div className="space-y-2.5 pt-2 border-t border-slate-200">
+                  <h4 className="text-xs font-black text-slate-700 flex items-center gap-1.5">
+                    <span className="text-slate-400 font-mono">▪</span>
+                    <span>سایر مشخصات سفارش (حالت عادی / بدون تغییر):</span>
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 text-xs bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200">
+                    {unchangedNormalList.map((item, idx) => (
+                      <div key={idx} className="p-2.5 bg-white rounded-xl border border-slate-200/80 space-y-1">
+                        <span className="text-[10.5px] text-slate-500 flex items-center gap-1">
+                          <span>{item.icon}</span>
+                          <span>{item.label}:</span>
+                        </span>
+                        <div className="text-slate-800 font-bold">
+                          {item.value}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Actions Footer */}
-              <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-200">
                 <button
                   type="button"
                   onClick={() => {
-                    if (onRejectOrderEdit) {
-                      onRejectOrderEdit(reviewingEditOrder.id);
-                      setReviewingEditOrder(null);
-                    }
+                    askConfirm(
+                      'عدم موافقت با ویرایش سفارش',
+                      `آیا از رد درخواست ویرایش سفارش #${reviewingEditOrder.orderNumber} اطمینان دارید؟ فاکتور قبلی بدون تغییر باقی خواهد ماند.`,
+                      () => {
+                        if (onRejectOrderEdit) {
+                          onRejectOrderEdit(reviewingEditOrder.id);
+                          setReviewingEditOrder(null);
+                        }
+                      }
+                    );
                   }}
-                  className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                  className="w-full sm:w-auto px-5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-black rounded-xl border border-rose-300 transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs"
                 >
-                  ❌ عدم موافقت و رد ویرایش
+                  <XCircle className="w-4 h-4" />
+                  <span>عدم موافقت و رد ویرایش</span>
                 </button>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
                   <button
                     type="button"
                     onClick={() => setReviewingEditOrder(null)}
-                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+                    className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer transition-colors"
                   >
-                    بستن
+                    انصراف و بستن
                   </button>
                   <button
                     type="button"
@@ -4575,9 +4969,9 @@ export default function ManagerDashboard({
                         setReviewingEditOrder(null);
                       }
                     }}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
+                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 hover:scale-[1.02] transition-all"
                   >
-                    <Check className="w-4 h-4" />
+                    <CheckCircle2 className="w-4 h-4" />
                     <span>تایید موافقت و اعمال تغییرات روی فاکتور</span>
                   </button>
                 </div>
