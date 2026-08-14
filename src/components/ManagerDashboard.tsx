@@ -1361,6 +1361,17 @@ export default function ManagerDashboard({
                           سفارش صادراتی ({order.destinationCountry || 'خارجی'})
                         </span>
                       )}
+                      {order.paymentReceiptUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setViewReceiptModalUrl({ url: order.paymentReceiptUrl!, name: order.paymentReceiptName || 'فیش_واریزی.jpg' })}
+                          className="text-[10.5px] bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-1 px-3 rounded-full flex items-center gap-1.5 shadow-xs transition-all cursor-pointer ring-1 ring-emerald-400/50 hover:scale-105"
+                          title={`مشاهده فیش واریزی پیوست شده: ${order.paymentReceiptName || ''}`}
+                        >
+                          <Paperclip className="w-3.5 h-3.5 text-emerald-100" />
+                          <span>📎 فیش پیوست شده (مشاهده)</span>
+                        </button>
+                      )}
                     </div>
                     <span className="text-xs font-mono font-bold text-slate-700">{order.orderNumber}</span>
                   </div>
@@ -1757,6 +1768,17 @@ export default function ManagerDashboard({
                             >
                               <Edit className="w-3 h-3" />
                               <span>⚠️ اصلاحیه جدید</span>
+                            </button>
+                          )}
+                          {order.paymentReceiptUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setViewReceiptModalUrl({ url: order.paymentReceiptUrl!, name: order.paymentReceiptName || 'فیش_واریزی.jpg' })}
+                              className="text-[9px] bg-emerald-600 hover:bg-emerald-700 text-white font-black py-0.5 px-2 rounded-full flex items-center gap-1 shadow-xs transition-all cursor-pointer ring-1 ring-emerald-400/40"
+                              title={`مشاهده فیش پیوست: ${order.paymentReceiptName || ''}`}
+                            >
+                              <Paperclip className="w-3 h-3 text-emerald-100" />
+                              <span>📎 فیش</span>
                             </button>
                           )}
                         </div>
@@ -3874,6 +3896,20 @@ export default function ManagerDashboard({
                           <span className="text-[11px] text-slate-500 font-bold bg-slate-100/80 px-2 py-0.5 rounded-md flex items-center gap-0.5">
                             📍 {order.destinationCity}
                           </span>
+                          {order.paymentReceiptUrl && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewReceiptModalUrl({ url: order.paymentReceiptUrl!, name: order.paymentReceiptName || 'فیش_واریزی.jpg' });
+                              }}
+                              className="text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-0.5 px-2 rounded-full flex items-center gap-1 shadow-xs transition-all cursor-pointer ring-1 ring-emerald-400/40"
+                              title={`مشاهده فیش پیوست: ${order.paymentReceiptName || ''}`}
+                            >
+                              <Paperclip className="w-3 h-3 text-emerald-100" />
+                              <span>📎 فیش</span>
+                            </button>
+                          )}
                         </div>
 
                         {/* Middle Group: Main Product Summary (Hidden on tiny screens if space limited, visible on sm+) */}
@@ -4249,6 +4285,18 @@ export default function ManagerDashboard({
                   {selectedOrderForHistory.paymentTrackingCode && (
                     <p>💳 <strong>کد پیگیری پیش‌پرداخت:</strong> <span className="font-mono font-bold text-emerald-800">{selectedOrderForHistory.paymentTrackingCode}</span></p>
                   )}
+                  {selectedOrderForHistory.paymentReceiptUrl && (
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setViewReceiptModalUrl({ url: selectedOrderForHistory.paymentReceiptUrl!, name: selectedOrderForHistory.paymentReceiptName || 'فیش_واریزی.jpg' })}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+                      >
+                        <Paperclip className="w-4 h-4 text-emerald-100" />
+                        <span>📎 مشاهده تصویر فیش بانکی پیوست‌شده ({selectedOrderForHistory.paymentReceiptName || 'فایل واریزی'})</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -4423,6 +4471,39 @@ export default function ManagerDashboard({
                       <td className="p-2.5 font-mono font-bold text-emerald-900">
                         {pendingData.paymentTrackingCode || '—'}
                         {isDiff(reviewingEditOrder.paymentTrackingCode, pendingData.paymentTrackingCode) && <span className="mr-2 text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold">تغییر یافته</span>}
+                      </td>
+                    </tr>
+
+                    {/* Payment Receipt Image/File Attachment */}
+                    <tr className={(reviewingEditOrder.paymentReceiptUrl || pendingData.paymentReceiptUrl) ? 'bg-slate-50/60' : ''}>
+                      <td className="p-2.5 font-bold text-slate-600">تصویر فیش بانکی پیوست:</td>
+                      <td className="p-2.5">
+                        {reviewingEditOrder.paymentReceiptUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => setViewReceiptModalUrl({ url: reviewingEditOrder.paymentReceiptUrl!, name: reviewingEditOrder.paymentReceiptName || 'فیش_قبلی.jpg' })}
+                            className="text-[11px] bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-1 px-2.5 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Paperclip className="w-3.5 h-3.5" />
+                            <span>مشاهده فیش قبلی</span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-400">فایلی پیوست نبود</span>
+                        )}
+                      </td>
+                      <td className="p-2.5 font-bold text-emerald-900">
+                        {pendingData.paymentReceiptUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => setViewReceiptModalUrl({ url: pendingData.paymentReceiptUrl, name: pendingData.paymentReceiptName || 'فیش_جدید.jpg' })}
+                            className="text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white font-black py-1 px-3 rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                          >
+                            <Paperclip className="w-3.5 h-3.5 text-emerald-100" />
+                            <span>📎 مشاهده فیش جدید پیوست‌شده ({pendingData.paymentReceiptName || 'فایل'})</span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-500 font-normal">بدون تغییر در فایل پیوست</span>
+                        )}
                       </td>
                     </tr>
 

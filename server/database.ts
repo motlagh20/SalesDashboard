@@ -651,59 +651,24 @@ function executeQuery(sql: string, values: any[] = []): any {
 
   // 18. INSERT INTO orders
   if (/INSERT\s+INTO\s+orders/i.test(cleanSql)) {
-    const id = values[0];
-    const orderNumber = values[1];
-    const customerName = values[2];
-    const agentCode = values[3];
-    const productId = values[4];
-    const productName = values[5];
-    const quantity = values[6];
-    const unit = values[7];
-    const destinationCity = values[8];
-    const exactAddress = values[9];
-    const phoneNumber = values[10];
-
-    let buyerName = null;
-    let notes = null;
-    let createdAt = null;
-    let status = null;
-    let itemsJson = null;
-    let paymentTrackingCode = null;
-
-    if (values.length >= 17) {
-      buyerName = values[11];
-      notes = values[12];
-      createdAt = values[13];
-      status = values[14];
-      itemsJson = values[15];
-      paymentTrackingCode = values[16];
-    } else {
-      notes = values[11];
-      createdAt = values[12];
-      status = values[13];
-      itemsJson = values[14];
-      paymentTrackingCode = values[15];
-    }
-
-    const priorityIndex = 0;
-
-    jsonData.orders.push({
-      id,
-      orderNumber,
-      customerName,
-      agentCode,
-      productId,
-      productName,
-      quantity: Number(quantity),
-      unit,
-      destinationCity,
-      exactAddress: exactAddress || null,
-      phoneNumber,
-      buyerName: buyerName || null,
-      notes: notes || null,
-      createdAt,
-      status,
-      priorityIndex: Number(priorityIndex) || 0,
+    const colsMatch = cleanSql.match(/INSERT\s+INTO\s+orders\s*\((.*?)\)\s*VALUES/i);
+    const newOrder: any = {
+      id: values[0] || `ord-${Date.now()}`,
+      orderNumber: values[1] || '',
+      customerName: values[2] || '',
+      agentCode: values[3] || '',
+      productId: values[4] || '',
+      productName: values[5] || '',
+      quantity: Number(values[6]) || 0,
+      unit: values[7] || 'مترمربع',
+      destinationCity: values[8] || '',
+      exactAddress: values[9] || null,
+      phoneNumber: values[10] || '',
+      buyerName: null,
+      notes: null,
+      createdAt: new Date().toISOString(),
+      status: 'PENDING_APPROVAL',
+      priorityIndex: 0,
       sentToFactoryAt: null,
       rejectionReason: null,
       vehicleType: null,
@@ -712,18 +677,66 @@ function executeQuery(sql: string, values: any[] = []): any {
       licensePlate: null,
       shippingAgency: null,
       estimatedArrival: null,
-      itemsJson: itemsJson || null,
-      paymentTrackingCode: paymentTrackingCode || null,
+      itemsJson: null,
+      paymentTrackingCode: null,
+      paymentReceiptUrl: null,
+      paymentReceiptName: null,
       billOfLadingNumber: null,
-      shippingCompanyId: null
-    });
+      shippingCompanyId: null,
+      isExportOrder: 0,
+      destinationCountry: null,
+      deliveryLocationUrl: null,
+      hasPendingEdit: 0,
+      pendingEditData: null
+    };
+
+    if (colsMatch) {
+      const colNames = colsMatch[1].split(',').map(c => c.trim().replace(/[`"']/g, ''));
+      let valIndex = 0;
+      colNames.forEach((col) => {
+        if (col === 'priorityIndex' && !cleanSql.includes('?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,')) {
+          // Check if priorityIndex was hardcoded like ", 0," in VALUES
+          // If so, it might not consume a placeholder
+        }
+        // Match against placeholder values
+        if (valIndex < values.length) {
+          const val = values[valIndex];
+          if (col === 'quantity' || col === 'priorityIndex') {
+            newOrder[col] = val !== null && val !== undefined ? Number(val) : 0;
+          } else if (col === 'isExportOrder' || col === 'hasPendingEdit') {
+            newOrder[col] = val ? 1 : 0;
+          } else {
+            newOrder[col] = val;
+          }
+          valIndex++;
+        }
+      });
+    } else {
+      // Positional fallback
+      newOrder.buyerName = values[11] || null;
+      newOrder.notes = values[12] || null;
+      newOrder.createdAt = values[13] || new Date().toISOString();
+      newOrder.status = values[14] || 'PENDING_APPROVAL';
+      newOrder.itemsJson = values[15] || null;
+      newOrder.paymentTrackingCode = values[16] || null;
+      newOrder.paymentReceiptUrl = values[17] || null;
+      newOrder.paymentReceiptName = values[18] || null;
+      newOrder.isExportOrder = values[19] ? 1 : 0;
+      newOrder.destinationCountry = values[20] || null;
+      newOrder.deliveryLocationUrl = values[21] || null;
+    }
+
+    // Ensure array exists
+    if (!jsonData.orders) jsonData.orders = [];
+    jsonData.orders.push(newOrder);
     saveJsonData(jsonData);
-    return [{ affectedRows: 1 }];
+    return [{ affectedRows: 1, insertId: newOrder.id }];
   }
 
   // 19. INSERT INTO order_history
   if (/INSERT\s+INTO\s+order_history/i.test(cleanSql)) {
     const [orderId, status, updatedAt, comment] = values;
+    if (!jsonData.order_history) jsonData.order_history = [];
     jsonData.order_history.push({
       id: jsonData.order_history.length + 1,
       orderId,
@@ -748,12 +761,17 @@ function executeQuery(sql: string, values: any[] = []): any {
         let valIdx = 0;
         assignments.forEach(assign => {
           const parts = assign.split('=').map(s => s.trim());
-          const colName = parts[0];
+          const colName = parts[0]?.replace(/[`"']/g, '');
           const valExpr = parts[1];
           if (colName) {
             let finalVal: any = undefined;
-            if (valExpr === '?') {
-              finalVal = values[valIdx++];
+            if (valExpr === '?' || (valExpr && valExpr.includes('?'))) {
+              const currentVal = values[valIdx++];
+              if (valExpr.toUpperCase().includes('COALESCE')) {
+                finalVal = currentVal !== null && currentVal !== undefined && currentVal !== '' ? currentVal : ord[colName];
+              } else {
+                finalVal = currentVal;
+              }
             } else if (valExpr === 'NULL' || valExpr === 'null') {
               finalVal = null;
             } else if (valExpr === '0') {
