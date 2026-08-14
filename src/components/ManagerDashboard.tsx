@@ -9,6 +9,7 @@ import { Order, OrderStatus, Product, Agent, ShippingCompany, PermanentDriver, A
 import { parseAndHydrateItemsJson, serializeItemsJson } from '../utils/itemsJsonHelper';
 import PermanentDriversManager from './PermanentDriversManager';
 import CommercialAnalyticsDashboard from './CommercialAnalyticsDashboard';
+import { BaseDefinitionsDashboard } from './BaseDefinitionsDashboard';
 import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary } from '../data/iranLocations';
 import { 
   BarChart3,
@@ -143,8 +144,23 @@ export default function ManagerDashboard({
   showToast,
   askConfirm,
 }: ManagerDashboardProps) {
+  // Independent Base Data Page State (صفحه مستقل اطلاعات پایه و دسترسی)
+  const isInitialBaseTab = initialTab === 'PRODUCTS_MGMT' || initialTab === 'AGENTS_MGMT' || initialTab === 'SHIPPING_MGMT' || initialTab === 'USERS_MGMT' || initialTab === 'PARTNERS_MGMT';
+  const [isBaseDataPage, setIsBaseDataPage] = useState<boolean>(isInitialBaseTab);
+  const [baseDataSubTab, setBaseDataSubTab] = useState<'AGENTS' | 'USERS' | 'PRODUCTS' | 'SHIPPING'>(() => {
+    if (initialTab === 'PRODUCTS_MGMT') return 'PRODUCTS';
+    if (initialTab === 'SHIPPING_MGMT' || initialPartnerSubTab === 'SHIPPING') return 'SHIPPING';
+    if (initialTab === 'AGENTS_MGMT' || initialPartnerSubTab === 'AGENTS') return 'AGENTS';
+    return 'USERS';
+  });
+
   // Navigation tabs for the Manager workspace
-  const [activeTab, setActiveTab] = useState<PanelTab>(initialTab || 'PENDING_APPROVAL');
+  const [activeTab, setActiveTab] = useState<PanelTab>(() => {
+    if (initialTab && !['PRODUCTS_MGMT', 'AGENTS_MGMT', 'SHIPPING_MGMT', 'USERS_MGMT', 'PARTNERS_MGMT'].includes(initialTab)) {
+      return initialTab;
+    }
+    return 'PENDING_APPROVAL';
+  });
   
   // Sub-filter for combined Partners & Users view
   const [partnerSubTab, setPartnerSubTab] = useState<'AGENTS' | 'SHIPPING' | 'USERS' | 'DRIVERS'>(initialPartnerSubTab || 'USERS');
@@ -1033,261 +1049,276 @@ export default function ManagerDashboard({
     REJECTED: { text: 'رد شده توسط مدیریت', css: 'bg-rose-100 text-rose-800' },
   };
 
+  // If user opened the independent Base Definitions & Access page
+  if (isBaseDataPage) {
+    return (
+      <BaseDefinitionsDashboard
+        agents={agents}
+        users={users}
+        products={products}
+        shippingCompanies={shippingCompanies}
+        onClose={() => setIsBaseDataPage(false)}
+        initialSubTab={baseDataSubTab}
+        onAddAgent={onAddAgent}
+        onUpdateAgent={onUpdateAgent}
+        onToggleAgent={onToggleAgent}
+        onDeleteAgent={onDeleteAgent}
+        fetchUsers={fetchUsers}
+        onAddProduct={onAddProduct}
+        onUpdateProduct={onUpdateProduct}
+        onToggleProduct={onToggleProduct}
+        onDeleteProduct={onDeleteProduct}
+        onAddShippingCompany={onAddShippingCompany}
+        onUpdateShippingCompany={onUpdateShippingCompany}
+        onToggleShippingCompany={onToggleShippingCompany}
+        onDeleteShippingCompany={onDeleteShippingCompany}
+        showToast={showToast}
+        askConfirm={askConfirm}
+      />
+    );
+  }
+
   return (
-    <div className="space-y-6 text-right dir-rtl font-sans" id="manager-dashboard">
+    <div className="space-y-4 text-right dir-rtl font-sans" id="manager-dashboard">
       
-      {/* High-level status cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="manager-metrics-row">
+      {/* 
+        Unified Process Pipeline & Command Hub:
+        Merges high-level metrics and interactive tab filters into a single compact, high-efficiency grid.
+      */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 md:p-5 space-y-4" id="manager-control-hub">
         
-        {/* Metric 1 */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between" id="metric-pending">
-          <div className="p-2.5 bg-amber-50 rounded-lg text-amber-600">
-            <Clock className="w-5 h-5" />
+        {/* Top Header Row: Title Context & Base Data Quick Action */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+            <h2 className="text-sm md:text-base font-extrabold text-slate-800 flex items-center gap-2">
+              <span>کارتابل سفارشات مدیریت بازرگانی</span>
+              <span className="bg-slate-100 text-slate-600 font-mono text-[11px] px-2 py-0.5 rounded-full font-bold">
+                {orders.length} کل سفارشات
+              </span>
+            </h2>
           </div>
-          <div className="text-right">
-            <span className="text-slate-400 text-[10px] block">در انتظار بررسی</span>
-            <strong className="text-base font-bold text-slate-800 font-mono">{totalPending} مورد</strong>
+
+          <div className="flex items-center gap-2">
+            {/* Direct Shortcut to the independent Base Definitions & Access page */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsBaseDataPage(true);
+                fetchUsers();
+              }}
+              className="bg-slate-50 hover:bg-indigo-50 text-indigo-950 border border-slate-200 hover:border-indigo-300 px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-2xs group"
+              id="open-base-data-btn"
+              title="ورود به صفحه مستقل تعریف اطلاعات پایه و دسترسی کاربران"
+            >
+              <ShieldCheck className="w-4 h-4 text-indigo-600 group-hover:scale-110 transition-transform" />
+              <span>اطلاعات پایه و دسترسی‌ها</span>
+              <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold">
+                {agents.length + users.length + products.length + shippingCompanies.length}
+              </span>
+            </button>
           </div>
         </div>
 
-        {/* Metric 2 */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between" id="metric-priority">
-          <div className="p-2.5 bg-indigo-50 rounded-lg text-indigo-600">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-          <div className="text-right">
-            <span className="text-slate-400 text-[10px] block">آماده ارسال / اولویت‌بندی</span>
-            <strong className="text-base font-bold text-slate-800 font-mono">{approvedButPendingDispatch.length} سفارش</strong>
-          </div>
-        </div>
-
-        {/* Metric 3 */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between" id="metric-factory">
-          <div className="p-2.5 bg-blue-50 rounded-lg text-blue-600">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <div className="text-right">
-            <span className="text-slate-400 text-[10px] block">در خط کارخانه</span>
-            <strong className="text-base font-bold text-slate-800 font-mono">{sentToFactoryCount} سفارش</strong>
-          </div>
-        </div>
-
-        {/* Metric 4 */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between" id="metric-in-transit">
-          <div className="p-2.5 bg-emerald-50 rounded-lg text-emerald-600">
-            <Navigation className="w-5 h-5" />
-          </div>
-          <div className="text-right">
-            <span className="text-slate-400 text-[10px] block">در مسیر بارگیری/حمل</span>
-            <strong className="text-base font-bold text-slate-800 font-mono">{inTransitCount} سفارش</strong>
-          </div>
-        </div>
-      </div>
-
-      {/* Main workspace navigation tabs */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6" id="manager-control-hub">
-        
-        {/* Workspace navigation: Visually separated into Order Operations & Base System Definitions */}
-        <div className="space-y-4 border-b border-slate-200 pb-5 mb-5">
+        {/* 
+          Interactive 4-Pillar Pipeline Switcher:
+          Each card serves as BOTH a live informative KPI AND an interactive filter button.
+        */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" id="manager-pipeline-tabs">
           
-          {/* Top Row: Group 1 & Group 2 Cards */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3" id="manager-panel-tabs">
-            
-            {/* Group 1: Order Operations & Analytics (7 Cols) */}
-            <div className="lg:col-span-7 bg-slate-50 border border-slate-200/90 rounded-2xl p-3 shadow-2xs space-y-2">
-              <div className="flex items-center justify-between border-b border-slate-200/80 pb-2 px-1">
-                <span className="text-[11px] font-black text-slate-700 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                  🛒 مدیریت و پردازش سفارشات (جریان لایو)
-                </span>
-                <span className="text-[10px] text-slate-500 font-medium">سفارشات، ارسال‌ها و آمار</span>
+          {/* Pillar 1: Received & Pending Approval */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('PENDING_APPROVAL')}
+            className={`text-right p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2.5 relative overflow-hidden ${
+              activeTab === 'PENDING_APPROVAL'
+                ? 'bg-amber-50/80 border-amber-400 ring-2 ring-amber-400/40 shadow-xs'
+                : 'bg-white hover:bg-slate-50/80 border-slate-200/90 text-slate-700 hover:border-amber-200'
+            }`}
+            id="tab-pending-approval"
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className={`p-2 rounded-lg ${activeTab === 'PENDING_APPROVAL' ? 'bg-amber-500 text-slate-950' : 'bg-amber-50 text-amber-600'}`}>
+                <Clock className="w-4 h-4" />
               </div>
-              
-              <div className="flex flex-wrap gap-1.5">
-                {/* Tab 0: Commercial Analytics Dashboard */}
-                <button
-                  onClick={() => setActiveTab('COMMERCIAL_ANALYTICS')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                    activeTab === 'COMMERCIAL_ANALYTICS'
-                      ? 'bg-amber-600 text-white shadow-sm ring-2 ring-amber-300'
-                      : 'bg-white text-amber-900 border border-amber-200 hover:bg-amber-100'
-                  }`}
-                >
-                  <BarChart3 className="w-3.5 h-3.5 text-amber-700" />
-                  <span>آمار و تحلیل بازرگانی</span>
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                </button>
+              <span className={`text-sm font-black font-mono px-2.5 py-0.5 rounded-full ${
+                totalPending > 0 ? 'bg-amber-500 text-slate-950 animate-pulse' : 'bg-slate-100 text-slate-600'
+              }`}>
+                {totalPending} مورد
+              </span>
+            </div>
+            <div>
+              <div className="font-extrabold text-xs text-slate-900">۱. سفارشات رسیده (بررسی مالی)</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">بررسی اعتبار مالی و تایید بازرگانی</div>
+            </div>
+            {activeTab === 'PENDING_APPROVAL' && (
+              <span className="absolute bottom-0 right-0 left-0 h-1 bg-amber-500"></span>
+            )}
+          </button>
 
-                {/* Tab 1: Received Orders (formerly "کارتابل تایید سفارشات") */}
-                <button
-                  onClick={() => setActiveTab('PENDING_APPROVAL')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-                    activeTab === 'PENDING_APPROVAL'
-                      ? 'bg-amber-500 text-slate-950 shadow-sm ring-2 ring-amber-400'
-                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <Clock className="w-3.5 h-3.5 text-amber-600" />
-                  <span>سفارشات رسیده ({totalPending})</span>
-                </button>
+          {/* Pillar 2: Approved & Ready for Dispatch to Sales */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('APPROVED_PRIORITIES')}
+            className={`text-right p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2.5 relative overflow-hidden ${
+              activeTab === 'APPROVED_PRIORITIES'
+                ? 'bg-indigo-50/80 border-indigo-400 ring-2 ring-indigo-400/40 shadow-xs'
+                : 'bg-white hover:bg-slate-50/80 border-slate-200/90 text-slate-700 hover:border-indigo-200'
+            }`}
+            id="tab-approved-priorities"
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className={`p-2 rounded-lg ${activeTab === 'APPROVED_PRIORITIES' ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
+                <Layers className="w-4 h-4" />
+              </div>
+              <span className={`text-sm font-black font-mono px-2.5 py-0.5 rounded-full ${
+                approvedButPendingDispatch.length > 0 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
+              }`}>
+                {approvedButPendingDispatch.length} سفارش
+              </span>
+            </div>
+            <div>
+              <div className="font-extrabold text-xs text-slate-900">۲. ارسال به واحد فروش</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">تایید شده، آماده اولویت‌بندی کارخانه</div>
+            </div>
+            {activeTab === 'APPROVED_PRIORITIES' && (
+              <span className="absolute bottom-0 right-0 left-0 h-1 bg-indigo-600"></span>
+            )}
+          </button>
 
-                {/* Tab 2: Dispatch to Sales (formerly "اولویت‌بندی ارسال کارخانه") */}
-                <button
-                  onClick={() => setActiveTab('APPROVED_PRIORITIES')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-                    activeTab === 'APPROVED_PRIORITIES'
-                      ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-300'
-                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <Layers className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>ارسال به فروش ({approvedButPendingDispatch.length})</span>
-                </button>
-
-                {/* Tab 6: Archival & Factory Tracking */}
-                <button
-                  onClick={() => setActiveTab('ARCHIVAL_ORDERS')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                    activeTab === 'ARCHIVAL_ORDERS'
-                      ? 'bg-slate-800 text-white shadow-sm ring-2 ring-slate-400'
-                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <FileText className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>رهگیری و آرشیو ({orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length})</span>
-                </button>
+          {/* Pillar 3: Factory Production & Transport Tracking */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('ARCHIVAL_ORDERS')}
+            className={`text-right p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2.5 relative overflow-hidden ${
+              activeTab === 'ARCHIVAL_ORDERS'
+                ? 'bg-sky-50/80 border-sky-400 ring-2 ring-sky-400/40 shadow-xs'
+                : 'bg-white hover:bg-slate-50/80 border-slate-200/90 text-slate-700 hover:border-sky-200'
+            }`}
+            id="tab-archival-orders"
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className={`p-2 rounded-lg ${activeTab === 'ARCHIVAL_ORDERS' ? 'bg-sky-600 text-white' : 'bg-sky-50 text-sky-600'}`}>
+                <Navigation className="w-4 h-4" />
+              </div>
+              <span className={`text-sm font-black font-mono px-2.5 py-0.5 rounded-full ${
+                (sentToFactoryCount + inTransitCount) > 0 ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-600'
+              }`}>
+                {orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length} سفارش
+              </span>
+            </div>
+            <div>
+              <div className="font-extrabold text-xs text-slate-900">۳. رهگیری کارخانه و حمل بار</div>
+              <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5 font-mono">
+                <span>🏭 خط: {sentToFactoryCount}</span>
+                <span>•</span>
+                <span>🚚 حمل: {inTransitCount}</span>
               </div>
             </div>
+            {activeTab === 'ARCHIVAL_ORDERS' && (
+              <span className="absolute bottom-0 right-0 left-0 h-1 bg-sky-600"></span>
+            )}
+          </button>
 
-            {/* Group 2: Base System Definitions & Users (5 Cols - DISTINCT VISUAL STYLE) */}
-            <div className="lg:col-span-5 bg-gradient-to-br from-indigo-50/90 to-purple-50/90 border-2 border-indigo-200/90 rounded-2xl p-3 shadow-xs space-y-2">
-              <div className="flex items-center justify-between border-b border-indigo-200/80 pb-2 px-1">
-                <span className="text-[11px] font-black text-indigo-950 flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
-                  ⚙️ تعریف اطلاعات پایه و دسترسی کاربران
-                </span>
-                <span className="px-2 py-0.5 bg-indigo-600 text-white text-[9px] rounded-full font-bold">پایه سیستم</span>
+          {/* Pillar 4: Commercial Analytics */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('COMMERCIAL_ANALYTICS')}
+            className={`text-right p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2.5 relative overflow-hidden ${
+              activeTab === 'COMMERCIAL_ANALYTICS'
+                ? 'bg-emerald-50/80 border-emerald-400 ring-2 ring-emerald-400/40 shadow-xs'
+                : 'bg-white hover:bg-slate-50/80 border-slate-200/90 text-slate-700 hover:border-emerald-200'
+            }`}
+            id="tab-commercial-analytics"
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className={`p-2 rounded-lg ${activeTab === 'COMMERCIAL_ANALYTICS' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-600'}`}>
+                <BarChart3 className="w-4 h-4" />
               </div>
-              
-              <div className="flex flex-wrap gap-1.5">
-                {/* Tab 3: Unified Partners & Users Management */}
-                <button
-                  onClick={() => {
-                    setActiveTab('PARTNERS_MGMT');
-                    fetchUsers();
-                  }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-                    activeTab === 'PARTNERS_MGMT' && partnerSubTab !== 'SHIPPING'
-                      ? 'bg-slate-900 text-amber-300 shadow-md ring-2 ring-amber-400'
-                      : 'bg-white text-slate-800 border border-indigo-200 hover:bg-indigo-100/70'
-                  }`}
-                >
-                  <Users className="w-3.5 h-3.5 text-amber-500" />
-                  <span>کاربران و نمایندگی‌ها ({agents.length} نمایندگی / {users.length} کاربر)</span>
-                </button>
-
-                {/* Tab 4: Products */}
-                <button
-                  onClick={() => setActiveTab('PRODUCTS_MGMT')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-                    activeTab === 'PRODUCTS_MGMT'
-                      ? 'bg-emerald-600 text-white shadow-md ring-2 ring-emerald-300'
-                      : 'bg-white text-emerald-950 border border-emerald-200 hover:bg-emerald-100/70'
-                  }`}
-                >
-                  <Briefcase className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>محصولات ({products.length})</span>
-                </button>
-
-                {/* Tab 5: Shipping Companies */}
-                <button
-                  onClick={() => {
-                    setActiveTab('PARTNERS_MGMT');
-                    setPartnerSubTab('SHIPPING');
-                  }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-                    activeTab === 'PARTNERS_MGMT' && partnerSubTab === 'SHIPPING'
-                      ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-300'
-                      : 'bg-white text-blue-950 border border-blue-200 hover:bg-blue-100/70'
-                  }`}
-                >
-                  <Truck className="w-3.5 h-3.5 text-blue-600" />
-                  <span>شرکت‌های حمل ({shippingCompanies.length})</span>
-                </button>
-              </div>
+              <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                داشبورد زنده
+              </span>
             </div>
-
-          </div>
-
-          {/* Top Pending Edit Notification Banner */}
-          {orders.some(o => o.hasPendingEdit) && (
-            <div className="bg-gradient-to-r from-amber-500/15 via-amber-100/80 to-amber-50 border-2 border-amber-400 rounded-2xl p-3.5 shadow-sm flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-amber-500 text-slate-950 rounded-xl font-bold text-lg shadow-xs shrink-0 animate-bounce">
-                  ⚠️
-                </div>
-                <div>
-                  <h4 className="font-extrabold text-slate-900 text-xs md:text-sm flex items-center gap-2">
-                    <span>درخواست اصلاحیه سفارش از سوی نمایندگی فروش</span>
-                    <span className="bg-amber-500 text-slate-950 font-mono text-xs px-2 py-0.5 rounded-full font-black">
-                      {orders.filter(o => o.hasPendingEdit).length} مورد
-                    </span>
-                  </h4>
-                  <p className="text-[11px] text-amber-900 mt-0.5">
-                    تغییراتی در مشخصات سفارش (مقدار، خریدار، آدرس، باربری و...) توسط نمایندگی ثبت شده و در انتظار بررسی و تایید شماست. (نوبت سفارش در کارخانه ثابت است)
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                {orders.filter(o => o.hasPendingEdit).map(ord => {
-                  const chs = getPendingEditChanges(ord, products);
-                  return (
-                    <button
-                      key={ord.id}
-                      type="button"
-                      onClick={() => setReviewingEditOrder(ord)}
-                      className="bg-amber-600 hover:bg-amber-700 text-white font-black text-xs px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2 animate-pulse"
-                      title={chs.map(c => c.label).join('، ')}
-                    >
-                      <Edit className="w-3.5 h-3.5" />
-                      <span>بررسی اصلاحیه #{ord.orderNumber}</span>
-                      {chs.length > 0 && (
-                        <span className="bg-amber-900/40 text-amber-100 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
-                          {chs.length} مورد تغییر
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+            <div>
+              <div className="font-extrabold text-xs text-slate-900">۴. آمار و تحلیل بازرگانی</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">نمودارهای فروش، تراز و عملکرد استانی</div>
             </div>
-          )}
+            {activeTab === 'COMMERCIAL_ANALYTICS' && (
+              <span className="absolute bottom-0 right-0 left-0 h-1 bg-emerald-600"></span>
+            )}
+          </button>
 
-          {/* Quick query filter (only for order views) */}
-          {(activeTab === 'PENDING_APPROVAL' || activeTab === 'APPROVED_PRIORITIES' || activeTab === 'ARCHIVAL_ORDERS') && (
-            <div className="relative w-full" id="manager-tab-search">
-              <input
-                type="text"
-                placeholder="جستجوی سریع سفارش (کد رهگیری، خریدار، نماینده، شهر...)"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 focus:border-emerald-500 rounded-xl py-2 pr-9 pl-8 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all font-sans"
-              />
-              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
-                  title="پاکسازی عبارت جستجو"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* Top Pending Edit Notification Banner */}
+        {orders.some(o => o.hasPendingEdit) && (
+          <div className="bg-gradient-to-r from-amber-500/15 via-amber-100/80 to-amber-50 border-2 border-amber-400 rounded-2xl p-3.5 shadow-sm flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-500 text-slate-950 rounded-xl font-bold text-lg shadow-xs shrink-0 animate-bounce">
+                ⚠️
+              </div>
+              <div>
+                <h4 className="font-extrabold text-slate-900 text-xs md:text-sm flex items-center gap-2">
+                  <span>درخواست اصلاحیه سفارش از سوی نمایندگی فروش</span>
+                  <span className="bg-amber-500 text-slate-950 font-mono text-xs px-2 py-0.5 rounded-full font-black">
+                    {orders.filter(o => o.hasPendingEdit).length} مورد
+                  </span>
+                </h4>
+                <p className="text-[11px] text-amber-900 mt-0.5">
+                  تغییراتی در مشخصات سفارش (مقدار، خریدار، آدرس، باربری و...) توسط نمایندگی ثبت شده و در انتظار بررسی و تایید شماست. (نوبت سفارش در کارخانه ثابت است)
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {orders.filter(o => o.hasPendingEdit).map(ord => {
+                const chs = getPendingEditChanges(ord, products);
+                return (
+                  <button
+                    key={ord.id}
+                    type="button"
+                    onClick={() => setReviewingEditOrder(ord)}
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-black text-xs px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2 animate-pulse"
+                    title={chs.map(c => c.label).join('، ')}
+                  >
+                    <Edit className="w-3.5 h-3.5" />
+                    <span>بررسی اصلاحیه #{ord.orderNumber}</span>
+                    {chs.length > 0 && (
+                      <span className="bg-amber-900/40 text-amber-100 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                        {chs.length} مورد تغییر
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Quick query filter (only for order views) */}
+        {(activeTab === 'PENDING_APPROVAL' || activeTab === 'APPROVED_PRIORITIES' || activeTab === 'ARCHIVAL_ORDERS') && (
+          <div className="relative w-full pt-1" id="manager-tab-search">
+            <input
+              type="text"
+              placeholder="جستجوی سریع سفارش (کد رهگیری، خریدار، نماینده، شهر، محصول، باربری، راننده...)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-emerald-500 rounded-xl py-2.5 pr-9 pl-8 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all font-sans shadow-2xs"
+            />
+            <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                title="پاکسازی عبارت جستجو"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
 
         {/* RENDER SECTION 0: COMMERCIAL ANALYTICS DASHBOARD (داشبورد آمار و تحلیل بازرگانی) */}
         {activeTab === 'COMMERCIAL_ANALYTICS' && (
@@ -3767,147 +3798,155 @@ export default function ManagerDashboard({
 
         {/* RENDER SECTION E: FACTOR LOGS ARCHIVE & LIVE FACTORY TRACKING (رهگیری کامل سفارشات کارخانه و سوابق) */}
         {activeTab === 'ARCHIVAL_ORDERS' && (
-          <div className="space-y-5">
+          <div className="space-y-4">
             
-            {/* Banner & Summary Stats Row */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-right">
-              <div className="bg-slate-800 text-white p-3 rounded-xl border border-slate-700 shadow-sm">
-                <span className="text-[10px] text-slate-300 block font-bold">🏭 کل ارسالی به کارخانه</span>
-                <strong className="text-base font-black font-mono text-amber-400">
-                  {orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length} سفارش
-                </strong>
-              </div>
-              <div className="bg-blue-50 border border-blue-200/80 p-3 rounded-xl text-blue-900 shadow-sm">
-                <span className="text-[10px] text-blue-600 block font-bold">⚙️ ۱. در صف خط کارخانه</span>
-                <strong className="text-base font-black font-mono">
-                  {orders.filter(o => o.status === 'SENT_TO_FACTORY').length} مورد
-                </strong>
-              </div>
-              <div className="bg-amber-50 border border-amber-200/80 p-3 rounded-xl text-amber-900 shadow-sm">
-                <span className="text-[10px] text-amber-600 block font-bold">🚒 ۲. تخصیص خودرو باربری</span>
-                <strong className="text-base font-black font-mono">
-                  {orders.filter(o => o.status === 'VEHICLE_ASSIGNED').length} مورد
-                </strong>
-              </div>
-              <div className="bg-emerald-50 border border-emerald-200/80 p-3 rounded-xl text-emerald-900 shadow-sm">
-                <span className="text-[10px] text-emerald-600 block font-bold">🚚 ۳. ترخیص و در مسیر</span>
-                <strong className="text-base font-black font-mono">
-                  {orders.filter(o => o.status === 'LOADED_AND_DISPATCHED').length} مورد
-                </strong>
-              </div>
-            </div>
-
-            {/* Sub-Filters and Agent Selector Control Bar */}
-            <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-3" id="archival-sub-filters">
+            {/* Unified Streamlined Control & Status Filter Bar */}
+            <div className="bg-slate-50 border border-slate-200/90 p-3.5 sm:p-4 rounded-2xl space-y-3 shadow-2xs" id="archival-sub-filters">
               
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
                 <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-slate-500" />
-                  <span className="text-xs font-black text-slate-800">سامانه متمرکز رهگیری وضعیت سفارشات و تاریخچه سوابق (مدیریت بازرگانی)</span>
-                </div>
-
-                {/* Filter by Representative Agent */}
-                <div className="flex items-center gap-2">
-                  <label className="text-[11px] text-slate-600 font-bold">فیلتر نمایندگی:</label>
-                  <select
-                    value={archiveAgentFilter}
-                    onChange={(e) => setArchiveAgentFilter(e.target.value)}
-                    className="bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-800 font-bold focus:outline-none focus:ring-1 focus:ring-slate-500 cursor-pointer"
-                  >
-                    <option value="ALL">همه نمایندگی‌ها ({agents.length})</option>
-                    {agents.map((ag) => (
-                      <option key={ag.id} value={ag.agentCode}>
-                        {ag.alias} (کد {ag.agentCode})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Status Tabs and Accordion Expand/Collapse Controls */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => expandAllOrders(visibleOrders)}
-                    className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 py-1 px-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                    title="باز کردن تمامی کارت‌های سفارش جهت مشاهده کامل جزئیات"
-                  >
-                    <Maximize2 className="w-3 h-3 text-indigo-600" />
-                    <span>باز کردن همه</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={collapseAllOrders}
-                    className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 py-1 px-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                    title="جمع کردن تمام کارت‌ها به حالت خلاصه و فشرده"
-                  >
-                    <Minimize2 className="w-3 h-3 text-slate-500" />
-                    <span>بستن همه</span>
-                  </button>
-                  <span className="text-[10px] bg-slate-200/80 text-slate-700 font-bold py-1 px-2 rounded-lg font-mono">
-                    {visibleOrders.length} مورد
+                  <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span className="text-xs sm:text-sm font-extrabold text-slate-800">
+                    رهگیری متمرکز وضعیت سفارشات و سوابق کارخانه
+                  </span>
+                  <span className="bg-slate-200/80 text-slate-700 text-[10.5px] font-bold px-2 py-0.5 rounded-full font-mono">
+                    {orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length} کل ارسالی
                   </span>
                 </div>
 
-                <div className="flex flex-wrap gap-1.5 justify-end">
-                  <span className="text-[10px] text-slate-400 font-bold self-center ml-1">📍 گام اجرا:</span>
-                  <button
-                    type="button"
-                    onClick={() => setArchiveStatusFilter('ALL')}
-                    className={`py-1 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                      archiveStatusFilter === 'ALL'
-                        ? 'bg-slate-800 text-white shadow-sm'
-                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-                    }`}
-                  >
-                    همه ({orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setArchiveStatusFilter('SENT_TO_FACTORY')}
-                    className={`py-1 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                      archiveStatusFilter === 'SENT_TO_FACTORY'
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-                    }`}
-                  >
-                    ۱. در صف کارخانه ({orders.filter(o => o.status === 'SENT_TO_FACTORY').length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setArchiveStatusFilter('VEHICLE_ASSIGNED')}
-                    className={`py-1 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                      archiveStatusFilter === 'VEHICLE_ASSIGNED'
-                        ? 'bg-amber-500 text-slate-950 shadow-sm'
-                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-                    }`}
-                  >
-                    ۲. تخصیص کامیون ({orders.filter(o => o.status === 'VEHICLE_ASSIGNED').length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setArchiveStatusFilter('LOADED_AND_DISPATCHED')}
-                    className={`py-1 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                      archiveStatusFilter === 'LOADED_AND_DISPATCHED'
-                        ? 'bg-emerald-600 text-white shadow-sm'
-                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-                    }`}
-                  >
-                    ۳. ترخیص و در حرکت ({orders.filter(o => o.status === 'LOADED_AND_DISPATCHED').length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setArchiveStatusFilter('REJECTED')}
-                    className={`py-1 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                      archiveStatusFilter === 'REJECTED'
-                        ? 'bg-rose-600 text-white shadow-sm'
-                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-                    }`}
-                  >
-                    ابطال / لغو ({orders.filter(o => o.status === 'REJECTED').length})
-                  </button>
+                {/* Filter by Representative Agent & Accordion Expand/Collapse */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1">
+                    <label className="text-[10px] text-slate-500 font-bold whitespace-nowrap">نمایندگی:</label>
+                    <select
+                      value={archiveAgentFilter}
+                      onChange={(e) => setArchiveAgentFilter(e.target.value)}
+                      className="bg-transparent text-xs text-slate-800 font-bold focus:outline-none cursor-pointer"
+                    >
+                      <option value="ALL">همه نمایندگی‌ها ({agents.length})</option>
+                      {agents.map((ag) => (
+                        <option key={ag.id} value={ag.agentCode}>
+                          {ag.alias} (کد {ag.agentCode})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => expandAllOrders(visibleOrders)}
+                      className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 py-1.5 px-2.5 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                      title="باز کردن تمامی کارت‌های سفارش جهت مشاهده کامل جزئیات"
+                    >
+                      <Maximize2 className="w-3 h-3 text-indigo-600" />
+                      <span>باز کردن همه</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={collapseAllOrders}
+                      className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 py-1.5 px-2.5 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                      title="جمع کردن تمام کارت‌ها به حالت خلاصه و فشرده"
+                    >
+                      <Minimize2 className="w-3 h-3 text-slate-500" />
+                      <span>بستن همه</span>
+                    </button>
+                  </div>
                 </div>
+              </div>
+
+              {/* Interactive Stage Filter Pills with Integrated Live Counters */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                <span className="text-[10px] text-slate-400 font-bold ml-1">📍 فیلتر گام اجرا:</span>
+
+                <button
+                  type="button"
+                  onClick={() => setArchiveStatusFilter('ALL')}
+                  className={`py-1.5 px-3 rounded-xl text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5 ${
+                    archiveStatusFilter === 'ALL'
+                      ? 'bg-slate-800 text-white shadow-xs ring-2 ring-slate-400'
+                      : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/90'
+                  }`}
+                >
+                  <span>همه ارسالی‌ها</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                    archiveStatusFilter === 'ALL' ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setArchiveStatusFilter('SENT_TO_FACTORY')}
+                  className={`py-1.5 px-3 rounded-xl text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5 ${
+                    archiveStatusFilter === 'SENT_TO_FACTORY'
+                      ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-300'
+                      : 'bg-white hover:bg-blue-50 text-blue-900 border border-slate-200/90'
+                  }`}
+                >
+                  <span>⚙️ ۱. در صف خط کارخانه</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                    archiveStatusFilter === 'SENT_TO_FACTORY' ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {orders.filter(o => o.status === 'SENT_TO_FACTORY').length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setArchiveStatusFilter('VEHICLE_ASSIGNED')}
+                  className={`py-1.5 px-3 rounded-xl text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5 ${
+                    archiveStatusFilter === 'VEHICLE_ASSIGNED'
+                      ? 'bg-amber-500 text-slate-950 shadow-xs ring-2 ring-amber-300'
+                      : 'bg-white hover:bg-amber-50 text-amber-900 border border-slate-200/90'
+                  }`}
+                >
+                  <span>🚒 ۲. تخصیص خودرو باربری</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                    archiveStatusFilter === 'VEHICLE_ASSIGNED' ? 'bg-amber-600 text-slate-950' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {orders.filter(o => o.status === 'VEHICLE_ASSIGNED').length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setArchiveStatusFilter('LOADED_AND_DISPATCHED')}
+                  className={`py-1.5 px-3 rounded-xl text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5 ${
+                    archiveStatusFilter === 'LOADED_AND_DISPATCHED'
+                      ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-300'
+                      : 'bg-white hover:bg-emerald-50 text-emerald-900 border border-slate-200/90'
+                  }`}
+                >
+                  <span>🚚 ۳. ترخیص و در مسیر حمل</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                    archiveStatusFilter === 'LOADED_AND_DISPATCHED' ? 'bg-emerald-700 text-white' : 'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {orders.filter(o => o.status === 'LOADED_AND_DISPATCHED').length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setArchiveStatusFilter('REJECTED')}
+                  className={`py-1.5 px-3 rounded-xl text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5 ${
+                    archiveStatusFilter === 'REJECTED'
+                      ? 'bg-rose-600 text-white shadow-xs ring-2 ring-rose-300'
+                      : 'bg-white hover:bg-rose-50 text-rose-800 border border-slate-200/90'
+                  }`}
+                >
+                  <span>ابطال / لغو شده</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                    archiveStatusFilter === 'REJECTED' ? 'bg-rose-700 text-white' : 'bg-rose-100 text-rose-800'
+                  }`}>
+                    {orders.filter(o => o.status === 'REJECTED').length}
+                  </span>
+                </button>
+
+                <span className="text-[10px] bg-slate-200/70 text-slate-600 font-bold py-1 px-2.5 rounded-xl font-mono mr-auto">
+                  نمایش {visibleOrders.length} مورد
+                </span>
               </div>
 
             </div>
@@ -4687,28 +4726,27 @@ export default function ManagerDashboard({
         }
 
         // 9. Items / Products & Quantities
-        if (hasItemsDiff) {
+        const changedItemsOnly = itemsDiffList.filter(it => it.type !== 'UNCHANGED');
+        const unchangedItemsOnly = itemsDiffList.filter(it => it.type === 'UNCHANGED');
+
+        if (changedItemsOnly.length > 0) {
           changedRows.push({
             id: 'items',
-            label: 'اقلام و متراژ سفارش',
+            label: `اقلام تغییر یافته سبد (${changedItemsOnly.length} قلم)`,
             icon: '📦',
             oldContent: (
               <div className="space-y-1.5">
-                {currentItems.map((it: any, idx: number) => (
+                {changedItemsOnly.map((it, idx) => (
                   <div key={idx} className="p-1.5 bg-slate-100/90 rounded-lg border border-slate-200 flex items-center justify-between text-xs">
                     <span className="text-slate-600 line-through">• {it.productName}</span>
-                    <span className="font-mono text-slate-500 line-through">{it.quantity?.toLocaleString()} {it.unit || reviewingEditOrder.unit}</span>
+                    <span className="font-mono text-slate-500 line-through">{it.oldQty > 0 ? `${it.oldQty.toLocaleString()} ${it.unit}` : '— (قبلاً نبود)'}</span>
                   </div>
                 ))}
-                <div className="pt-1.5 border-t border-slate-200 text-[11px] text-slate-500 flex items-center justify-between">
-                  <span>مجموع متراژ قبلی:</span>
-                  <span className="font-mono font-bold line-through">{totalOldQty.toLocaleString()} {reviewingEditOrder.unit}</span>
-                </div>
               </div>
             ),
             newContent: (
               <div className="space-y-2">
-                {itemsDiffList.map((diffItem, idx) => {
+                {changedItemsOnly.map((diffItem, idx) => {
                   if (diffItem.type === 'MODIFIED') {
                     const isIncrease = (diffItem.diffQty || 0) > 0;
                     return (
@@ -4742,7 +4780,7 @@ export default function ManagerDashboard({
                         </div>
                       </div>
                     );
-                  } else if (diffItem.type === 'REMOVED') {
+                  } else {
                     return (
                       <div key={idx} className="p-2 bg-rose-50 text-rose-900 rounded-xl border border-rose-200 flex items-center justify-between text-xs line-through opacity-75">
                         <span>- {diffItem.productName}</span>
@@ -4750,13 +4788,6 @@ export default function ManagerDashboard({
                           <span className="font-mono">{diffItem.oldQty?.toLocaleString()} {diffItem.unit}</span>
                           <span className="bg-rose-600 text-white text-[10px] px-2 py-0.5 rounded font-bold no-underline">حذف شده</span>
                         </div>
-                      </div>
-                    );
-                  } else {
-                    return (
-                      <div key={idx} className="p-1.5 bg-slate-50 text-slate-700 rounded-lg border border-slate-200 flex items-center justify-between text-xs">
-                        <span>• {diffItem.productName}</span>
-                        <span className="font-mono font-bold text-slate-800">{diffItem.newQty?.toLocaleString()} {diffItem.unit}</span>
                       </div>
                     );
                   }
@@ -4776,22 +4807,26 @@ export default function ManagerDashboard({
               </div>
             )
           });
-        } else {
+        }
+
+        if (unchangedItemsOnly.length > 0) {
           unchangedNormalList.push({
-            label: 'اقلام و متراژ سفارش',
+            label: changedItemsOnly.length > 0 ? `اقلام بدون تغییر سبد (${unchangedItemsOnly.length} قلم)` : 'اقلام و متراژ سبد خرید',
             icon: '📦',
             value: (
               <div className="space-y-1">
-                {currentItems.map((it: any, idx: number) => (
+                {unchangedItemsOnly.map((it, idx) => (
                   <div key={idx} className="flex items-center justify-between text-xs font-medium text-slate-800">
                     <span>• {it.productName}:</span>
-                    <strong className="font-mono">{it.quantity?.toLocaleString()} {it.unit || reviewingEditOrder.unit}</strong>
+                    <strong className="font-mono">{it.newQty?.toLocaleString()} {it.unit}</strong>
                   </div>
                 ))}
-                <div className="pt-1 border-t border-slate-200 text-xs font-bold text-slate-900 flex justify-between">
-                  <span>مجموع متراژ:</span>
-                  <span className="font-mono">{totalOldQty.toLocaleString()} {reviewingEditOrder.unit}</span>
-                </div>
+                {changedItemsOnly.length === 0 && (
+                  <div className="pt-1 border-t border-slate-200 text-xs font-bold text-slate-900 flex justify-between">
+                    <span>مجموع متراژ:</span>
+                    <span className="font-mono">{totalOldQty.toLocaleString()} {reviewingEditOrder.unit}</span>
+                  </div>
+                )}
               </div>
             )
           });

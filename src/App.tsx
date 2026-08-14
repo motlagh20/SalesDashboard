@@ -1551,43 +1551,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Interactive Explanation Toast for the active role (hidden for REPRESENTATIVE to prevent top clutter) */}
-      {activeRole !== 'REPRESENTATIVE' && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-3 sm:mt-6">
-          <div className="bg-white border-r-4 border-emerald-500 p-3 sm:p-4 rounded-xl shadow-xs text-xs text-slate-600" id="workflow-intro-card">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-100/80 pb-2 mb-2">
-              <button
-                type="button"
-                onClick={() => setIsIntroExpanded(!isIntroExpanded)}
-                className="text-[10px] text-slate-500 hover:text-slate-800 font-bold bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded transition-colors cursor-pointer"
-              >
-                {isIntroExpanded ? 'بستن راهنما ▲' : 'راهنمای این پنل ▼'}
-              </button>
-              <h4 className="font-extrabold text-slate-800 flex items-center gap-1.5 text-xs sm:text-sm">
-                <span>
-                  {activeRole === 'SALES_MANAGER' && '👔 کارتابل مدیریت بازرگانی و تایید مالی'}
-                  {activeRole === 'FACTORY_TRANSPORT' && '🏭 کارتابل واحد فروش کارخانه'}
-                  {activeRole === 'SHIPPING_COMPANY' && '🚚 پنل اختصاصی باربری‌ها و اتوبارهای همکار طبرستان'}
-                  {activeRole === 'SYSTEM_ADMIN' && '🛡️ کارتابل اختصاصی ادمین ارشد نرم‌افزار (پایش و عیب‌یابی لایو)'}
-                  {activeRole === 'INFRASTRUCTURE' && '⚙️ نیازمندی‌های توسعه زیرساخت نرم‌افزاری در فاز تولید'}
-                </span>
-                <Info className="w-4 h-4 text-emerald-600 shrink-0" />
-              </h4>
-            </div>
-
-            <p className={`text-slate-500 leading-relaxed text-justify transition-all ${isIntroExpanded ? 'block' : 'hidden sm:block text-[11px] sm:text-xs'}`}>
-              {activeRole === 'SALES_MANAGER' && 'سفارشات جدید ثبت شده توسط نمایندگان سراسر کشور با تمام فاکتورها در این کارتابل مدیریت بازرگانی ظاهر می‌شود. واحد بازرگانی می‌تواند با تایید سفارش آن را به خط کارخانه بفرستد یا در صورت عدم کفایت اعتباری با درج علت آن را لغو کند. همچنین قابلیت تعریف نمایندگان، محصولات و شرکت‌های حمل و نقل در این پنل تعبیه شده است.'}
-              {activeRole === 'FACTORY_TRANSPORT' && 'سفارشات تایید شده بازرگانی در صف کارخانه قرار می‌گیرند. مدیر فروش کارخانه به جای پر کردن فرم‌های طولانی، به راحتی سفارش را با مشخص کردن باربری و نوع نیاز خودرو به باربری مربوطه ارسال می‌کند تا کمترین درگیری ثبتی را تجربه کند.'}
-              {activeRole === 'SHIPPING_COMPANY' && 'باربری‌ها وقتی ارجاع حمل را از واحد فروش کارخانه طبرستان دریافت می‌کنند، درخواست مربوطه به همراه مقدار سفال سقف یا آجر در صف آنها ظاهر می‌شود. آنها با دکمه درج سریع نام راننده و پلاک را با حداقل وقت تلف شده پر کرده و شماره بارنامه صادرشده در برنامه اختصاصی خود را نوشته و سفارش را به نوبت بارگیری تایید می‌کنند.'}
-              {activeRole === 'SYSTEM_ADMIN' && 'در این کارتابل لایو، ادمین ارشد نرم‌افزار می‌تواند به صورت آنی تمام فعالیت‌های کاربران، وضعیت دیتابیس، حافظه رم و پردازنده سرور، لاگ‌های لایو شبکه و عیب‌یابی آنی سیستم را پایش و رصد نماید.'}
-              {activeRole === 'INFRASTRUCTURE' && 'در این لایه فناوری‌ها، زیرساخت پایگاه داده رابطه‌ای، شیوه احراز هویت پیامکی کاربران و نحوه استقرار برنامه جهت دسترسی دائم تمامی گوشی‌های اندروید و آیفون تبیین شده است.'}
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Main Content Area Container with custom animations on transition */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6" id="primary-main-container">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-3 sm:mt-5" id="primary-main-container">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeRole}

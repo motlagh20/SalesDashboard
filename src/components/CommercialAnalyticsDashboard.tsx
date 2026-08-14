@@ -308,165 +308,164 @@ export default function CommercialAnalyticsDashboard({
 
   return (
     <div className="animate-fade-in font-sans space-y-8 pb-12 dir-rtl text-right" id="commercial-analytics-panel">
-      {/* Top Banner Header */}
-      <div className="bg-gradient-to-r from-amber-950 via-slate-900 to-amber-950 text-white rounded-3xl p-6 md:p-8 shadow-xl border border-amber-800/40 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
-
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 relative z-10">
+      {/* Clean Compact Header & Controls */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 border border-slate-200/90 rounded-2xl p-3.5 shadow-2xs" id="commercial-header-bar">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="w-5 h-5 text-amber-600 shrink-0" />
           <div>
-            <div className="flex items-center gap-2 mb-2.5">
-              <span className="px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full text-xs font-bold flex items-center gap-1.5">
-                <BarChart3 className="w-3.5 h-3.5 text-amber-400" />
-                کارتابل تحلیلی و آمار آمیخته بازرگانی
-              </span>
-              <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full text-xs font-bold flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                به‌روزرسانی خودکار
-              </span>
-            </div>
-
-            <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white flex items-center gap-3">
-              <span>داشبورد اختصاصی مدیریت بازرگانی و پایش سفارشات</span>
-            </h1>
-            <p className="text-slate-300 text-xs md:text-sm mt-2 leading-relaxed max-w-3xl">
-              تحلیل جریان سفارشات رسیده، سفارشات ارسالی به خط کارخانه، سفارشات خاتمه‌یافته، زمان تخمینی تحویل هر سفارش (SLA) و چارت‌های فروش
+            <h2 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+              <span>گزارش جامع آماری و تحلیل مالی بازرگانی</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            </h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              پایش ارزش ریالی فروش، سهم بازار محصولات سفال، توزیع جغرافیایی و زمان‌بندی تحویل (SLA)
             </p>
           </div>
+        </div>
 
-          {/* Controls: Time Range & Export */}
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Time Period Selector */}
-            <div className="bg-slate-800/90 p-1 rounded-2xl border border-slate-700/80 flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setTimePeriod('ALL')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  timePeriod === 'ALL' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                کل دوره
-              </button>
-              <button
-                type="button"
-                onClick={() => setTimePeriod('MONTH')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  timePeriod === 'MONTH' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                ۳۰ روز گذشته
-              </button>
-              <button
-                type="button"
-                onClick={() => setTimePeriod('WEEK')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  timePeriod === 'WEEK' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                ۷ روز گذشته
-              </button>
-              <button
-                type="button"
-                onClick={() => setTimePeriod('TODAY')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  timePeriod === 'TODAY' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                امروز
-              </button>
-            </div>
-
-            {/* Export Excel Button */}
+        {/* Controls: Time Period Filter & Export Excel */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Time Period Filter Pills */}
+          <div className="bg-white p-0.5 rounded-xl border border-slate-200 flex items-center gap-0.5 shadow-2xs">
             <button
               type="button"
-              onClick={handleExportCommercialExcel}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer"
+              onClick={() => setTimePeriod('ALL')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                timePeriod === 'ALL' ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
             >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-200" />
-              <span>خروجی جامع اکسل</span>
+              کل دوره
+            </button>
+            <button
+              type="button"
+              onClick={() => setTimePeriod('MONTH')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                timePeriod === 'MONTH' ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              ۳۰ روز
+            </button>
+            <button
+              type="button"
+              onClick={() => setTimePeriod('WEEK')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                timePeriod === 'WEEK' ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              ۷ روز
+            </button>
+            <button
+              type="button"
+              onClick={() => setTimePeriod('TODAY')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                timePeriod === 'TODAY' ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              امروز
             </button>
           </div>
+
+          {/* Export Excel Button */}
+          <button
+            type="button"
+            onClick={handleExportCommercialExcel}
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-100" />
+            <span>خروجی اکسل</span>
+          </button>
         </div>
       </div>
 
-      {/* Primary KPI Metrics Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="commercial-kpi-cards">
-        {/* KPI 1: Received / Pending Approval Orders (سفارشات رسیده) */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex items-center justify-between">
+      {/* Primary Analytics KPI Summary: Financial & Operational Value (Non-repetitive) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" id="commercial-kpi-cards">
+        
+        {/* KPI 1: Financial Sales Volume */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
           <div>
-            <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200 block w-fit mb-1.5">
-              سفارشات رسیده
-            </span>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900">{receivedPendingOrders.length}</span>
-              <span className="text-xs font-bold text-amber-600">در انتظار تایید</span>
-            </div>
-            <span className="text-[11px] text-slate-500 mt-1 block">
-              حجم کل: {receivedPendingOrders.reduce((s, o) => s + o.quantity, 0).toLocaleString()} قالب / تن
-            </span>
-          </div>
-          <div className="p-3.5 bg-amber-100/80 text-amber-800 rounded-2xl border border-amber-200/80">
-            <Clock className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* KPI 2: Sent to Factory (سفارشات ارسال شده به کارخانه) */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex items-center justify-between">
-          <div>
-            <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200 block w-fit mb-1.5">
-              ارسال شده به کارخانه
-            </span>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900">{sentToFactoryOrders.length}</span>
-              <span className="text-xs font-bold text-indigo-600">در صف تولید و حمل</span>
-            </div>
-            <span className="text-[11px] text-slate-500 mt-1 block">
-              حجم کل: {sentToFactoryOrders.reduce((s, o) => s + o.quantity, 0).toLocaleString()} قالب / تن
-            </span>
-          </div>
-          <div className="p-3.5 bg-indigo-100/80 text-indigo-800 rounded-2xl border border-indigo-200/80">
-            <Building2 className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* KPI 3: Completed Orders (سفارشات خاتمه یافته) */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex items-center justify-between">
-          <div>
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 block w-fit mb-1.5">
-              سفارشات خاتمه یافته
-            </span>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900">{completedOrders.length}</span>
-              <span className="text-xs font-bold text-emerald-600">تحویل نهایی مشتری</span>
-            </div>
-            <span className="text-[11px] text-slate-500 mt-1 block">
-              نرخ موفقیت: {filteredByPeriodOrders.length > 0 ? Math.round((completedOrders.length / filteredByPeriodOrders.length) * 100) : 0}%
-            </span>
-          </div>
-          <div className="p-3.5 bg-emerald-100/80 text-emerald-800 rounded-2xl border border-emerald-200/80">
-            <PackageCheck className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* KPI 4: Financial Value & Average SLA */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex items-center justify-between">
-          <div>
-            <span className="text-xs font-bold text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200 block w-fit mb-1.5">
+            <span className="text-[10.5px] font-bold text-purple-700 block mb-1">
               ارزش کل فروش بازرگانی
             </span>
             <div className="flex items-baseline gap-1">
-              <span className="text-xl font-black text-slate-900">
+              <span className="text-lg font-black font-mono text-slate-900">
                 {(totalFinancialValue / 1000000).toLocaleString(undefined, { maximumFractionDigits: 1 })}
               </span>
-              <span className="text-xs font-bold text-purple-700">میلیون تومان</span>
+              <span className="text-[10px] font-bold text-slate-500">میلیون تومان</span>
             </div>
-            <span className="text-[11px] text-slate-500 mt-1 block">
-              متوسط زمان تحویل: ~{averageMetrics.avgRemaining || 28} ساعت
+            <span className="text-[10px] text-slate-400 mt-0.5 block">
+              فاکتورهای تایید شده و فعال
             </span>
           </div>
-          <div className="p-3.5 bg-purple-100/80 text-purple-800 rounded-2xl border border-purple-200/80">
-            <DollarSign className="w-6 h-6" />
+          <div className="p-2.5 bg-purple-50 text-purple-700 rounded-xl border border-purple-100">
+            <DollarSign className="w-5 h-5" />
           </div>
         </div>
+
+        {/* KPI 2: Total Quantity / Volume */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10.5px] font-bold text-amber-700 block mb-1">
+              حجم کل عرضه و تقاضا
+            </span>
+            <div className="flex items-baseline gap-1">
+              <span className="text-lg font-black font-mono text-slate-900">
+                {totalQuantityUnits.toLocaleString()}
+              </span>
+              <span className="text-[10px] font-bold text-slate-500">قالب / تن</span>
+            </div>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">
+              مجموع سفال سقف و آجر
+            </span>
+          </div>
+          <div className="p-2.5 bg-amber-50 text-amber-700 rounded-xl border border-amber-100">
+            <TrendingUp className="w-5 h-5" />
+          </div>
+        </div>
+
+        {/* KPI 3: Average Fulfillment Duration */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10.5px] font-bold text-blue-700 block mb-1">
+              میانگین زمان تحویل (SLA)
+            </span>
+            <div className="flex items-baseline gap-1">
+              <span className="text-lg font-black font-mono text-slate-900">
+                ~{averageMetrics.avgRemaining || 28}
+              </span>
+              <span className="text-[10px] font-bold text-slate-500">ساعت</span>
+            </div>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">
+              از ثبت تا تخلیه در مقصد
+            </span>
+          </div>
+          <div className="p-2.5 bg-blue-50 text-blue-700 rounded-xl border border-blue-100">
+            <Timer className="w-5 h-5" />
+          </div>
+        </div>
+
+        {/* KPI 4: On-time Delivery Rate */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10.5px] font-bold text-emerald-700 block mb-1">
+              نرخ تحویل به موقع
+            </span>
+            <div className="flex items-baseline gap-1">
+              <span className="text-lg font-black font-mono text-slate-900">
+                {filteredByPeriodOrders.length > 0
+                  ? Math.max(0, Math.round(((filteredByPeriodOrders.length - averageMetrics.overdueCount) / filteredByPeriodOrders.length) * 100))
+                  : 100}%
+              </span>
+              <span className="text-[10px] font-bold text-emerald-600">طبق برنامه</span>
+            </div>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">
+              {averageMetrics.overdueCount > 0 ? `${averageMetrics.overdueCount} سفارش تاخیردار` : 'بدون تاخیر بحرانی'}
+            </span>
+          </div>
+          <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-100">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+        </div>
+
       </div>
 
       {/* Visual Analytics Charts Section */}
@@ -719,20 +718,20 @@ export default function CommercialAnalyticsDashboard({
               </div>
             </div>
 
-            {/* Alert 3: Pending Approval Bottleneck */}
-            <div className="p-3.5 bg-blue-50/90 rounded-xl border border-blue-200/80 flex items-start gap-3">
-              <div className="p-2 bg-blue-100 text-blue-700 rounded-lg shrink-0">
-                <ShieldCheck className="w-4 h-4" />
+            {/* Alert 3: On Schedule Fulfillment Summary */}
+            <div className="p-3.5 bg-emerald-50/90 rounded-xl border border-emerald-200/80 flex items-start gap-3">
+              <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg shrink-0">
+                <CheckCircle2 className="w-4 h-4" />
               </div>
               <div className="flex-1">
                 <div className="flex items-center justify-between">
-                  <strong className="text-xs text-blue-900 font-extrabold">صف تایید اولیه مدیر بازرگانی</strong>
-                  <span className="px-2 py-0.5 bg-blue-600 text-white font-mono font-bold text-xs rounded-full">
-                    {receivedPendingOrders.length} سفارش
+                  <strong className="text-xs text-emerald-900 font-extrabold">سفارشات در وضعیت مطلوب و نرمال</strong>
+                  <span className="px-2 py-0.5 bg-emerald-600 text-white font-mono font-bold text-xs rounded-full">
+                    {Math.max(0, ordersWithSLA.filter(o => o.status !== 'CANCELLED').length - averageMetrics.overdueCount - averageMetrics.atRiskCount)} سفارش
                   </span>
                 </div>
-                <p className="text-[11px] text-blue-800 mt-1 leading-relaxed">
-                  سفارشات جدید ثبت شده توسط نمایندگان آماده بررسی مالی و تایید جهت ارسال به خط کارخانه می‌باشند.
+                <p className="text-[11px] text-emerald-800 mt-1 leading-relaxed">
+                  تولید، بارگیری و ترخیص این سفارشات مطابق استاندارد پیش‌بینی شده در حال انجام بوده و تاخیری در تحویل گزارش نشده است.
                 </p>
               </div>
             </div>
