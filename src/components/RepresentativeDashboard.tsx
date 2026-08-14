@@ -42,6 +42,8 @@ import {
   ShieldCheck,
   Layers,
   Info,
+  Package,
+  Plus,
   Paperclip,
   UploadCloud,
   Eye,
@@ -256,6 +258,8 @@ export default function RepresentativeDashboard({
   const [editIsExportOrder, setEditIsExportOrder] = useState(false);
   const [editDestinationCountry, setEditDestinationCountry] = useState('');
   const [editItems, setEditItems] = useState<InvoiceItem[]>([]);
+  const [editAddProductId, setEditAddProductId] = useState<string>('');
+  const [editAddQuantity, setEditAddQuantity] = useState<number | ''>('');
 
   // Territory-based location filtering
   const agentTerritories = currentAgentObj.territories || [];
@@ -499,33 +503,107 @@ export default function RepresentativeDashboard({
     setEditVehicleType(pendingData?.vehicleType ?? ord.vehicleDetails?.vehicleType ?? ord.vehicleType ?? 'تریلی');
     setEditIsExportOrder(pendingData?.isExportOrder !== undefined ? !!pendingData.isExportOrder : !!ord.isExportOrder);
     setEditDestinationCountry(pendingData?.destinationCountry ?? ord.destinationCountry ?? '');
+    
+    const activeProducts = products.filter(p => p.isEnabled !== false);
+    setEditAddProductId(activeProducts[0]?.id || '');
+    setEditAddQuantity('');
 
     let itemsList: InvoiceItem[] = [];
     const rawItemsJson = pendingData?.itemsJson || ord.itemsJson;
     if (rawItemsJson) {
       const hydrated = parseAndHydrateItemsJson(rawItemsJson, products);
       if (hydrated.length > 0) {
-        itemsList = hydrated.map((it, idx) => ({
-          id: `edit-item-${idx}-${Date.now()}`,
-          productId: it.productId || 'prod-1',
-          productName: it.productName || 'محصول',
-          quantity: it.quantity || 1,
-          unit: it.unit || 'عدد',
-          pricePerUnit: it.pricePerUnit || 0
-        }));
+        itemsList = hydrated.map((it, idx) => {
+          const matchedProd = products.find(p => p.id === it.productId || p.name === it.productName);
+          return {
+            id: `edit-item-${idx}-${Date.now()}`,
+            productId: matchedProd?.id || it.productId || 'prod-1',
+            productName: matchedProd?.name || it.productName || 'سفال طبرستان',
+            quantity: Number(it.quantity) || 1,
+            unit: matchedProd?.unit || it.unit || 'مترمربع',
+            pricePerUnit: matchedProd?.pricePerUnit ?? it.pricePerUnit ?? 0,
+            imageUrl: matchedProd?.imageUrl || it.imageUrl
+          };
+        });
       }
     }
     if (itemsList.length === 0) {
+      const pId = pendingData?.productId || ord.productId;
+      const matchedProd = products.find(p => p.id === pId || p.name === (pendingData?.productName || ord.productName));
       itemsList = [{
         id: `edit-item-single-${Date.now()}`,
-        productId: pendingData?.productId || ord.productId,
-        productName: pendingData?.productName || ord.productName,
+        productId: matchedProd?.id || pId || 'prod-1',
+        productName: matchedProd?.name || pendingData?.productName || ord.productName || 'سفال طبرستان',
         quantity: Number(pendingData?.quantity || ord.quantity) || 1,
-        unit: pendingData?.unit || ord.unit,
-        pricePerUnit: 0
+        unit: matchedProd?.unit || pendingData?.unit || ord.unit || 'مترمربع',
+        pricePerUnit: matchedProd?.pricePerUnit || 0,
+        imageUrl: matchedProd?.imageUrl
       }];
     }
     setEditItems(itemsList);
+  };
+
+  const handleUpdateEditItemQuantity = (index: number, newQty: number) => {
+    setEditItems(prev => prev.map((item, idx) => idx === index ? { ...item, quantity: Math.max(0, newQty) } : item));
+  };
+
+  const handleUpdateEditItemProduct = (index: number, newProductId: string) => {
+    const prod = products.find(p => p.id === newProductId);
+    if (!prod) return;
+    setEditItems(prev => prev.map((item, idx) => idx === index ? {
+      ...item,
+      productId: prod.id,
+      productName: prod.name,
+      unit: prod.unit,
+      pricePerUnit: prod.pricePerUnit,
+      imageUrl: prod.imageUrl
+    } : item));
+  };
+
+  const handleRemoveEditItem = (index: number) => {
+    if (editItems.length <= 1) {
+      showToast('سفارش باید حداقل شامل یک قلم کالا باشد.', 'error');
+      return;
+    }
+    setEditItems(prev => prev.filter((_, idx) => idx !== index));
+    showToast('قلم کالا از سفارش حذف شد.', 'info');
+  };
+
+  const handleAddEditItem = () => {
+    const activeProds = products.filter(p => p.isEnabled !== false);
+    const targetProdId = editAddProductId || activeProds[0]?.id;
+    const prod = products.find(p => p.id === targetProdId);
+    const qty = Number(editAddQuantity);
+
+    if (!prod) {
+      showToast('لطفاً نوع کالا را انتخاب کنید.', 'error');
+      return;
+    }
+    if (!qty || qty <= 0) {
+      showToast('لطفاً متراژ یا تعداد معتبر (بیشتر از صفر) وارد نمایید.', 'error');
+      return;
+    }
+
+    const existingIdx = editItems.findIndex(it => it.productId === prod.id);
+    if (existingIdx >= 0) {
+      setEditItems(prev => prev.map((it, idx) => idx === existingIdx ? { ...it, quantity: it.quantity + qty } : it));
+      showToast(`مقدار ${qty.toLocaleString()} به «${prod.name}» اضافه شد.`, 'success');
+    } else {
+      setEditItems(prev => [
+        ...prev,
+        {
+          id: `edit-item-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          productId: prod.id,
+          productName: prod.name,
+          quantity: qty,
+          unit: prod.unit,
+          pricePerUnit: prod.pricePerUnit,
+          imageUrl: prod.imageUrl
+        }
+      ]);
+      showToast(`کالای «${prod.name}» به لیست اقلام سفارش افزوده شد.`, 'success');
+    }
+    setEditAddQuantity('');
   };
 
   const handleSaveOrderEdit = () => {
@@ -536,6 +614,22 @@ export default function RepresentativeDashboard({
     }
     if (!onEditOrder) {
       showToast('سرویس ثبت ویرایش سفارش در دسترس نیست.', 'error');
+      return;
+    }
+
+    if (editItems.length === 0) {
+      showToast('سفارش باید حداقل دارای یک قلم کالا باشد.', 'error');
+      return;
+    }
+
+    const invalidItem = editItems.find(it => !it.quantity || Number(it.quantity) <= 0);
+    if (invalidItem) {
+      showToast(`لطفاً مقدار معتبر برای کالای «${invalidItem.productName}» وارد کنید.`, 'error');
+      return;
+    }
+
+    if (!editBuyerName.trim()) {
+      showToast('لطفاً نام خریدار یا پروژه را وارد نمایید.', 'error');
       return;
     }
 
@@ -562,7 +656,7 @@ export default function RepresentativeDashboard({
       destinationCountry: editIsExportOrder ? editDestinationCountry : '',
       productId: firstItem.productId,
       productName: editItems.length > 1 
-        ? editItems.map(i => `${i.productName} (${i.quantity} ${i.unit})`).join(' + ')
+        ? editItems.map(i => `${i.productName} (${i.quantity.toLocaleString()} ${i.unit})`).join(' + ')
         : firstItem.productName,
       quantity: totalQuantity,
       unit: firstItem.unit,
@@ -571,6 +665,7 @@ export default function RepresentativeDashboard({
 
     onEditOrder(editingOrder.id, payload);
     setEditingOrder(null);
+    showToast('اصلاحیه سفارش با موفقیت ثبت شد و به کارتابل مدیر بازرگانی ارسال گردید.', 'success');
   };
 
   const handleGetCurrentLocation = () => {
@@ -2104,131 +2199,413 @@ export default function RepresentativeDashboard({
         }}
       />
 
+      {/* Edit Order Interactive Map Picker Modal */}
+      <InteractiveMapPicker
+        isOpen={isEditMapPickerOpen}
+        onClose={() => setIsEditMapPickerOpen(false)}
+        cityHint={editDestinationCity}
+        agentTerritories={agentTerritories}
+        onConfirmLocation={(url, lat, lng, addressText) => {
+          setEditDeliveryLocationUrl(url);
+          if (addressText) {
+            setEditExactAddress(addressText);
+            showToast('موقعیت مکانی روی نقشه و آدرس متنی آن با موفقیت ثبت شد.', 'success');
+          } else {
+            showToast('موقعیت مکانی روی نقشه ثبت شد.', 'success');
+          }
+        }}
+      />
+
       {/* Edit Order Modal */}
-      {editingOrder && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-lg w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-150 pb-3">
-              <h3 className="font-extrabold text-slate-900 text-sm">
-                ویرایش سفارش #{editingOrder.orderNumber || editingOrder.id.slice(-6)}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setEditingOrder(null)}
-                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {editingOrder && (() => {
+        const editTotalQuantity = editItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+        const editTotalAmount = editItems.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.pricePerUnit) || 0)), 0);
+        const activeProducts = products.filter(p => p.isEnabled !== false);
 
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-800 font-bold mb-1">نام خریدار:</label>
-                <input
-                  type="text"
-                  value={editBuyerName}
-                  onChange={e => setEditBuyerName(e.target.value)}
-                  className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-800 font-bold mb-1">تلفن خریدار:</label>
-                <input
-                  type="text"
-                  value={editPhoneNumber}
-                  onChange={e => setEditPhoneNumber(e.target.value)}
-                  className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 font-mono dir-ltr text-left font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-800 font-bold mb-1">آدرس دقیق تخلیه بار:</label>
-                <textarea
-                  rows={2}
-                  value={editExactAddress}
-                  onChange={e => setEditExactAddress(e.target.value)}
-                  className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 font-sans font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
-                />
-              </div>
-
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
-                <label className="block text-slate-800 font-bold mb-1 flex items-center justify-between">
-                  <span>کد رهگیری واریز / چک:</span>
-                  {editPaymentReceiptUrl && <span className="text-[10px] text-emerald-700 font-bold">✓ فیش الصاق شده</span>}
-                </label>
-                <input
-                  type="text"
-                  value={editPaymentTrackingCode}
-                  onChange={e => setEditPaymentTrackingCode(e.target.value)}
-                  className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 font-mono text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
-                />
-
-                <div className="pt-1">
-                  <label className="block text-slate-700 font-bold mb-1">تصویر یا PDF فیش واریزی:</label>
-                  {editPaymentReceiptUrl ? (
-                    <div className="flex items-center justify-between bg-emerald-50 border border-emerald-300 rounded-xl p-2 text-xs">
-                      <div className="flex items-center gap-2 truncate">
-                        {editPaymentReceiptUrl.startsWith('data:image') ? (
-                          <img src={editPaymentReceiptUrl} alt="فیش" className="w-8 h-8 object-cover rounded-lg border border-emerald-400 shrink-0" />
-                        ) : (
-                          <FileText className="w-5 h-5 text-emerald-700 shrink-0" />
-                        )}
-                        <span className="font-bold text-emerald-950 truncate text-[11px]">{editPaymentReceiptName || 'فیش_واریزی.jpg'}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditPaymentReceiptUrl('');
-                          setEditPaymentReceiptName('');
-                        }}
-                        className="text-rose-600 hover:text-rose-800 text-[10px] font-bold px-2 py-1 bg-white rounded-lg border border-rose-200 cursor-pointer shrink-0"
-                      >
-                        حذف
-                      </button>
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-2xl w-full p-5 sm:p-6 space-y-5 max-h-[92vh] overflow-y-auto animate-scale-up">
+              
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-150 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-amber-100 text-amber-900 rounded-2xl border border-amber-200 shadow-2xs">
+                    <Edit className="w-5 h-5 text-amber-800" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-black text-slate-900 text-sm sm:text-base">
+                        ویرایش و اصلاح اطلاعات سفارش
+                      </h3>
+                      <span className="bg-slate-100 text-slate-700 font-mono font-black text-xs px-2 py-0.5 rounded-lg border border-slate-200">
+                        #{editingOrder.orderNumber || editingOrder.id.slice(-6)}
+                      </span>
                     </div>
-                  ) : (
-                    <label className="flex items-center justify-center gap-2 bg-white hover:bg-slate-100 text-slate-700 font-bold py-2 px-3 rounded-xl border border-dashed border-slate-300 text-xs transition-colors cursor-pointer shadow-2xs">
-                      <UploadCloud className="w-4 h-4 text-emerald-600" />
-                      <span>انتخاب یا تغییر فایل فیش واریزی</span>
+                    <p className="text-[11px] text-slate-500 font-bold">
+                      امکان تغییر نوع و متراژ کالاها، مشخصات خریدار، آدرس تحویل و فیش واریز
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingOrder(null)}
+                  className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Informative Priority Notice */}
+              <div className="p-3 bg-emerald-50/80 rounded-2xl border border-emerald-200/80 text-emerald-950 text-xs flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <span className="font-black block text-xs text-emerald-900">حفظ نوبت و اولویت تولید:</span>
+                  <p className="text-[11px] text-emerald-800 font-semibold leading-relaxed">
+                    با ویرایش اطلاعات و اقلام، <strong>اولویت و نوبت سفارش در خط کارخانه محفوظ می‌ماند</strong> و اصلاحات جدید جهت تایید نهایی برای مدیر بازرگانی ارسال می‌گردد.
+                  </p>
+                </div>
+              </div>
+
+              {/* Section 1: Order Products & Quantities (FULL EDITING) */}
+              <div className="space-y-3 bg-slate-50/80 p-4 rounded-2xl border-2 border-emerald-600/30">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Package className="w-4 h-4 text-emerald-700" />
+                    <span className="font-black text-xs sm:text-sm text-slate-900">اقلام، نوع کالا و متراژ سفارش</span>
+                  </div>
+                  <span className="bg-emerald-100 text-emerald-900 text-[11px] font-black px-2.5 py-0.5 rounded-lg border border-emerald-200">
+                    {editItems.length} قلم کالا
+                  </span>
+                </div>
+
+                {/* Items List */}
+                <div className="space-y-2.5">
+                  {editItems.map((item, idx) => {
+                    const lineTotal = (Number(item.quantity) || 0) * (Number(item.pricePerUnit) || 0);
+                    return (
+                      <div
+                        key={item.id || idx}
+                        className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-2"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          
+                          {/* Product Selection */}
+                          <div className="flex-1 min-w-[200px]">
+                            <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                              نوع محصول (قلم {idx + 1}):
+                            </label>
+                            <select
+                              value={item.productId}
+                              onChange={(e) => handleUpdateEditItemProduct(idx, e.target.value)}
+                              className="w-full bg-slate-50 hover:bg-white border-2 border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-black focus:outline-none focus:border-emerald-600 focus:bg-white shadow-2xs cursor-pointer transition-all"
+                            >
+                              {activeProducts.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} — ({p.pricePerUnit.toLocaleString()} ت/{p.unit})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Quantity & Unit */}
+                          <div className="flex items-center gap-2">
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                                مقدار ({item.unit || 'مترمربع'}):
+                              </label>
+                              <div className="relative flex items-center">
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={item.quantity}
+                                  onChange={(e) => handleUpdateEditItemQuantity(idx, Number(toEnglishDigits(e.target.value)))}
+                                  className="w-28 bg-emerald-50/40 hover:bg-emerald-50/70 border-2 border-emerald-400 rounded-xl py-1.5 px-2 text-center text-xs font-mono font-black text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white shadow-2xs"
+                                />
+                                <span className="absolute left-2 text-[10px] font-bold text-slate-500 pointer-events-none">
+                                  {item.unit || 'متر'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Delete Item Button */}
+                            {editItems.length > 1 && (
+                              <div className="pt-4">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveEditItem(idx)}
+                                  className="p-2 text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                                  title="حذف این قلم از سفارش"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                        </div>
+
+                        {/* Price Subtotal Badge */}
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[11px]">
+                          <span className="text-slate-500 font-bold">
+                            قیمت فی: <strong className="text-slate-700">{item.pricePerUnit?.toLocaleString() || 0} تومان</strong>
+                          </span>
+                          <span className="font-mono font-black text-emerald-800">
+                            مبلغ ردیف: {lineTotal.toLocaleString()} تومان
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Add New Product to Edit Basket */}
+                <div className="bg-emerald-50/60 p-3 rounded-xl border border-dashed border-emerald-300 space-y-2">
+                  <span className="text-[11px] font-black text-emerald-950 flex items-center gap-1">
+                    <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>افزودن کالای دیگر به این سفارش:</span>
+                  </span>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <div className="flex-1">
+                      <select
+                        value={editAddProductId || (activeProducts[0]?.id || '')}
+                        onChange={(e) => setEditAddProductId(e.target.value)}
+                        className="w-full bg-white border-2 border-emerald-300 rounded-xl py-1.5 px-3 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600 cursor-pointer"
+                      >
+                        {activeProducts.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.pricePerUnit.toLocaleString()} تومان)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="w-full sm:w-28">
                       <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleFileRead(file, (url, name) => {
-                            setEditPaymentReceiptUrl(url);
-                            setEditPaymentReceiptName(name);
-                            showToast('تصویر فیش واریزی جدید انتخاب شد.', 'success');
-                          });
-                        }}
-                        className="hidden"
+                        type="number"
+                        min="1"
+                        placeholder="متراژ/تعداد"
+                        value={editAddQuantity}
+                        onChange={(e) => setEditAddQuantity(e.target.value ? Number(toEnglishDigits(e.target.value)) : '')}
+                        className="w-full bg-white border-2 border-emerald-300 rounded-xl py-1.5 px-2 text-center text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
                       />
-                    </label>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddEditItem}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1 cursor-pointer shadow-2xs shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>افزودن به اقلام</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Total Summary for Edit Modal */}
+                <div className="bg-emerald-600 text-white p-3 rounded-xl flex items-center justify-between shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold opacity-90">مجموع متراژ/مقدار:</span>
+                    <span className="font-mono font-black text-sm bg-white/20 px-2 py-0.5 rounded-md">
+                      {editTotalQuantity.toLocaleString()} {editItems[0]?.unit || 'مترمربع'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold opacity-90">جمع کل برآوردی:</span>
+                    <span className="font-mono font-black text-sm sm:text-base">
+                      {editTotalAmount.toLocaleString()} تومان
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Buyer & Destination Info */}
+              <div className="space-y-3">
+                <h4 className="font-black text-xs text-slate-800 flex items-center gap-1.5 border-b border-slate-150 pb-1.5">
+                  <User className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>مشخصات خریدار، مقصد و ناوگان حمل:</span>
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block text-slate-800 font-bold mb-1">نام خریدار / عنوان پروژه:</label>
+                    <input
+                      type="text"
+                      value={editBuyerName}
+                      onChange={e => setEditBuyerName(e.target.value)}
+                      placeholder="نام و نام خانوادگی خریدار"
+                      className="w-full bg-slate-50 hover:bg-white border-2 border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-800 font-bold mb-1">شماره همراه خریدار:</label>
+                    <input
+                      type="text"
+                      value={editPhoneNumber}
+                      onChange={e => setEditPhoneNumber(toEnglishDigits(e.target.value))}
+                      placeholder="0912..."
+                      className="w-full bg-slate-50 hover:bg-white border-2 border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-mono dir-ltr text-left font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-800 font-bold mb-1">شهر مقصد:</label>
+                    <input
+                      type="text"
+                      value={editDestinationCity}
+                      onChange={e => setEditDestinationCity(e.target.value)}
+                      placeholder="نام شهر یا استان مقصد"
+                      className="w-full bg-slate-50 hover:bg-white border-2 border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-800 font-bold mb-1">نوع خودروی باربری:</label>
+                    <select
+                      value={editVehicleType}
+                      onChange={e => setEditVehicleType(e.target.value)}
+                      className="w-full bg-slate-50 hover:bg-white border-2 border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 focus:bg-white shadow-2xs cursor-pointer transition-all"
+                    >
+                      <option value="تریلی">تریلی (کفی / لبه‌دار)</option>
+                      <option value="جفت">کامیون ۱۰ چرخ (جفت)</option>
+                      <option value="تک">کامیون ۶ چرخ (تک)</option>
+                      <option value="خاور">کامیونت / خاور</option>
+                      <option value="نیسان/وانت">نیسان / وانت</option>
+                      <option value="حمل توسط مشتری">حمل توسط خود مشتری</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Exact Address & Map Location */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-slate-800 font-bold text-xs">آدرس دقیق تخلیه بار:</label>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditMapPickerOpen(true)}
+                      className="text-emerald-700 hover:text-emerald-900 text-[11px] font-black flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg transition-all cursor-pointer shadow-2xs"
+                    >
+                      <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{editDeliveryLocationUrl ? 'تغییر موقعیت روی نقشه' : 'انتخاب از روی نقشه هوشمند'}</span>
+                    </button>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={editExactAddress}
+                    onChange={e => setEditExactAddress(e.target.value)}
+                    placeholder="آدرس پستی و جزئیات محل تخلیه..."
+                    className="w-full bg-slate-50 hover:bg-white border-2 border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-sans font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
+                  />
+                  {editDeliveryLocationUrl && (
+                    <div className="mt-1 flex items-center gap-1.5 text-[11px] text-emerald-800 bg-emerald-50 p-1.5 rounded-lg border border-emerald-200 font-bold">
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>موقعیت مکانی نقشه الصاق شده است:</span>
+                      <span className="font-mono truncate max-w-[250px] dir-ltr text-left text-[10px] text-slate-600">{editDeliveryLocationUrl}</span>
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
 
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-150">
-              <button
-                type="button"
-                onClick={() => setEditingOrder(null)}
-                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 rounded-xl text-xs font-bold text-slate-700"
-              >
-                انصراف
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveOrderEdit}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-xl text-xs font-bold text-white shadow-sm"
-              >
-                ذخیره تغییرات
-              </button>
+              {/* Section 3: Payment & Notes */}
+              <div className="space-y-3">
+                <h4 className="font-black text-xs text-slate-800 flex items-center gap-1.5 border-b border-slate-150 pb-1.5">
+                  <Coins className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>اطلاعات پرداخت و فیش واریزی:</span>
+                </h4>
+
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-3">
+                  <div>
+                    <label className="block text-slate-800 font-bold text-xs mb-1 flex items-center justify-between">
+                      <span>کد رهگیری واریز / شماره چک:</span>
+                      {editPaymentReceiptUrl && <span className="text-[10px] text-emerald-700 font-bold">✓ فیش الصاق شده</span>}
+                    </label>
+                    <input
+                      type="text"
+                      value={editPaymentTrackingCode}
+                      onChange={e => setEditPaymentTrackingCode(e.target.value)}
+                      placeholder="مثال: ۱۲۳۴۵۶۷۸۹"
+                      className="w-full bg-white border-2 border-slate-300 rounded-xl py-2 px-3 font-mono text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 font-bold text-xs mb-1">تصویر یا PDF فیش واریزی:</label>
+                    {editPaymentReceiptUrl ? (
+                      <div className="flex items-center justify-between bg-emerald-50 border border-emerald-300 rounded-xl p-2.5 text-xs">
+                        <div className="flex items-center gap-2.5 truncate">
+                          {editPaymentReceiptUrl.startsWith('data:image') ? (
+                            <img src={editPaymentReceiptUrl} alt="فیش" className="w-10 h-10 object-cover rounded-lg border border-emerald-400 shrink-0 shadow-2xs" />
+                          ) : (
+                            <FileText className="w-6 h-6 text-emerald-700 shrink-0" />
+                          )}
+                          <span className="font-bold text-emerald-950 truncate text-xs">{editPaymentReceiptName || 'فیش_واریزی.jpg'}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditPaymentReceiptUrl('');
+                            setEditPaymentReceiptName('');
+                          }}
+                          className="text-rose-600 hover:text-rose-800 text-xs font-bold px-2.5 py-1 bg-white rounded-lg border border-rose-200 cursor-pointer shrink-0 transition-colors"
+                        >
+                          حذف فیش
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-2 bg-white hover:bg-slate-100 text-slate-700 font-bold py-2.5 px-3 rounded-xl border-2 border-dashed border-slate-300 text-xs transition-colors cursor-pointer shadow-2xs">
+                        <UploadCloud className="w-4 h-4 text-emerald-600" />
+                        <span>انتخاب یا تغییر فایل فیش واریزی</span>
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleFileRead(file, (url, name) => {
+                              setEditPaymentReceiptUrl(url);
+                              setEditPaymentReceiptName(name);
+                              showToast('تصویر فیش واریزی جدید انتخاب شد.', 'success');
+                            });
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-800 font-bold text-xs mb-1">یادداشت و توضیحات تکمیلی:</label>
+                    <input
+                      type="text"
+                      value={editNotes}
+                      onChange={e => setEditNotes(e.target.value)}
+                      placeholder="توضیحات مربوط به بارگیری، زمان تحویل و..."
+                      className="w-full bg-white border-2 border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 shadow-2xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer Actions */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-150">
+                <button
+                  type="button"
+                  onClick={() => setEditingOrder(null)}
+                  className="px-5 py-2.5 bg-slate-200 hover:bg-slate-300 rounded-xl text-xs font-extrabold text-slate-700 cursor-pointer transition-colors"
+                >
+                  انصراف
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveOrderEdit}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>ثبت و ارسال اصلاحیه سفارش</span>
+                </button>
+              </div>
+
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Standalone Payment Receipt Upload Modal */}
       {standaloneReceiptOrder && (
