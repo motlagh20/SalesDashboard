@@ -520,9 +520,12 @@ export default function ManagerDashboard({
 
   useEffect(() => {
     fetchUsers();
-    const interval = setInterval(fetchUsers, 10000);
-    return () => clearInterval(interval);
-  }, [agents, shippingCompanies]);
+    // Only periodically refresh users if the manager is on the USERS subtab
+    if (partnerSubTab === 'USERS') {
+      const interval = setInterval(fetchUsers, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [partnerSubTab]);
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();

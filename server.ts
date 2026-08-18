@@ -173,6 +173,15 @@ async function startServer() {
   // Unified Ultra-Fast Sync Bootstrap API Endpoint (Fetches all datasets in a single HTTP round-trip)
   app.get("/api/sync/bootstrap", async (req, res) => {
     try {
+      const bypass = req.query._t !== undefined;
+      const cacheKey = "sync_bootstrap";
+      if (!bypass) {
+        const cached = getCachedRouteData(cacheKey);
+        if (cached) {
+          return res.json(cached);
+        }
+      }
+
       const db = getDbPool();
       
       const [
@@ -318,7 +327,7 @@ async function startServer() {
         return formatted;
       });
 
-      res.json({
+      const payload = {
         products,
         agents,
         shippingCompanies,
@@ -327,7 +336,10 @@ async function startServer() {
         systemSettings: getSystemSettings(),
         sandboxEnabled: globalSandboxEnabled,
         timestamp: Date.now()
-      });
+      };
+
+      setCachedRouteData(cacheKey, payload, 8); // 8 seconds cache
+      res.json(payload);
     } catch (err: any) {
       console.error("Error in GET /api/sync/bootstrap:", err);
       res.status(500).json({ error: err.message });
@@ -3018,6 +3030,11 @@ function compactItemsJson(itemsInput: any): string | null {
   // 7. SYSTEM ACTIVITY LOGS & HARDWARE/SOFTWARE METRICS
   app.get("/api/system/monitor-data", async (req, res) => {
     try {
+      const cached = getCachedRouteData("monitor_data");
+      if (cached) {
+        return res.json(cached);
+      }
+
       const limit = parseInt(req.query.limit as string) || 100;
       const logsPromise = getUserActivityLogs(limit).catch(() => []);
       
@@ -3112,14 +3129,17 @@ function compactItemsJson(itemsInput: any): string | null {
         }
       };
 
-      res.json({
+      const monitorPayload = {
         success: true,
         logs,
         metrics,
         errorLogs: rawErrorLogs,
         systemSettings: getSystemSettings(),
         userCount
-      });
+      };
+
+      setCachedRouteData("monitor_data", monitorPayload, 5); // 5s cache
+      res.json(monitorPayload);
     } catch (err: any) {
       console.error("Error in GET /api/system/monitor-data:", err);
       res.status(500).json({ error: err.message });

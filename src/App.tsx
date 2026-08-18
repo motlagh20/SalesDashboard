@@ -124,7 +124,7 @@ export default function App() {
     };
 
     sendHeartbeat();
-    const interval = setInterval(sendHeartbeat, 15000);
+    const interval = setInterval(sendHeartbeat, 30000);
     return () => clearInterval(interval);
   }, [currentUser]);
 
