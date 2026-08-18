@@ -196,15 +196,16 @@ export default function SeniorAdminDashboard({
     );
   };
 
-  const fetchSystemLogsAndStats = async () => {
+  const fetchSystemLogsAndStats = async (signal?: AbortSignal) => {
     setIsRefreshingMonitor(true);
     try {
       // 1. Try high-speed unified monitor-data endpoint first
-      const resUnified = await fetch('/api/system/monitor-data?limit=100');
+      const resUnified = await fetch('/api/system/monitor-data?limit=100', { signal });
       if (resUnified.ok) {
         const ct = resUnified.headers.get('content-type') || '';
         if (ct.includes('application/json')) {
           const data = await resUnified.json();
+          if (signal?.aborted) return;
           if (data.logs && Array.isArray(data.logs)) {
             setActivityLogs(data.logs);
           }
@@ -224,18 +225,21 @@ export default function SeniorAdminDashboard({
         }
       }
     } catch {
-      // fallback to individual calls if unified call is unavailable
+      // fallback to individual calls if unified call is unavailable or aborted
     }
 
     try {
+      if (signal?.aborted) return;
       // Fallback: Individual calls
       const [resLogs, resMetrics, resErr, resUsers, resSettings] = await Promise.allSettled([
-        fetch('/api/system/activity-logs?limit=100'),
-        fetch('/api/system/metrics'),
-        fetch('/api/system/error-logs'),
-        fetch('/api/users'),
-        fetch('/api/system-settings')
+        fetch('/api/system/activity-logs?limit=100', { signal }),
+        fetch('/api/system/metrics', { signal }),
+        fetch('/api/system/error-logs', { signal }),
+        fetch('/api/users', { signal }),
+        fetch('/api/system-settings', { signal })
       ]);
+
+      if (signal?.aborted) return;
 
       if (resLogs.status === 'fulfilled' && resLogs.value.ok) {
         try {
@@ -276,8 +280,8 @@ export default function SeniorAdminDashboard({
           }
         } catch {}
       }
-    } catch (err) {
-      console.warn('Silent note: system logs refresh encountered transient issue:', err);
+    } catch {
+      // Ignore network aborts during navigation/unmount
     } finally {
       setIsRefreshingMonitor(false);
     }
@@ -308,11 +312,16 @@ export default function SeniorAdminDashboard({
   };
 
   useEffect(() => {
-    fetchSystemLogsAndStats();
+    const controller = new AbortController();
+    fetchSystemLogsAndStats(controller.signal);
     if (autoRefreshActive) {
-      const interval = setInterval(fetchSystemLogsAndStats, 10000);
-      return () => clearInterval(interval);
+      const interval = setInterval(() => fetchSystemLogsAndStats(controller.signal), 10000);
+      return () => {
+        clearInterval(interval);
+        controller.abort();
+      };
     }
+    return () => controller.abort();
   }, [autoRefreshActive]);
 
   const handleFlushCache = async () => {
