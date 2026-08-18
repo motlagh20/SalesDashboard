@@ -25,7 +25,8 @@ import {
   Undo2,
   AlertCircle,
   Send,
-  X
+  X,
+  Sparkles
 } from 'lucide-react';
 
 interface ShippingCompanyDashboardProps {
@@ -34,6 +35,7 @@ interface ShippingCompanyDashboardProps {
   products: Product[];
   permanentDrivers?: PermanentDriver[];
   onAssignVehicle: (orderId: string, vehicle: VehicleDetails) => void;
+  onUpdateVehicle?: (orderId: string, vehicle: VehicleDetails) => Promise<boolean>;
   onReturnOrderToSales?: (orderId: string, reason: string) => void;
   onSaveLocation?: (orderId: string, deliveryLocationUrl: string) => Promise<void>;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -74,6 +76,7 @@ export default function ShippingCompanyDashboard({
   products = [],
   permanentDrivers = [],
   onAssignVehicle,
+  onUpdateVehicle,
   onReturnOrderToSales,
   onSaveLocation,
   showToast,
@@ -109,6 +112,7 @@ export default function ShippingCompanyDashboard({
 
   // Specific assignment form states per order
   const [assigningOrderId, setAssigningOrderId] = useState<string | null>(null);
+  const [isEditingExistingVehicle, setIsEditingExistingVehicle] = useState<boolean>(false);
   const [vehicleType, setVehicleType] = useState('تریلی ۱۸ چرخ لبه‌دار');
   const [driverName, setDriverName] = useState('');
   const [driverPhone, setDriverPhone] = useState('');
@@ -120,6 +124,79 @@ export default function ShippingCompanyDashboard({
   const [returningOrderId, setReturningOrderId] = useState<string | null>(null);
   const [returnReasonSelect, setReturnReasonSelect] = useState('عدم امکان تامین کامیون / وسیله نقلیه در زمان مقرر');
   const [returnNote, setReturnNote] = useState('');
+
+  const handleOpenEditVehicle = (order: Order) => {
+    setAssigningOrderId(order.id);
+    setIsEditingExistingVehicle(true);
+    setVehicleType(order.vehicleDetails?.vehicleType || 'تریلی ۱۸ چرخ لبه‌دار');
+    setDriverName(order.vehicleDetails?.driverName || '');
+    setDriverPhone(order.vehicleDetails?.driverPhone || '');
+    setLicensePlate(order.vehicleDetails?.licensePlate || '');
+    setBillOfLadingNumber(order.vehicleDetails?.billOfLadingNumber || '');
+    setEstimatedArrival(order.vehicleDetails?.estimatedArrival || new Date().toLocaleDateString('fa-IR'));
+  };
+
+  const handleAssignSubmit = async (e: React.FormEvent, orderId: string) => {
+    e.preventDefault();
+    if (!driverName.trim()) {
+      showToast('لطفا نام راننده را وارد کنید.', 'error');
+      return;
+    }
+    if (!driverPhone.trim()) {
+      showToast('لطفا شماره همراه راننده را وارد کنید.', 'error');
+      return;
+    }
+    if (!licensePlate.trim()) {
+      showToast('لطفا شماره پلاک خودرو را وارد کنید.', 'error');
+      return;
+    }
+    if (!billOfLadingNumber.trim()) {
+      showToast('لطفا شماره بارنامه صادره از سیستم حمل خود را وارد کنید.', 'error');
+      return;
+    }
+
+    const vehicleObj: VehicleDetails = {
+      vehicleType,
+      driverName: driverName.trim(),
+      driverPhone: driverPhone.trim(),
+      licensePlate: licensePlate.trim(),
+      shippingAgency: currentCompany?.name || 'باربری همکار کارخانه',
+      estimatedArrival: estimatedArrival || new Date().toLocaleDateString('fa-IR'),
+      billOfLadingNumber: billOfLadingNumber.trim()
+    };
+
+    if (isEditingExistingVehicle) {
+      if (onUpdateVehicle) {
+        const success = await onUpdateVehicle(orderId, vehicleObj);
+        if (success) {
+          showToast(`✏️ مشخصات ناوگان و راننده برای سفارش با موفقیت اصلاح گردید.`, 'success');
+          setAssigningOrderId(null);
+          setIsEditingExistingVehicle(false);
+        }
+      } else {
+        try {
+          const res = await fetch(`/api/orders/${orderId}/update-vehicle`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(vehicleObj)
+          });
+          if (res.ok) {
+            showToast(`✏️ مشخصات ناوگان و راننده برای سفارش با موفقیت اصلاح گردید.`, 'success');
+            setAssigningOrderId(null);
+            setIsEditingExistingVehicle(false);
+          } else {
+            showToast('خطا در اصلاح مشخصات ناوگان', 'error');
+          }
+        } catch {
+          showToast('خطای شبکه در ارتباط با سرور', 'error');
+        }
+      }
+    } else {
+      onAssignVehicle(orderId, vehicleObj);
+      setAssigningOrderId(null);
+      setIsEditingExistingVehicle(false);
+    }
+  };
 
   const handleReturnSubmit = (orderId: string) => {
     if (!onReturnOrderToSales) {
@@ -203,51 +280,6 @@ export default function ShippingCompanyDashboard({
   const sortedOrders = [...filteredOrders].sort((a, b) => {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
-
-  // Handle assign submission
-  const handleAssignSubmit = (e: React.FormEvent, orderId: string) => {
-    e.preventDefault();
-    if (!driverName.trim()) {
-      showToast('لطفا نام راننده را مشخص کنید.', 'error');
-      return;
-    }
-    if (!driverPhone.trim()) {
-      showToast('لطفا شماره همراه راننده را مشخص کنید.', 'error');
-      return;
-    }
-    if (!licensePlate.trim()) {
-      showToast('لطفا پلاک خودرو را بنویسید.', 'error');
-      return;
-    }
-    if (!billOfLadingNumber.trim()) {
-      showToast('خطا: ثبت شماره بارنامه صادره از نرم‌افزار حمل الزامی است.', 'error');
-      return;
-    }
-
-    askConfirm(
-      'تایید و تخصیص خودرو به سفارش',
-      `آیا مشخصات راننده به همراه شماره بارنامه «${billOfLadingNumber}» مورد تایید است؟ این اطلاعات به کارخط کارخانه ارسال خواهد شد.`,
-      () => {
-        onAssignVehicle(orderId, {
-          vehicleType,
-          driverName,
-          driverPhone,
-          licensePlate,
-          shippingAgency: currentCompany ? currentCompany.name : 'باربری',
-          estimatedArrival,
-          billOfLadingNumber
-        });
-        
-        // Reset state
-        setAssigningOrderId(null);
-        setDriverName('');
-        setDriverPhone('');
-        setLicensePlate('');
-        setBillOfLadingNumber('');
-        setEstimatedArrival(new Date().toLocaleDateString('fa-IR'));
-      }
-    );
-  };
 
   return (
     <div className="space-y-6 text-right dir-rtl font-sans" id="shipping-company-dashboard">
@@ -431,14 +463,19 @@ export default function ShippingCompanyDashboard({
                   
                   {/* Order Line Header */}
                   <div className="p-4 bg-slate-50 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2.5 flex-wrap">
                       <span className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-mono font-bold">{order.orderNumber}</span>
                       <span className="text-slate-400 text-xs">|</span>
                       <span className="text-xs font-bold text-slate-800">{order.customerName}</span>
                       <span className="text-slate-400 text-xs">({order.agentCode})</span>
+                      {order.isExportOrder && (
+                        <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-purple-200">
+                          🌍 صادراتی (پالت شرینک)
+                        </span>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-2 self-start md:self-auto">
+                    <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
                       <span className="text-slate-400 text-[11px] font-mono">ثبت: {new Date(order.createdAt).toLocaleDateString('fa-IR')}</span>
                       <span className="text-slate-200">|</span>
                       <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
@@ -448,10 +485,46 @@ export default function ShippingCompanyDashboard({
                       }`}>
                         {order.status === 'SENT_TO_FACTORY' && 'منتظر وسیله نقلیه'}
                         {order.status === 'VEHICLE_ASSIGNED' && 'تخصیص‌یافته / در صف بارگیری کارخانه'}
-                        {order.status === 'LOADED_AND_DISPATCHED' && 'بارگیری کامل و ترخیص شده'}
+                        {order.status === 'WAREHOUSE_LOADED' && 'بارگیری شده / در گیت حراست'}
+                        {order.status === 'LOADED_AND_DISPATCHED' && 'ترخیص نهایی'}
                       </span>
                     </div>
                   </div>
+
+                  {/* Pending Edit Suspension Warning */}
+                  {order.hasPendingEdit && (
+                    <div className="bg-amber-500/10 border-b border-amber-500/20 p-3 px-5 text-amber-900 text-xs font-bold flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>⚠️ این سفارش توسط نماینده ویرایش شده و تا زمان تایید مجدد توسط مدیر بازرگانی غیرفعال می‌باشد.</span>
+                      </div>
+                      <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md font-mono shrink-0">معلق در انتظار مدیر</span>
+                    </div>
+                  )}
+
+                  {/* Recently Edited Notice Banner */}
+                  {order.recentlyEditedNotice && !order.hasPendingEdit && (
+                    <div className="bg-blue-50 border-b border-blue-200 p-2.5 px-5 text-blue-900 text-xs font-bold flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+                      <span>⚡ {order.recentlyEditedNotice}</span>
+                    </div>
+                  )}
+
+                  {/* Discrepancy Notice */}
+                  {order.warehouseDiscrepancy && (
+                    <div className="bg-rose-50 border-b border-rose-200 p-2.5 px-5 text-rose-900 text-xs font-bold flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>⚠️ اعلام مغایرت انبار: {order.warehouseDiscrepancy.reason} (گزارش‌دهنده: {order.warehouseDiscrepancy.reporterName})</span>
+                    </div>
+                  )}
+
+                  {/* Detained Notice */}
+                  {order.securityDetained && (
+                    <div className="bg-red-100 border-b border-red-300 p-2.5 px-5 text-red-900 text-xs font-bold flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      <span>🛑 توقیف در گیت حراست: {order.securityDetained.reason} (افسر: {order.securityDetained.officerName})</span>
+                    </div>
+                  )}
 
                   {/* Shipment Details inside Card Body */}
                   <div className="p-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -623,20 +696,33 @@ export default function ShippingCompanyDashboard({
                                 </div>
                               </div>
 
-                              {/* Location Send Button for Driver */}
+                              {/* Location Send Button and Edit Fleet Button for Driver */}
                               <div className="mt-3 border-t border-emerald-100/80 pt-2.5 flex items-center justify-between flex-wrap gap-2">
                                 <div className="flex items-center gap-1.5 text-xs text-slate-600">
                                   <MapPin className="w-3.5 h-3.5 text-sky-600 shrink-0" />
                                   <span>لوکیشن تخلیه بار: <strong>{order.deliveryLocationUrl ? 'ثبت شده روی نقشه' : 'هنوز لینکی ثبت نشده'}</strong></span>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedLocationOrder(order)}
-                                  className="bg-sky-700 hover:bg-sky-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                                >
-                                  <Send className="w-3.5 h-3.5" />
-                                  <span>📲 ارسال لوکیشن و آدرس به راننده</span>
-                                </button>
+                                <div className="flex items-center gap-2">
+                                  {order.status === 'VEHICLE_ASSIGNED' && !order.hasPendingEdit && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenEditVehicle(order)}
+                                      className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                                      title="ویرایش راننده، نوع خودرو، پلاک یا شماره بارنامه"
+                                    >
+                                      <UserCheck className="w-3.5 h-3.5" />
+                                      <span>✏️ ویرایش ناوگان / تعویض راننده</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedLocationOrder(order)}
+                                    className="bg-sky-700 hover:bg-sky-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                                  >
+                                    <Send className="w-3.5 h-3.5" />
+                                    <span>📲 ارسال لوکیشن و آدرس به راننده</span>
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           )}
@@ -646,8 +732,10 @@ export default function ShippingCompanyDashboard({
                             <div className="flex flex-col items-center justify-center p-6 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
                               <p className="text-xs text-slate-500 font-bold mb-3">کامیونی برای این مورد ثبت نشده است</p>
                               <button
+                                disabled={order.hasPendingEdit}
                                 onClick={() => {
                                   setAssigningOrderId(order.id);
+                                  setIsEditingExistingVehicle(false);
                                   // Prep-fill draft values to make fast
                                   setVehicleType('تریلی ۱۸ چرخ لبه‌دار');
                                   setDriverName('');
@@ -656,26 +744,33 @@ export default function ShippingCompanyDashboard({
                                   setBillOfLadingNumber('');
                                   setEstimatedArrival(new Date().toLocaleDateString('fa-IR'));
                                 }}
-                                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 px-5 rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+                                className={`text-white text-xs font-bold py-2 px-5 rounded-lg shadow-sm transition-all flex items-center gap-1.5 ${
+                                  order.hasPendingEdit 
+                                    ? 'bg-slate-400 cursor-not-allowed opacity-60' 
+                                    : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'
+                                }`}
                               >
                                 <Truck className="w-4 h-4" />
-                                <span>تخصیص خودرو و ثبت بارنامه جدید</span>
+                                <span>{order.hasPendingEdit ? 'سفارش در حال ویرایش نماینده (غیرفعال)' : 'تخصیص خودرو و ثبت بارنامه جدید'}</span>
                               </button>
                             </div>
                           )}
 
-                          {/* Dynamic form for creating allocation */}
+                          {/* Dynamic form for creating / editing allocation */}
                           {isAssigning && (
                             <form onSubmit={(e) => handleAssignSubmit(e, order.id)} className="bg-slate-50 rounded-xl p-4 border border-indigo-200 space-y-4">
                               
                               <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                                 <span className="text-xs font-extrabold text-indigo-900 flex items-center gap-1">
                                   <UserCheck className="w-4 h-4 text-indigo-600" />
-                                  <span>فرم تامین خودرو ترابری</span>
+                                  <span>{isEditingExistingVehicle ? '✏️ ویرایش مشخصات ناوگان حمل و راننده' : 'فرم تامین خودرو ترابری'}</span>
                                 </span>
                                 <button
                                   type="button"
-                                  onClick={() => setAssigningOrderId(null)}
+                                  onClick={() => {
+                                    setAssigningOrderId(null);
+                                    setIsEditingExistingVehicle(false);
+                                  }}
                                   className="text-[10px] text-slate-400 hover:text-rose-500 font-bold"
                                 >
                                   بستن فرم

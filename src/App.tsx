@@ -11,6 +11,8 @@ import RepresentativeDashboard from './components/RepresentativeDashboard';
 import ManagerDashboard from './components/ManagerDashboard';
 import FactoryDashboard from './components/FactoryDashboard';
 import ShippingCompanyDashboard from './components/ShippingCompanyDashboard';
+import WarehouseDashboard from './components/WarehouseDashboard';
+import SecurityGateDashboard from './components/SecurityGateDashboard';
 import SeniorAdminDashboard from './components/SeniorAdminDashboard';
 import InfrastructureInfo from './components/InfrastructureInfo';
 import LoginGate from './components/LoginGate';
@@ -29,7 +31,9 @@ import {
   X,
   Lock,
   User,
-  Clock
+  Clock,
+  Boxes,
+  ShieldCheck
 } from 'lucide-react';
 
 export default function App() {
@@ -1235,6 +1239,54 @@ export default function App() {
     }
   };
 
+  // 6. Complete Warehouse Loading & Issue Exit Permit (Called by Product Warehouse)
+  const handleWarehouseLoad = async (orderId: string, warehouseData: any): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/warehouse-load`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(warehouseData)
+      });
+
+      if (response.ok) {
+        showToast(`📦 بارگیری انجام و برگ خروج شماره ${warehouseData.exitPermitNumber || ''} با موفقیت صادر گردید.`, 'success');
+        refreshAllData();
+        return true;
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت اطلاعات بارگیری انبار');
+        showToast(`خطا در ثبت انبار: ${errorMsg}`, 'error');
+        return false;
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+      return false;
+    }
+  };
+
+  // 7. Security Gate Inspection & Final Clearance (Called by Security Gate)
+  const handleSecurityClearance = async (orderId: string, securityData: any): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}/security-clearance`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(securityData)
+      });
+
+      if (response.ok) {
+        showToast('🛡️ بازرسی حراست تایید و مجوز خروج از گیت کارخانه نهایی گردید.', 'success');
+        refreshAllData();
+        return true;
+      } else {
+        const errorMsg = await getErrorMessage(response, 'خطا در ثبت ترخیص حراست');
+        showToast(`خطا در ترخیص حراست: ${errorMsg}`, 'error');
+        return false;
+      }
+    } catch (err) {
+      showToast('خطای شبکه در ارتباط با سرور', 'error');
+      return false;
+    }
+  };
+
   // Clear only transactions & orders (preserving user accounts, agents, products & shipping companies)
   const handleClearTransactions = async (): Promise<boolean> => {
     try {
@@ -1365,79 +1417,82 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 text-right dir-rtl font-sans selection:bg-emerald-100 selection:text-emerald-800 pb-16" id="app-root-wrapper">
       
       {/* Top Main Navigation Header */}
-      <header className="bg-slate-900 text-white sticky top-0 z-50 shadow-md border-b border-slate-800" id="primary-header">
+      <header className="bg-slate-950 text-white sticky top-0 z-50 shadow-lg border-b-2 border-slate-700" id="primary-header">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between min-h-16 py-2 sm:py-0 gap-2 sm:gap-4">
             
             {/* Header Brand */}
             <div className="flex items-center justify-between sm:justify-start gap-3">
               <div className="flex items-center gap-2.5">
-                <div className="shrink-0 flex items-center justify-center" id="app-logo">
-                  <TabarestanLogo className="w-8 h-8 sm:w-9 sm:h-9 text-emerald-500" />
+                <div className="shrink-0 flex items-center justify-center p-1 bg-white rounded-xl shadow-xs" id="app-logo">
+                  <TabarestanLogo className="w-7 h-7 sm:w-8 sm:h-8 text-emerald-700" />
                 </div>
                 <div>
-                  <h1 className="text-xs sm:text-base font-extrabold tracking-tight text-white">تولیدی صنایع سفال طبرستان</h1>
-                  <p className="text-[9px] sm:text-[10px] text-slate-400">سامانه ثبت سفارشات و رهگیری</p>
+                  <h1 className="text-xs sm:text-base font-black tracking-tight text-white">تولیدی صنایع سفال طبرستان</h1>
+                  <p className="text-[10px] sm:text-[11px] text-slate-300 font-bold">سامانه جامع ثبت سفارشات و رهگیری</p>
                 </div>
               </div>
             </div>
 
             {/* User Session Info / Exit */}
             {currentUser && (
-              <div className="flex items-center justify-between sm:justify-start gap-2 text-xs bg-slate-800/90 border border-slate-700/80 rounded-xl py-1 px-2.5 sm:py-1.5 sm:px-3">
+              <div className="flex items-center justify-between sm:justify-start gap-2 text-xs bg-slate-900 border-2 border-slate-700 rounded-xl py-1.5 px-3 shadow-md">
                 <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-slate-400 text-xs">👋</span>
-                  <span className="text-slate-300 flex items-center gap-1 truncate text-[11px] sm:text-xs">
-                    <strong className="text-white font-extrabold truncate max-w-[110px] xs:max-w-[160px] sm:max-w-none">{currentUser.fullName}</strong>
-                    <span className="text-emerald-400 font-bold text-[10px] sm:text-xs shrink-0">
+                  <span className="text-slate-200 text-xs">👤</span>
+                  <span className="text-slate-200 flex items-center gap-1 truncate text-xs font-bold">
+                    <strong className="text-white font-black truncate max-w-[120px] xs:max-w-[180px] sm:max-w-none">{currentUser.fullName}</strong>
+                    <span className="text-emerald-400 font-black text-xs shrink-0">
                       ({
                         currentUser.role === 'SYSTEM_ADMIN' ? 'ادمین ارشد' :
                         currentUser.role === 'SALES_MANAGER' ? 'مدیر بازرگانی' :
                         currentUser.role === 'REPRESENTATIVE' ? 'نماینده فروش' :
-                        currentUser.role === 'FACTORY_TRANSPORT' ? 'فروش کارخانه' : 'باربری همکار'
+                        currentUser.role === 'FACTORY_TRANSPORT' ? 'فروش کارخانه' :
+                        currentUser.role === 'SHIPPING_COMPANY' ? 'باربری همکار' :
+                        currentUser.role === 'PRODUCT_WAREHOUSE' ? 'انبار محصول' :
+                        currentUser.role === 'SECURITY_GATE' ? 'انتظامات و حراست' : 'کاربر سیستم'
                       })
                     </span>
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
                     onClick={() => handleOpenEditProfile()}
-                    className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-2.5 py-1 sm:px-3 rounded-lg transition-all cursor-pointer font-extrabold text-[10px] sm:text-xs flex items-center gap-1 shadow-xs border border-emerald-300"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 sm:px-3 rounded-lg transition-all cursor-pointer font-black text-xs flex items-center gap-1 shadow-xs border border-emerald-400"
                     title="مشاهده مشخصات و ویرایش اطلاعات پروفایل"
                   >
-                    <User className="w-3.5 h-3.5 text-slate-950" />
+                    <User className="w-3.5 h-3.5 text-white stroke-[2.5]" />
                     <span>پروفایل</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsChangePasswordModalOpen(true)}
-                    className="bg-amber-500/10 hover:bg-amber-500 hover:text-slate-900 border border-amber-500/30 text-amber-400 px-2 py-1 rounded text-[10px] font-bold"
+                    className="bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 border border-amber-400 text-amber-300 px-2 py-1 rounded-lg text-xs font-black transition-colors"
                   >
                     رمز
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsLocked(true)}
-                    className="bg-rose-500/10 hover:bg-rose-500 hover:text-white border border-rose-500/30 text-rose-300 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                    className="bg-rose-500/20 hover:bg-rose-600 hover:text-white border border-rose-400 text-rose-300 px-2 py-1 rounded-lg text-xs font-black flex items-center gap-1 transition-all cursor-pointer"
                     title="قفل کردن سریع صفحه"
                   >
-                    <Lock className="w-3 h-3 text-rose-400" />
+                    <Lock className="w-3 h-3 text-rose-300 stroke-[2.5]" />
                     <span className="hidden xs:inline">قفل</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsAutoLockSettingsOpen(true)}
-                    className="bg-sky-500/10 hover:bg-sky-500 hover:text-white border border-sky-500/30 text-sky-300 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                    className="bg-sky-500/20 hover:bg-sky-600 hover:text-white border border-sky-400 text-sky-300 px-2 py-1 rounded-lg text-xs font-black flex items-center gap-1 transition-all cursor-pointer"
                     title={`تنظیم زمان قفل خودکار (فعلی: ${autoLockMinutes > 0 ? autoLockMinutes + ' دقیقه' : 'غیرفعال'})`}
                   >
-                    <Clock className="w-3 h-3 text-sky-400" />
+                    <Clock className="w-3 h-3 text-sky-300 stroke-[2.5]" />
                     <span>{autoLockMinutes > 0 ? `${autoLockMinutes}m` : 'خاموش'}</span>
                   </button>
                   <button
                     onClick={handleLogout}
-                    className="bg-rose-500/20 hover:bg-rose-500 hover:text-white text-rose-300 px-2 py-1 rounded text-[10px] font-bold"
+                    className="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded-lg text-xs font-black border border-rose-500 shadow-2xs transition-colors cursor-pointer"
                   >
                     خروج
                   </button>
@@ -1517,7 +1572,35 @@ export default function App() {
                   <span>۴. پنل باربری‌ها</span>
                 </button>
 
-                {/* Role 5: Senior Software Admin */}
+                {/* Role 5: Product Warehouse */}
+                <button
+                  onClick={() => setActiveRole('PRODUCT_WAREHOUSE')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
+                    activeRole === 'PRODUCT_WAREHOUSE'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
+                  }`}
+                  id="role-btn-warehouse"
+                >
+                  <Boxes className="w-3 h-3" />
+                  <span>۵. انبار محصول</span>
+                </button>
+
+                {/* Role 6: Security Gate */}
+                <button
+                  onClick={() => setActiveRole('SECURITY_GATE')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
+                    activeRole === 'SECURITY_GATE'
+                      ? 'bg-teal-600 text-white shadow-sm'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-650'
+                  }`}
+                  id="role-btn-security"
+                >
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>۶. انتظامات و حراست</span>
+                </button>
+
+                {/* Role 7: Senior Software Admin */}
                 <button
                   onClick={() => setActiveRole('SYSTEM_ADMIN')}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
@@ -1528,10 +1611,10 @@ export default function App() {
                   id="role-btn-sysadmin"
                 >
                   <ShieldAlert className="w-3 h-3 text-purple-300" />
-                  <span>۵. ادمین ارشد نرم‌افزار</span>
+                  <span>۷. ادمین ارشد</span>
                 </button>
 
-                {/* View 6: Infrastructure Docs */}
+                {/* View 8: Infrastructure Docs */}
                 <button
                   onClick={() => setActiveRole('INFRASTRUCTURE')}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
@@ -1542,7 +1625,7 @@ export default function App() {
                   id="role-btn-infra"
                 >
                   <Layers className="w-3 h-3" />
-                  <span>۶. زیرساخت</span>
+                  <span>۸. زیرساخت</span>
                 </button>
 
               </div>
@@ -1650,6 +1733,29 @@ export default function App() {
                 currentUser={currentUser}
                 onOpenEditProfile={handleOpenEditProfile}
                 sandboxEnabled={sandboxEnabled}
+              />
+            )}
+
+            {activeRole === 'PRODUCT_WAREHOUSE' && (
+              <WarehouseDashboard
+                orders={orders}
+                products={products}
+                currentUser={currentUser}
+                showToast={showToast}
+                askConfirm={askConfirm}
+                onWarehouseLoad={handleWarehouseLoad}
+                onRefresh={refreshAllData}
+              />
+            )}
+
+            {activeRole === 'SECURITY_GATE' && (
+              <SecurityGateDashboard
+                orders={orders}
+                currentUser={currentUser}
+                showToast={showToast}
+                askConfirm={askConfirm}
+                onSecurityClearance={handleSecurityClearance}
+                onRefresh={refreshAllData}
               />
             )}
 

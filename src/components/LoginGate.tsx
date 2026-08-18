@@ -34,8 +34,9 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
     { name: 'آقای احمدی (مدیر بازرگانی)', phone: '09121111111', username: 'manager', role: 'SALES_MANAGER', icon: '👔' },
     { name: 'آقای حمیدرضا احمدی (نماینده تهران)', phone: '09120000001', username: 'rep_tehran', role: 'REPRESENTATIVE', icon: '📱' },
     { name: 'مسئول اول فروش کارخانه', phone: '09110000005', username: 'factory', role: 'FACTORY_TRANSPORT', icon: '🏭' },
-    { name: 'مسئول دوم فروش کارخانه', phone: '09110000007', username: 'factory2', role: 'FACTORY_TRANSPORT', icon: '🏭' },
     { name: 'باربری ترانزیت همکار', phone: '09110000006', username: 'shipping_transit', role: 'SHIPPING_COMPANY', icon: '🚚' },
+    { name: 'مسئول انبار محصول (بارگیری و حواله)', phone: '09110000008', username: 'warehouse', role: 'PRODUCT_WAREHOUSE', icon: '📦' },
+    { name: 'افسر انتظامات و گیت حراست', phone: '09110000009', username: 'security_gate', role: 'SECURITY_GATE', icon: '👮' },
   ];
 
   // 1. Password Login

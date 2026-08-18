@@ -263,6 +263,28 @@
       "shippingCompanyId": null,
       "isEnabled": 1,
       "password": "123456"
+    },
+    {
+      "id": "usr-8",
+      "username": "warehouse",
+      "fullName": "مسئول انبار محصول (بارگیری و صدور حواله)",
+      "phoneNumber": "09110000008",
+      "role": "PRODUCT_WAREHOUSE",
+      "agentCode": null,
+      "shippingCompanyId": null,
+      "isEnabled": 1,
+      "password": "123456"
+    },
+    {
+      "id": "usr-9",
+      "username": "security_gate",
+      "fullName": "افسر انتظامات و گیت حراست",
+      "phoneNumber": "09110000009",
+      "role": "SECURITY_GATE",
+      "agentCode": null,
+      "shippingCompanyId": null,
+      "isEnabled": 1,
+      "password": "123456"
     }
   ],
   "permanent_drivers": [

@@ -1043,9 +1043,10 @@ export default function ManagerDashboard({
   const statusTags: Record<OrderStatus, { text: string; css: string }> = {
     PENDING_APPROVAL: { text: 'در انتظار تایید', css: 'bg-amber-100 text-amber-800' },
     APPROVED_BY_SALES: { text: 'تایید شده (در صف اولویت‌بندی)', css: 'bg-indigo-100 text-indigo-800' },
-    SENT_TO_FACTORY: { text: 'ارسال شده', css: 'bg-blue-100 text-blue-800' },
-    VEHICLE_ASSIGNED: { text: 'وسیله نقلیه تخصیص یافته', css: 'bg-amber-100 text-amber-800' },
-    LOADED_AND_DISPATCHED: { text: 'بارگیری شده و حرکت کرده', css: 'bg-emerald-100 text-emerald-800' },
+    SENT_TO_FACTORY: { text: 'ارسال شده به باربری', css: 'bg-blue-100 text-blue-800' },
+    VEHICLE_ASSIGNED: { text: 'وسیله نقلیه تخصیص یافته (آماده انبار)', css: 'bg-amber-100 text-amber-800' },
+    WAREHOUSE_LOADED: { text: 'بارگیری انبار / برگ خروج (در گیت حراست)', css: 'bg-teal-100 text-teal-800' },
+    LOADED_AND_DISPATCHED: { text: 'بارگیری و ترخیص نهایی شده', css: 'bg-emerald-100 text-emerald-800' },
     REJECTED: { text: 'رد شده توسط مدیریت', css: 'bg-rose-100 text-rose-800' },
   };
 
@@ -1082,25 +1083,94 @@ export default function ManagerDashboard({
     <div className="space-y-4 text-right dir-rtl font-sans" id="manager-dashboard">
       
       {/* 
-        Unified Process Pipeline & Command Hub:
-        Merges high-level metrics and interactive tab filters into a single compact, high-efficiency grid.
+        Sleek, Compact Command & Workflow Hub:
+        A clean, uncluttered navigation strip with live counters and direct access to base definitions.
       */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 md:p-5 space-y-4" id="manager-control-hub">
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-3 md:p-4 space-y-3" id="manager-control-hub">
         
-        {/* Top Header Row: Title Context & Base Data Quick Action */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
-            <h2 className="text-sm md:text-base font-extrabold text-slate-800 flex items-center gap-2">
-              <span>کارتابل سفارشات مدیریت بازرگانی</span>
-              <span className="bg-slate-100 text-slate-600 font-mono text-[11px] px-2 py-0.5 rounded-full font-bold">
-                {orders.length} کل سفارشات
+        {/* Top Header Row: Unified Navigation Tabs & Base Data Action */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          
+          {/* Streamlined Tab Switcher (Compact, non-repetitive) */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5" id="manager-pipeline-tabs">
+            {/* Tab 1: Pending Approval */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('PENDING_APPROVAL')}
+              className={`px-3.5 py-2 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+                activeTab === 'PENDING_APPROVAL'
+                  ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/80'
+              }`}
+              id="tab-pending-approval"
+            >
+              <Clock className="w-4 h-4" />
+              <span>۱. سفارشات رسیده (بررسی مالی)</span>
+              <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                activeTab === 'PENDING_APPROVAL' ? 'bg-slate-950 text-amber-400' : (totalPending > 0 ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-600')
+              }`}>
+                {totalPending}
               </span>
-            </h2>
+            </button>
+
+            {/* Tab 2: Approved & Ready for Dispatch to Sales */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('APPROVED_PRIORITIES')}
+              className={`px-3.5 py-2 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+                activeTab === 'APPROVED_PRIORITIES'
+                  ? 'bg-indigo-600 text-white shadow-xs font-black'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/80'
+              }`}
+              id="tab-approved-priorities"
+            >
+              <Layers className="w-4 h-4" />
+              <span>۲. ارسال به واحد فروش</span>
+              <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                activeTab === 'APPROVED_PRIORITIES' ? 'bg-white text-indigo-900' : (approvedButPendingDispatch.length > 0 ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200 text-slate-600')
+              }`}>
+                {approvedButPendingDispatch.length}
+              </span>
+            </button>
+
+            {/* Tab 3: Factory Production & Transport Tracking */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('ARCHIVAL_ORDERS')}
+              className={`px-3.5 py-2 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+                activeTab === 'ARCHIVAL_ORDERS'
+                  ? 'bg-sky-600 text-white shadow-xs font-black'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/80'
+              }`}
+              id="tab-archival-orders"
+            >
+              <Navigation className="w-4 h-4" />
+              <span>۳. رهگیری خط و حمل بار</span>
+              <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                activeTab === 'ARCHIVAL_ORDERS' ? 'bg-white text-sky-900' : 'bg-slate-200 text-slate-600'
+              }`}>
+                {orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length}
+              </span>
+            </button>
+
+            {/* Tab 4: Commercial Analytics */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('COMMERCIAL_ANALYTICS')}
+              className={`px-3.5 py-2 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+                activeTab === 'COMMERCIAL_ANALYTICS'
+                  ? 'bg-emerald-600 text-white shadow-xs font-black'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/80'
+              }`}
+              id="tab-commercial-analytics"
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span>۴. آمار و تحلیل بازرگانی</span>
+            </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Direct Shortcut to the independent Base Definitions & Access page */}
+          {/* Right/End: Quick Action to Base Definitions */}
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -1120,154 +1190,18 @@ export default function ManagerDashboard({
           </div>
         </div>
 
-        {/* 
-          Interactive 4-Pillar Pipeline Switcher:
-          Each card serves as BOTH a live informative KPI AND an interactive filter button.
-        */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" id="manager-pipeline-tabs">
-          
-          {/* Pillar 1: Received & Pending Approval */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('PENDING_APPROVAL')}
-            className={`text-right p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2.5 relative overflow-hidden ${
-              activeTab === 'PENDING_APPROVAL'
-                ? 'bg-amber-50/80 border-amber-400 ring-2 ring-amber-400/40 shadow-xs'
-                : 'bg-white hover:bg-slate-50/80 border-slate-200/90 text-slate-700 hover:border-amber-200'
-            }`}
-            id="tab-pending-approval"
-          >
-            <div className="flex items-center justify-between w-full">
-              <div className={`p-2 rounded-lg ${activeTab === 'PENDING_APPROVAL' ? 'bg-amber-500 text-slate-950' : 'bg-amber-50 text-amber-600'}`}>
-                <Clock className="w-4 h-4" />
-              </div>
-              <span className={`text-sm font-black font-mono px-2.5 py-0.5 rounded-full ${
-                totalPending > 0 ? 'bg-amber-500 text-slate-950 animate-pulse' : 'bg-slate-100 text-slate-600'
-              }`}>
-                {totalPending} مورد
-              </span>
-            </div>
-            <div>
-              <div className="font-extrabold text-xs text-slate-900">۱. سفارشات رسیده (بررسی مالی)</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">بررسی اعتبار مالی و تایید بازرگانی</div>
-            </div>
-            {activeTab === 'PENDING_APPROVAL' && (
-              <span className="absolute bottom-0 right-0 left-0 h-1 bg-amber-500"></span>
-            )}
-          </button>
-
-          {/* Pillar 2: Approved & Ready for Dispatch to Sales */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('APPROVED_PRIORITIES')}
-            className={`text-right p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2.5 relative overflow-hidden ${
-              activeTab === 'APPROVED_PRIORITIES'
-                ? 'bg-indigo-50/80 border-indigo-400 ring-2 ring-indigo-400/40 shadow-xs'
-                : 'bg-white hover:bg-slate-50/80 border-slate-200/90 text-slate-700 hover:border-indigo-200'
-            }`}
-            id="tab-approved-priorities"
-          >
-            <div className="flex items-center justify-between w-full">
-              <div className={`p-2 rounded-lg ${activeTab === 'APPROVED_PRIORITIES' ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
-                <Layers className="w-4 h-4" />
-              </div>
-              <span className={`text-sm font-black font-mono px-2.5 py-0.5 rounded-full ${
-                approvedButPendingDispatch.length > 0 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
-              }`}>
-                {approvedButPendingDispatch.length} سفارش
-              </span>
-            </div>
-            <div>
-              <div className="font-extrabold text-xs text-slate-900">۲. ارسال به واحد فروش</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">تایید شده، آماده اولویت‌بندی کارخانه</div>
-            </div>
-            {activeTab === 'APPROVED_PRIORITIES' && (
-              <span className="absolute bottom-0 right-0 left-0 h-1 bg-indigo-600"></span>
-            )}
-          </button>
-
-          {/* Pillar 3: Factory Production & Transport Tracking */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('ARCHIVAL_ORDERS')}
-            className={`text-right p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2.5 relative overflow-hidden ${
-              activeTab === 'ARCHIVAL_ORDERS'
-                ? 'bg-sky-50/80 border-sky-400 ring-2 ring-sky-400/40 shadow-xs'
-                : 'bg-white hover:bg-slate-50/80 border-slate-200/90 text-slate-700 hover:border-sky-200'
-            }`}
-            id="tab-archival-orders"
-          >
-            <div className="flex items-center justify-between w-full">
-              <div className={`p-2 rounded-lg ${activeTab === 'ARCHIVAL_ORDERS' ? 'bg-sky-600 text-white' : 'bg-sky-50 text-sky-600'}`}>
-                <Navigation className="w-4 h-4" />
-              </div>
-              <span className={`text-sm font-black font-mono px-2.5 py-0.5 rounded-full ${
-                (sentToFactoryCount + inTransitCount) > 0 ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-600'
-              }`}>
-                {orders.filter(o => o.status !== 'PENDING_APPROVAL' && o.status !== 'APPROVED_BY_SALES').length} سفارش
-              </span>
-            </div>
-            <div>
-              <div className="font-extrabold text-xs text-slate-900">۳. رهگیری کارخانه و حمل بار</div>
-              <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5 font-mono">
-                <span>🏭 خط: {sentToFactoryCount}</span>
-                <span>•</span>
-                <span>🚚 حمل: {inTransitCount}</span>
-              </div>
-            </div>
-            {activeTab === 'ARCHIVAL_ORDERS' && (
-              <span className="absolute bottom-0 right-0 left-0 h-1 bg-sky-600"></span>
-            )}
-          </button>
-
-          {/* Pillar 4: Commercial Analytics */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('COMMERCIAL_ANALYTICS')}
-            className={`text-right p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2.5 relative overflow-hidden ${
-              activeTab === 'COMMERCIAL_ANALYTICS'
-                ? 'bg-emerald-50/80 border-emerald-400 ring-2 ring-emerald-400/40 shadow-xs'
-                : 'bg-white hover:bg-slate-50/80 border-slate-200/90 text-slate-700 hover:border-emerald-200'
-            }`}
-            id="tab-commercial-analytics"
-          >
-            <div className="flex items-center justify-between w-full">
-              <div className={`p-2 rounded-lg ${activeTab === 'COMMERCIAL_ANALYTICS' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-600'}`}>
-                <BarChart3 className="w-4 h-4" />
-              </div>
-              <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                داشبورد زنده
-              </span>
-            </div>
-            <div>
-              <div className="font-extrabold text-xs text-slate-900">۴. آمار و تحلیل بازرگانی</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">نمودارهای فروش، تراز و عملکرد استانی</div>
-            </div>
-            {activeTab === 'COMMERCIAL_ANALYTICS' && (
-              <span className="absolute bottom-0 right-0 left-0 h-1 bg-emerald-600"></span>
-            )}
-          </button>
-
-        </div>
-
-        {/* Top Pending Edit Notification Banner */}
+        {/* Top Pending Edit Notification Banner (Only shown if pending edit requests exist) */}
         {orders.some(o => o.hasPendingEdit) && (
-          <div className="bg-gradient-to-r from-amber-500/15 via-amber-100/80 to-amber-50 border-2 border-amber-400 rounded-2xl p-3.5 shadow-sm flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-amber-500 text-slate-950 rounded-xl font-bold text-lg shadow-xs shrink-0 animate-bounce">
-                ⚠️
-              </div>
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 shadow-2xs flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2.5">
+              <span className="text-base animate-bounce">⚠️</span>
               <div>
-                <h4 className="font-extrabold text-slate-900 text-xs md:text-sm flex items-center gap-2">
-                  <span>درخواست اصلاحیه سفارش از سوی نمایندگی فروش</span>
-                  <span className="bg-amber-500 text-slate-950 font-mono text-xs px-2 py-0.5 rounded-full font-black">
+                <h4 className="font-extrabold text-slate-900 text-xs flex items-center gap-2">
+                  <span>درخواست اصلاحیه سفارش از سوی نمایندگی</span>
+                  <span className="bg-amber-500 text-slate-950 font-mono text-[10px] px-1.5 py-0.2 rounded-full font-bold">
                     {orders.filter(o => o.hasPendingEdit).length} مورد
                   </span>
                 </h4>
-                <p className="text-[11px] text-amber-900 mt-0.5">
-                  تغییراتی در مشخصات سفارش (مقدار، خریدار، آدرس، باربری و...) توسط نمایندگی ثبت شده و در انتظار بررسی و تایید شماست. (نوبت سفارش در کارخانه ثابت است)
-                </p>
               </div>
             </div>
 
@@ -1279,16 +1213,11 @@ export default function ManagerDashboard({
                     key={ord.id}
                     type="button"
                     onClick={() => setReviewingEditOrder(ord)}
-                    className="bg-amber-600 hover:bg-amber-700 text-white font-black text-xs px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2 animate-pulse"
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-2xs transition-all cursor-pointer flex items-center gap-1.5"
                     title={chs.map(c => c.label).join('، ')}
                   >
                     <Edit className="w-3.5 h-3.5" />
                     <span>بررسی اصلاحیه #{ord.orderNumber}</span>
-                    {chs.length > 0 && (
-                      <span className="bg-amber-900/40 text-amber-100 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
-                        {chs.length} مورد تغییر
-                      </span>
-                    )}
                   </button>
                 );
               })}
@@ -1298,13 +1227,13 @@ export default function ManagerDashboard({
 
         {/* Quick query filter (only for order views) */}
         {(activeTab === 'PENDING_APPROVAL' || activeTab === 'APPROVED_PRIORITIES' || activeTab === 'ARCHIVAL_ORDERS') && (
-          <div className="relative w-full pt-1" id="manager-tab-search">
+          <div className="relative w-full" id="manager-tab-search">
             <input
               type="text"
               placeholder="جستجوی سریع سفارش (کد رهگیری، خریدار، نماینده، شهر، محصول، باربری، راننده...)"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-emerald-500 rounded-xl py-2.5 pr-9 pl-8 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all font-sans shadow-2xs"
+              className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-emerald-500 rounded-xl py-2 pr-9 pl-8 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all font-sans shadow-2xs"
             />
             <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             {searchQuery && (

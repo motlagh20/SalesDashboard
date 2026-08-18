@@ -903,19 +903,19 @@ export default function RepresentativeDashboard({
   const getStatusLabelAndColor = (status: OrderStatus) => {
     switch (status) {
       case 'PENDING_APPROVAL':
-        return { text: 'در انتظار تایید مدیریت', badge: 'bg-amber-100 text-amber-800 border-amber-200' };
+        return { text: 'در انتظار تایید مدیریت', badge: 'bg-amber-100 text-amber-950 border-amber-300 font-black' };
       case 'APPROVED_BY_SALES':
-        return { text: 'تایید فروش / در صف اولویت‌بندی', badge: 'bg-indigo-100 text-indigo-800 border-indigo-200' };
+        return { text: 'تایید فروش / در صف اولویت‌بندی', badge: 'bg-indigo-100 text-indigo-950 border-indigo-300 font-black' };
       case 'SENT_TO_FACTORY':
-        return { text: 'ارسال شده / تأمین کامیون', badge: 'bg-blue-100 text-blue-800 border-blue-200' };
+        return { text: 'ارسال شده / تأمین کامیون', badge: 'bg-blue-100 text-blue-950 border-blue-300 font-black' };
       case 'VEHICLE_ASSIGNED':
-        return { text: 'تخصیص وسیله نقلیه (ترابری)', badge: 'bg-amber-100 text-amber-800 border-amber-200' };
+        return { text: 'تخصیص وسیله نقلیه (ترابری)', badge: 'bg-amber-100 text-amber-950 border-amber-300 font-black' };
       case 'LOADED_AND_DISPATCHED':
-        return { text: 'بارگیری شده و در حرکت به مقصد', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+        return { text: 'بارگیری شده و در حرکت به مقصد', badge: 'bg-emerald-100 text-emerald-950 border-emerald-300 font-black' };
       case 'REJECTED':
-        return { text: 'عدم تایید / رد شده', badge: 'bg-rose-100 text-rose-800 border-rose-200' };
+        return { text: 'عدم تایید / رد شده', badge: 'bg-rose-100 text-rose-950 border-rose-300 font-black' };
       default:
-        return { text: 'نامشخص', badge: 'bg-slate-100 text-slate-800 border-slate-200' };
+        return { text: 'نامشخص', badge: 'bg-slate-100 text-slate-900 border-slate-300 font-black' };
     }
   };
 
@@ -924,12 +924,12 @@ export default function RepresentativeDashboard({
       
       {/* Simulation Dropdown Bar (Only for Sales Manager in Sandbox Mode) */}
       {sandboxEnabled && currentUser?.role === 'SALES_MANAGER' && (
-        <div className="bg-emerald-50/90 p-2 sm:p-2.5 rounded-2xl border border-emerald-200 text-xs font-bold text-emerald-900 flex flex-wrap items-center justify-between gap-2 shadow-2xs" id="agent-selector-box">
-          <span className="text-[11px] sm:text-xs text-emerald-800 font-extrabold shrink-0">📲 شبیه‌ساز ورود به عنوان نمایندگی فروش:</span>
+        <div className="bg-emerald-50 p-2.5 sm:p-3 rounded-2xl border-2 border-emerald-300 text-xs font-black text-emerald-950 flex flex-wrap items-center justify-between gap-2 shadow-xs" id="agent-selector-box">
+          <span className="text-xs sm:text-sm text-emerald-950 font-black shrink-0">📲 شبیه‌ساز ورود به عنوان نمایندگی فروش:</span>
           <select
             value={selectedAgent}
             onChange={(e) => setSelectedAgent(e.target.value)}
-            className="bg-white border border-emerald-300 rounded-xl py-1 px-3 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans cursor-pointer font-extrabold shadow-2xs"
+            className="bg-white border-2 border-emerald-400 rounded-xl py-1.5 px-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans cursor-pointer font-black shadow-xs"
             id="agent-dropdown"
           >
             {agents.map((agent) => (
@@ -942,38 +942,38 @@ export default function RepresentativeDashboard({
       )}
 
       {/* 2. Main Dashboard Action Buttons / Tabs */}
-      <div className="bg-slate-200/70 p-1.5 rounded-2xl border border-slate-300/70 shadow-xs flex items-center justify-between gap-2" id="rep-tabs-container">
+      <div className="bg-slate-200 p-2 rounded-2xl border-2 border-slate-300 shadow-sm flex items-center justify-between gap-2.5" id="rep-tabs-container">
         <button
           type="button"
           onClick={() => {
             setFormStep(1);
             setIsCreateModalOpen(true);
           }}
-          className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
+          className={`flex-1 py-3 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
             isCreateModalOpen
-              ? 'bg-emerald-600 text-white shadow-md border border-emerald-600 font-black'
-              : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 font-black shadow-sm'
+              ? 'bg-emerald-700 text-white shadow-md border-2 border-emerald-800 font-black'
+              : 'bg-emerald-700 hover:bg-emerald-800 text-white border-2 border-emerald-800 font-black shadow-sm'
           }`}
           id="rep-tab-create"
         >
-          <PlusCircle className="w-5 h-5 text-white" />
-          <span>ثبت سفارش</span>
+          <PlusCircle className="w-5 h-5 text-white stroke-[2.5]" />
+          <span className="font-black text-sm">ثبت سفارش جدید</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('TRACKING')}
-          className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
+          className={`flex-1 py-3 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
             activeTab === 'TRACKING' && !isCreateModalOpen
-              ? 'bg-white text-emerald-800 shadow-md border border-slate-200 font-black'
-              : 'bg-white/80 text-slate-700 hover:text-slate-900 hover:bg-white border border-slate-200/80'
+              ? 'bg-white text-emerald-950 shadow-md border-2 border-emerald-700 font-black'
+              : 'bg-white text-slate-800 hover:text-slate-950 hover:bg-slate-50 border-2 border-slate-300 font-black'
           }`}
           id="rep-tab-tracking"
         >
-          <ShoppingBag className="w-4.5 h-4.5 text-emerald-600" />
-          <span>پیگیری</span>
-          <span className={`text-xs py-0.5 px-2.5 rounded-full font-mono font-bold transition-all ${
-            activeTab === 'TRACKING' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'
+          <ShoppingBag className="w-5 h-5 text-emerald-700 stroke-[2.5]" />
+          <span className="font-black text-sm">پیگیری سفارشات</span>
+          <span className={`text-xs py-0.5 px-3 rounded-full font-mono font-black border transition-all ${
+            activeTab === 'TRACKING' ? 'bg-emerald-100 text-emerald-950 border-emerald-300' : 'bg-slate-200 text-slate-900 border-slate-300'
           }`}>
             {agentOrders.length}
           </span>
@@ -991,20 +991,22 @@ export default function RepresentativeDashboard({
               document.getElementById('rep-column-list')?.scrollIntoView({ behavior: 'smooth' });
             }, 50);
           }}
-          className={`p-3 rounded-2xl cursor-pointer transition-all flex items-center justify-between border ${
+          className={`p-3.5 rounded-2xl cursor-pointer transition-all flex items-center justify-between border-2 shadow-xs ${
             activeTab === 'TRACKING' && trackingFilter === 'PENDING'
-              ? 'bg-amber-100/90 border-amber-400 ring-2 ring-amber-400/50 shadow-md scale-[1.02]'
-              : 'bg-amber-50/80 hover:bg-amber-100/80 border-amber-200'
+              ? 'bg-amber-100 border-amber-500 ring-2 ring-amber-400 shadow-md scale-[1.02]'
+              : 'bg-amber-50 hover:bg-amber-100 border-amber-300'
           }`}
           title="مشاهده سفارشات در انتظار بررسی"
         >
           <div>
-            <span className="text-[11px] font-bold text-amber-800 block">در انتظار بررسی</span>
-            <span className="text-xl font-black font-mono text-amber-900">
+            <span className="text-xs font-black text-amber-950 block mb-0.5">در انتظار بررسی</span>
+            <span className="text-2xl font-black font-mono text-amber-950">
               {agentOrders.filter(o => o.status === 'PENDING_APPROVAL').length}
             </span>
           </div>
-          <Clock className="w-7 h-7 text-amber-500 opacity-80" />
+          <div className="p-2 bg-amber-200/80 rounded-xl border border-amber-400 text-amber-900 shrink-0">
+            <Clock className="w-6 h-6 stroke-[2.5]" />
+          </div>
         </div>
 
         <div 
@@ -1016,20 +1018,22 @@ export default function RepresentativeDashboard({
               document.getElementById('rep-column-list')?.scrollIntoView({ behavior: 'smooth' });
             }, 50);
           }}
-          className={`p-3 rounded-2xl cursor-pointer transition-all flex items-center justify-between border ${
+          className={`p-3.5 rounded-2xl cursor-pointer transition-all flex items-center justify-between border-2 shadow-xs ${
             activeTab === 'TRACKING' && trackingFilter === 'APPROVED'
-              ? 'bg-indigo-100/90 border-indigo-400 ring-2 ring-indigo-400/50 shadow-md scale-[1.02]'
-              : 'bg-indigo-50/80 hover:bg-indigo-100/80 border-indigo-200'
+              ? 'bg-indigo-100 border-indigo-500 ring-2 ring-indigo-400 shadow-md scale-[1.02]'
+              : 'bg-indigo-50 hover:bg-indigo-100 border-indigo-300'
           }`}
           title="مشاهده سفارشات تایید شده و در صف کارخانه"
         >
           <div>
-            <span className="text-[11px] font-bold text-indigo-800 block">تایید شده / صف کارخانه</span>
-            <span className="text-xl font-black font-mono text-indigo-900">
+            <span className="text-xs font-black text-indigo-950 block mb-0.5">تایید شده / صف کارخانه</span>
+            <span className="text-2xl font-black font-mono text-indigo-950">
               {agentOrders.filter(o => o.status === 'APPROVED_BY_SALES' || o.status === 'SENT_TO_FACTORY' || o.status === 'VEHICLE_ASSIGNED').length}
             </span>
           </div>
-          <CheckCircle className="w-7 h-7 text-indigo-500 opacity-80" />
+          <div className="p-2 bg-indigo-200/80 rounded-xl border border-indigo-400 text-indigo-900 shrink-0">
+            <CheckCircle className="w-6 h-6 stroke-[2.5]" />
+          </div>
         </div>
 
         <div 
@@ -1041,20 +1045,22 @@ export default function RepresentativeDashboard({
               document.getElementById('rep-column-list')?.scrollIntoView({ behavior: 'smooth' });
             }, 50);
           }}
-          className={`p-3 rounded-2xl cursor-pointer transition-all flex items-center justify-between border ${
+          className={`p-3.5 rounded-2xl cursor-pointer transition-all flex items-center justify-between border-2 shadow-xs ${
             activeTab === 'TRACKING' && trackingFilter === 'DISPATCHED'
-              ? 'bg-emerald-100/90 border-emerald-400 ring-2 ring-emerald-400/50 shadow-md scale-[1.02]'
-              : 'bg-emerald-50/80 hover:bg-emerald-100/80 border-emerald-200'
+              ? 'bg-emerald-100 border-emerald-500 ring-2 ring-emerald-400 shadow-md scale-[1.02]'
+              : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-300'
           }`}
           title="مشاهده سفارشات بارگیری و حمل شده"
         >
           <div>
-            <span className="text-[11px] font-bold text-emerald-800 block">بارگیری و حمل شده</span>
-            <span className="text-xl font-black font-mono text-emerald-900">
+            <span className="text-xs font-black text-emerald-950 block mb-0.5">بارگیری و حمل شده</span>
+            <span className="text-2xl font-black font-mono text-emerald-950">
               {agentOrders.filter(o => o.status === 'LOADED_AND_DISPATCHED').length}
             </span>
           </div>
-          <Truck className="w-7 h-7 text-emerald-500 opacity-80" />
+          <div className="p-2 bg-emerald-200/80 rounded-xl border border-emerald-400 text-emerald-900 shrink-0">
+            <Truck className="w-6 h-6 stroke-[2.5]" />
+          </div>
         </div>
 
         <div 
@@ -1066,20 +1072,22 @@ export default function RepresentativeDashboard({
               document.getElementById('rep-column-list')?.scrollIntoView({ behavior: 'smooth' });
             }, 50);
           }}
-          className={`p-3 rounded-2xl cursor-pointer transition-all flex items-center justify-between border ${
+          className={`p-3.5 rounded-2xl cursor-pointer transition-all flex items-center justify-between border-2 shadow-xs ${
             activeTab === 'TRACKING' && trackingFilter === 'ALL'
-              ? 'bg-slate-200/90 border-slate-400 ring-2 ring-slate-400/50 shadow-md scale-[1.02]'
-              : 'bg-slate-100 hover:bg-slate-200/80 border-slate-200'
+              ? 'bg-slate-200 border-slate-500 ring-2 ring-slate-400 shadow-md scale-[1.02]'
+              : 'bg-slate-100 hover:bg-slate-200 border-slate-300'
           }`}
           title="مشاهده کل سفارشات ثبت شده"
         >
           <div>
-            <span className="text-[11px] font-bold text-slate-700 block">کل سفارشات ثبت شده</span>
-            <span className="text-xl font-black font-mono text-slate-900">
+            <span className="text-xs font-black text-slate-900 block mb-0.5">کل سفارشات ثبت شده</span>
+            <span className="text-2xl font-black font-mono text-slate-950">
               {agentOrders.length}
             </span>
           </div>
-          <ShoppingBag className="w-7 h-7 text-slate-400 opacity-80" />
+          <div className="p-2 bg-slate-200 rounded-xl border border-slate-400 text-slate-800 shrink-0">
+            <ShoppingBag className="w-6 h-6 stroke-[2.5]" />
+          </div>
         </div>
       </div>
 
@@ -1883,60 +1891,60 @@ export default function RepresentativeDashboard({
 
       {/* TAB 2: ORDER HISTORY & TRACKING LIST */}
       {activeTab === 'TRACKING' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6" id="rep-column-list">
+        <div className="bg-white rounded-2xl border-2 border-slate-300 shadow-sm p-4 sm:p-6" id="rep-column-list">
           
           {/* Search and Collapse Controls Bar */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-5">
-            <div className="text-xs font-black text-slate-800 flex items-center gap-2">
-              <ShoppingBag className="w-4 h-4 text-emerald-600" />
+            <div className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-2">
+              <ShoppingBag className="w-5 h-5 text-emerald-700 stroke-[2.5]" />
               <span>لیست و وضعیت سفارشات ثبت شده</span>
             </div>
 
             {/* Search & Collapse All Controls */}
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0 text-xs font-bold text-slate-700">
+              <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl border-2 border-slate-300 shrink-0 text-xs font-black text-slate-800">
                 <button
                   type="button"
                   onClick={() => expandAllOrders(filteredAgentOrders)}
-                  className="px-2.5 py-1 rounded-lg hover:bg-white transition-all cursor-pointer flex items-center gap-1 text-[11px]"
+                  className="px-2.5 py-1 rounded-lg hover:bg-white hover:shadow-2xs transition-all cursor-pointer flex items-center gap-1 text-xs"
                   title="باز کردن همه کارت‌ها"
                 >
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-600" />
+                  <ChevronDown className="w-4 h-4 text-slate-800" />
                   <span>باز کردن همه</span>
                 </button>
-                <span className="text-slate-300">|</span>
+                <span className="text-slate-400 font-bold">|</span>
                 <button
                   type="button"
                   onClick={collapseAllOrders}
-                  className="px-2.5 py-1 rounded-lg hover:bg-white transition-all cursor-pointer flex items-center gap-1 text-[11px]"
+                  className="px-2.5 py-1 rounded-lg hover:bg-white hover:shadow-2xs transition-all cursor-pointer flex items-center gap-1 text-xs"
                   title="بستن همه کارت‌ها"
                 >
-                  <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
+                  <ChevronUp className="w-4 h-4 text-slate-800" />
                   <span>بستن همه</span>
                 </button>
               </div>
 
-              <div className="relative w-full sm:w-60">
+              <div className="relative w-full sm:w-64">
                 <input
                   type="text"
                   placeholder="جستجو در کد، خریدار، شهر..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 pr-9 pl-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 font-bold shadow-2xs transition-all"
+                  className="w-full bg-white border-2 border-slate-400 rounded-xl py-2 pr-9 pl-3 text-xs text-slate-950 placeholder:text-slate-500 focus:outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-500/30 font-black shadow-xs transition-all"
                 />
-                <Search className="w-4 h-4 text-emerald-600 absolute right-3 top-2.5" />
+                <Search className="w-4.5 h-4.5 text-emerald-700 absolute right-3 top-2.5" />
               </div>
             </div>
           </div>
 
           {/* Orders Cards List (Collapsible Accordion) */}
           {filteredAgentOrders.length === 0 ? (
-            <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200 space-y-3">
-              <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto" />
-              <p className="text-xs text-slate-500 font-bold">هیچ سفارشی با این فیلتر یافت نشد.</p>
+            <div className="text-center py-12 bg-slate-100 rounded-2xl border-2 border-dashed border-slate-300 space-y-3">
+              <ShoppingBag className="w-12 h-12 text-slate-400 mx-auto" />
+              <p className="text-xs sm:text-sm text-slate-700 font-black">هیچ سفارشی با این فیلتر یافت نشد.</p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               {filteredAgentOrders.map((order) => {
                 const statusInfo = getStatusLabelAndColor(order.status);
                 const hydratedItems = parseAndHydrateItemsJson(order.itemsJson, products);
@@ -1945,43 +1953,43 @@ export default function RepresentativeDashboard({
                 return (
                   <div 
                     key={order.id} 
-                    className={`bg-white rounded-2xl border transition-all duration-200 overflow-hidden ${
+                    className={`bg-white rounded-2xl border-2 transition-all duration-200 overflow-hidden ${
                       isExpanded 
-                        ? 'border-slate-300 shadow-xs ring-1 ring-slate-200' 
-                        : 'border-slate-200 hover:border-slate-300 shadow-2xs hover:shadow-xs'
+                        ? 'border-emerald-600 shadow-md ring-2 ring-emerald-500/20' 
+                        : 'border-slate-300 hover:border-slate-400 shadow-xs hover:shadow-sm'
                     }`}
                   >
                     {/* Collapsible Header Bar */}
                     <div 
                       onClick={() => toggleOrderExpand(order.id)}
-                      className="p-3.5 sm:p-4 bg-slate-50/60 hover:bg-slate-100/80 cursor-pointer transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 select-none"
+                      className="p-3.5 sm:p-4 bg-slate-100/90 hover:bg-slate-200/90 cursor-pointer transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 select-none"
                     >
                       <div className="flex items-center gap-2.5 flex-wrap">
                         <button
                           type="button"
-                          className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-600 hover:text-slate-900 shadow-2xs shrink-0"
+                          className="w-7 h-7 rounded-lg bg-white border-2 border-slate-300 flex items-center justify-center text-slate-800 hover:text-slate-950 shadow-2xs shrink-0 font-bold"
                           title={isExpanded ? 'بستن' : 'باز کردن'}
                         >
                           {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                         </button>
 
-                        <span className="font-mono font-bold text-slate-900 text-xs sm:text-sm bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs">
+                        <span className="font-mono font-black text-slate-950 text-xs sm:text-sm bg-white px-2.5 py-1 rounded-lg border-2 border-slate-300 shadow-2xs">
                           #{order.orderNumber || order.id.slice(-6)}
                         </span>
 
-                        <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${statusInfo.badge}`}>
+                        <span className={`text-xs font-black px-2.5 py-0.5 rounded-full border-2 ${statusInfo.badge}`}>
                           {statusInfo.text}
                         </span>
 
-                        <span className="text-[11px] text-slate-500 font-mono hidden xs:inline-block">📅 {formatDisplayDate(order.createdAt)}</span>
+                        <span className="text-xs text-slate-700 font-mono font-bold hidden xs:inline-block">📅 {formatDisplayDate(order.createdAt)}</span>
 
                         {/* Summary Bar when collapsed or expanded */}
-                        <div className="text-xs text-slate-700 font-medium flex items-center gap-1.5 bg-white/80 px-2.5 py-1 rounded-lg border border-slate-200/80">
-                          <span className="font-bold text-slate-900">{order.buyerName || 'خریدار'}</span>
-                          <span className="text-slate-400">•</span>
-                          <span className="text-slate-600">{order.destinationCity}</span>
-                          <span className="text-slate-400 hidden md:inline">•</span>
-                          <span className="text-slate-500 hidden md:inline truncate max-w-xs">{order.productName}</span>
+                        <div className="text-xs text-slate-900 font-bold flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg border-2 border-slate-300 shadow-2xs">
+                          <span className="font-black text-slate-950">{order.buyerName || 'خریدار'}</span>
+                          <span className="text-slate-400 font-black">•</span>
+                          <span className="text-slate-800">{order.destinationCity}</span>
+                          <span className="text-slate-400 font-black hidden md:inline">•</span>
+                          <span className="text-slate-700 hidden md:inline truncate max-w-xs">{order.productName}</span>
                         </div>
                       </div>
 
@@ -1989,10 +1997,10 @@ export default function RepresentativeDashboard({
                         <button
                           type="button"
                           onClick={() => setSelectedOrderDetails(order)}
-                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                          className="bg-emerald-100 hover:bg-emerald-200 text-emerald-950 border-2 border-emerald-400 px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
                           title="مشاهده جزئیات کامل و اقلام سفارش"
                         >
-                          <Info className="w-3.5 h-3.5 text-emerald-600" />
+                          <Info className="w-4 h-4 text-emerald-800" />
                           <span>جزئیات کامل</span>
                         </button>
 
@@ -2000,10 +2008,10 @@ export default function RepresentativeDashboard({
                           <button
                             type="button"
                             onClick={() => handleOpenEditModal(order)}
-                            className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
+                            className="bg-amber-100 hover:bg-amber-200 text-amber-950 border-2 border-amber-400 px-2.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
                             title="ویرایش و اصلاح اطلاعات این سفارش"
                           >
-                            <Edit className="w-3.5 h-3.5 text-amber-700" />
+                            <Edit className="w-4 h-4 text-amber-800" />
                             <span>ویرایش</span>
                           </button>
                         )}
@@ -2012,7 +2020,7 @@ export default function RepresentativeDashboard({
 
                     {/* Expandable Body */}
                     {isExpanded && (
-                      <div className="p-4 border-t border-slate-200 space-y-3 bg-white animate-fadeIn">
+                      <div className="p-4 border-t-2 border-slate-300 space-y-3 bg-white animate-fadeIn">
                         {/* Order Details Body */}
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                           <div>

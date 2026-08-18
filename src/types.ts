@@ -3,7 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type OrderStatus = 'PENDING_APPROVAL' | 'APPROVED_BY_SALES' | 'SENT_TO_FACTORY' | 'VEHICLE_ASSIGNED' | 'LOADED_AND_DISPATCHED' | 'REJECTED';
+export type OrderStatus = 
+  | 'PENDING_APPROVAL' 
+  | 'APPROVED_BY_SALES' 
+  | 'SENT_TO_FACTORY' 
+  | 'VEHICLE_ASSIGNED' 
+  | 'WAREHOUSE_LOADED' 
+  | 'LOADED_AND_DISPATCHED' 
+  | 'REJECTED';
 
 export interface VehicleDetails {
   vehicleType: string; // e.g., تریلی، کامیون جفت، کامیون تک، خاور
@@ -13,6 +20,34 @@ export interface VehicleDetails {
   shippingAgency: string;
   estimatedArrival?: string;
   billOfLadingNumber?: string; // شماره بارنامه صادره از سیستم باربری صادرکننده
+}
+
+export interface WarehouseDetails {
+  loadedPalletsCount?: number;       // تعداد پالت بارگیری شده (ویژه صادراتی)
+  actualQuantity?: number;           // مقدار واقعی بارگیری شده (قالب یا عدد فله)
+  packagingType?: 'PALLET' | 'BULK'; // پالت (صادراتی) یا فله چیدمان دستی (داخلی)
+  exitPermitNumber?: string;         // شماره برگ حواله خروج کالا از انبار
+  weighbridgeGross?: number;         // وزن پر باسکول (کیلوگرم)
+  weighbridgeTare?: number;          // وزن خالی باسکول (کیلوگرم)
+  weighbridgeNet?: number;           // وزن خالص کالا (کیلوگرم)
+  warehouseKeeperName?: string;      // نام انباردار مسئول
+  loadedAt?: string;                 // زمان ثبت بارگیری و صدور حواله
+  warehouseNotes?: string;           // توضیحات و ملاحظات انبار
+  productionBatch?: string;          // شماره ردیف / لات تولید
+  packageQualityConfirmed?: boolean; // تایید سلامت بسته‌بندی و چیدمان بار
+}
+
+export interface SecurityGateDetails {
+  gatePassNumber?: string;           // شماره پروانه الکترونیکی خروج گیت حراست
+  officerName?: string;              // نام افسر حراست / نگهبان شیفت درب خروج
+  gateExitAt?: string;               // تاریخ و ساعت دقیق خروج از گیت کارخانه
+  plateMatchConfirmed?: boolean;     // تایید تطبیق پلاک فیزیکی خودرو با بارنامه
+  driverIdConfirmed?: boolean;       // تایید هویت و مدارک راننده
+  permitMatchConfirmed?: boolean;    // تایید رویت و ابطال برگ حواله انبار
+  billOfLadingChecked?: boolean;     // تایید رویت و دریافت بارنامه رسمی باربری
+  warehouseSlipChecked?: boolean;    // تایید رویت و دریافت برگه خروج انبار
+  sealNumber?: string;               // شماره پلمپ بار (ویژه بارهای حساس یا صادراتی)
+  securityNotes?: string;            // توضیحات و ملاحظات حراست درب خروج
 }
 
 export interface Order {
@@ -39,6 +74,8 @@ export interface Order {
     comment?: string;
   }[];
   vehicleDetails?: VehicleDetails;
+  warehouseDetails?: WarehouseDetails;
+  securityGateDetails?: SecurityGateDetails;
   rejectionReason?: string;
   itemsJson?: string;
   paymentTrackingCode?: string;
@@ -48,10 +85,25 @@ export interface Order {
   shippingCompanyId?: string; // شناسه شرکت حمل و نقل ارجاع شده
   isExportOrder?: boolean;    // آیا سفارش صادراتی است
   destinationCountry?: string; // کشور مقصد صادراتی
+  packagingType?: 'PALLET' | 'BULK'; // نوع بسته‌بندی: پالت (صادراتی) یا فله (داخلی)
   deliveryLocationUrl?: string; // لینک یا مختصات نقشه تخلیه بار (گوگل مپ، نشان، بلد)
   vehicleType?: string;        // نوع ناوگان درخواستی
   hasPendingEdit?: boolean;    // آیا سفارش ویرایش شده و در انتظار تایید مدیر بازرگانی است
   pendingEditData?: string;    // اطلاعات متنی/JSON ویرایش شده در انتظار تایید
+  editSuspendedPreviousStatus?: OrderStatus; // وضعیت سفارش قبل از تعلیق به دلیل ویرایش نماینده
+  recentlyEditedNotice?: string; // برچسب اعلام تغییرات به سایر واحدها پس از تایید مدیریت
+  warehouseDiscrepancy?: {
+    reason: string;
+    reportedAt: string;
+    reporterName: string;
+    requestedQuantity?: number;
+  };
+  securityDetained?: {
+    reason: string;
+    detainedAt: string;
+    officerName: string;
+    action: 'RETURNED_TO_WAREHOUSE' | 'RETURNED_TO_SHIPPING';
+  };
 }
 
 export interface Product {
@@ -125,7 +177,16 @@ export interface PermanentDriver {
   isEnabled: boolean;
 }
 
-export type UserRole = 'SYSTEM_ADMIN' | 'REPRESENTATIVE' | 'SALES_MANAGER' | 'FACTORY_TRANSPORT' | 'SHIPPING_COMPANY';
+export type UserRole = 
+  | 'SYSTEM_ADMIN' 
+  | 'REPRESENTATIVE' 
+  | 'SALES_MANAGER' 
+  | 'FACTORY_TRANSPORT' 
+  | 'SHIPPING_COMPANY' 
+  | 'PRODUCT_WAREHOUSE' 
+  | 'SECURITY_GATE' 
+  | 'DRIVER' 
+  | 'INFRASTRUCTURE';
 
 export interface AppUser {
   id: string;

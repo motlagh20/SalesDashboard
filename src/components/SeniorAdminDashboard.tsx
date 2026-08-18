@@ -26,7 +26,16 @@ import {
   ShoppingBag,
   FileText,
   Users,
-  Briefcase
+  Briefcase,
+  Sliders,
+  Settings,
+  Layers,
+  Lock,
+  Unlock,
+  PackageCheck,
+  ToggleLeft,
+  ToggleRight,
+  FileCheck
 } from 'lucide-react';
 
 interface SeniorAdminDashboardProps {
@@ -104,7 +113,7 @@ export default function SeniorAdminDashboard({
   sandboxEnabled = true,
   onToggleSandbox
 }: SeniorAdminDashboardProps) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'SYSTEM_MONITOR' | 'SYSTEM_DEFINITIONS' | 'PERMANENT_DRIVERS' | 'SEARCH_ORDERS'>('SYSTEM_MONITOR');
+  const [activeAdminTab, setActiveAdminTab] = useState<'SYSTEM_MONITOR' | 'SYSTEM_DEFINITIONS' | 'PERMANENT_DRIVERS' | 'SEARCH_ORDERS' | 'WORKFLOW_SETTINGS'>('SYSTEM_MONITOR');
   const [orderSearchQuery, setOrderSearchQuery] = useState<string>('');
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [systemMetrics, setSystemMetrics] = useState<any>(null);
@@ -117,6 +126,18 @@ export default function SeniorAdminDashboard({
   const [registeredUsersCount, setRegisteredUsersCount] = useState<number>(0);
   const [usersList, setUsersList] = useState<AppUser[]>([]);
   const [isClearingTransactions, setIsClearingTransactions] = useState<boolean>(false);
+  const [systemSettings, setSystemSettings] = useState<{
+    securityGateEnabled: boolean;
+    exportPalletMandatory: boolean;
+    editSuspensionStrictness: string;
+    warehouseDiscrepancyReferral: boolean;
+  }>({
+    securityGateEnabled: true,
+    exportPalletMandatory: true,
+    editSuspensionStrictness: 'STRICT_SUSPEND',
+    warehouseDiscrepancyReferral: true
+  });
+  const [isUpdatingSettings, setIsUpdatingSettings] = useState<boolean>(false);
 
   const handleClearTransactionsClick = () => {
     askConfirm(
@@ -224,10 +245,46 @@ export default function SeniorAdminDashboard({
           }
         }
       }
+
+      // 5. Fetch system settings
+      const resSettings = await fetch('/api/system-settings');
+      if (resSettings.ok) {
+        const ct = resSettings.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const data = await resSettings.json();
+          if (data && typeof data === 'object') {
+            setSystemSettings(prev => ({ ...prev, ...data }));
+          }
+        }
+      }
     } catch (err) {
       console.error('Error fetching system logs and stats:', err);
     } finally {
       setIsRefreshingMonitor(false);
+    }
+  };
+
+  const handleToggleSetting = async (key: string, value: any, successMsg?: string) => {
+    setIsUpdatingSettings(true);
+    try {
+      const updatedPayload = { ...systemSettings, [key]: value };
+      const res = await fetch('/api/system-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedPayload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSystemSettings(data.settings || updatedPayload);
+        showToast(successMsg || 'تنظیمات فرآیند سیستم با موفقیت بروزرسانی شد.', 'success');
+        fetchSystemLogsAndStats();
+      } else {
+        showToast('خطا در ذخیره تنظیمات روی سرور', 'error');
+      }
+    } catch (e) {
+      showToast('خطای شبکه در ذخیره تنظیمات', 'error');
+    } finally {
+      setIsUpdatingSettings(false);
     }
   };
 
@@ -276,8 +333,11 @@ export default function SeniorAdminDashboard({
       case 'SYSTEM_ADMIN': return 'ادمین ارشد نرم‌افزار';
       case 'SALES_MANAGER': return 'مدیر بازرگانی و فروش';
       case 'REPRESENTATIVE': return 'نمایندگی فروش';
-      case 'FACTORY_TRANSPORT': return 'مدیریت کارخانه';
+      case 'FACTORY_TRANSPORT': return 'ترابری و برنامه کارخانه';
+      case 'PRODUCT_WAREHOUSE': return 'انبار محصول (بارگیری و حواله)';
+      case 'SECURITY_GATE': return 'گیت حراست و ترخیص';
       case 'SHIPPING_COMPANY': return 'شرکت حمل و نقل';
+      case 'DRIVER': return 'راننده ناوگان';
       default: return role || 'کاربر عمومی';
     }
   };
@@ -458,6 +518,22 @@ export default function SeniorAdminDashboard({
         >
           <Search className="w-4 h-4 text-cyan-300" />
           <span>استعلام و جستجوی سرتاسری سفارشات ({orders.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveAdminTab('WORKFLOW_SETTINGS')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+            activeAdminTab === 'WORKFLOW_SETTINGS'
+              ? 'bg-purple-900 text-white shadow-md'
+              : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200/80'
+          }`}
+        >
+          <Sliders className="w-4 h-4 text-rose-400" />
+          <span>تنظیمات ماژول‌ها و فرآیندهای زنجیره سفارش</span>
+          <span className={`px-2 py-0.5 text-[10px] rounded-full font-bold ${systemSettings.securityGateEnabled ? 'bg-emerald-500 text-slate-950' : 'bg-amber-400 text-slate-950'}`}>
+            {systemSettings.securityGateEnabled ? 'گیت حراست فعال' : 'حراست غیرفعال'}
+          </span>
         </button>
       </div>
 
@@ -672,6 +748,319 @@ export default function SeniorAdminDashboard({
             showToast={showToast}
             askConfirm={askConfirm}
           />
+        </div>
+      )}
+
+      {activeAdminTab === 'WORKFLOW_SETTINGS' && (
+        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm animate-fade-in space-y-6" id="senior-admin-workflow-settings-view">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-slate-900 via-purple-950 to-indigo-950 text-white p-5 rounded-2xl border border-purple-800/40 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="p-3 bg-purple-600/30 border border-purple-400/30 rounded-xl">
+                <Sliders className="w-6 h-6 text-purple-300" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white flex items-center gap-2">
+                  <span>پیکربندی ماژول‌ها و قوانین زنجیره ثبت تا ترخیص سفارشات</span>
+                  <span className="px-2.5 py-0.5 bg-purple-500 text-slate-950 text-[11px] rounded-full font-bold">کنترل پنل ادمین ارشد</span>
+                </h3>
+                <p className="text-xs text-purple-200/80 mt-1 leading-relaxed">
+                  تنظیم نحوه عبور سفارشات از ایستگاه‌های انبار محصول، گیت حراست کارخانه، اعمال قوانین ویرایش و مدیریت بسته‌بندی پالت/فله
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={fetchSystemLogsAndStats}
+              disabled={isUpdatingSettings || isRefreshingMonitor}
+              className="px-4 py-2 bg-purple-800 hover:bg-purple-700 text-purple-100 border border-purple-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm shrink-0 cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingMonitor ? 'animate-spin' : ''}`} />
+              <span>بازخوانی تنظیمات</span>
+            </button>
+          </div>
+
+          {/* Module Settings Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* Setting 1: Security Gate Module Toggle */}
+            <div className={`p-5 rounded-2xl border transition-all ${
+              systemSettings.securityGateEnabled 
+                ? 'bg-emerald-50/40 border-emerald-200' 
+                : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl border ${
+                    systemSettings.securityGateEnabled 
+                      ? 'bg-emerald-100 text-emerald-700 border-emerald-300' 
+                      : 'bg-slate-200 text-slate-500 border-slate-300'
+                  }`}>
+                    <Shield className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                      <span>ماژول گیت حراست و ترخیص درب خروج کارخانه</span>
+                      <span className={`px-2 py-0.5 text-[10px] font-black rounded-full ${
+                        systemSettings.securityGateEnabled ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-700'
+                      }`}>
+                        {systemSettings.securityGateEnabled ? 'فعال در چرخه' : 'غیرفعال / ترخیص مستقیم'}
+                      </span>
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      در صورت فعال بودن، پس از تکمیل بارگیری انبار، سفارش به گیت حراست هدایت شده و پروانه الکترونیکی خروج با دریافت بارنامه رسمی و برگ حواله انبار صادر می‌گردد.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Switch button */}
+                <button
+                  type="button"
+                  disabled={isUpdatingSettings}
+                  onClick={() => handleToggleSetting('securityGateEnabled', !systemSettings.securityGateEnabled, `ماژول گیت حراست ${!systemSettings.securityGateEnabled ? 'فعال' : 'غیرفعال'} شد.`)}
+                  className={`p-1.5 rounded-full transition-all cursor-pointer ${
+                    systemSettings.securityGateEnabled ? 'text-emerald-600 hover:text-emerald-700' : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                  title={systemSettings.securityGateEnabled ? 'کلیک جهت غیرفعال‌سازی' : 'کلیک جهت فعال‌سازی'}
+                >
+                  {systemSettings.securityGateEnabled ? (
+                    <ToggleRight className="w-10 h-10" />
+                  ) : (
+                    <ToggleLeft className="w-10 h-10" />
+                  )}
+                </button>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-200/80 flex items-center justify-between text-[11px] text-slate-600 font-medium">
+                <span>مسیر چرخه بعد از انبار:</span>
+                <span className="font-bold text-slate-800">
+                  {systemSettings.securityGateEnabled ? 'انبار محصول ⬅️ گیت حراست و بازرسی ⬅️ ترخیص نهایی' : 'انبار محصول ⬅️ ترخیص و خروج مستقیم'}
+                </span>
+              </div>
+            </div>
+
+            {/* Setting 2: Export Pallet vs Domestic Bulk */}
+            <div className={`p-5 rounded-2xl border transition-all ${
+              systemSettings.exportPalletMandatory 
+                ? 'bg-indigo-50/40 border-indigo-200' 
+                : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl border ${
+                    systemSettings.exportPalletMandatory 
+                      ? 'bg-indigo-100 text-indigo-700 border-indigo-300' 
+                      : 'bg-slate-200 text-slate-500 border-slate-300'
+                  }`}>
+                    <PackageCheck className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                      <span>الزام پالت صادراتی و چیدمان فله داخلی</span>
+                      <span className={`px-2 py-0.5 text-[10px] font-black rounded-full ${
+                        systemSettings.exportPalletMandatory ? 'bg-indigo-600 text-white' : 'bg-slate-300 text-slate-700'
+                      }`}>
+                        {systemSettings.exportPalletMandatory ? 'قانون فعال' : 'اختیاری'}
+                      </span>
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      بار فقط در صورت صادراتی بودن با پالت بارگیری می‌شود. در غیر این صورت سفارشات داخلی به صورت فله روی وسیله نقلیه چیده می‌شوند و تعداد دقیق اهمیت دارد.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isUpdatingSettings}
+                  onClick={() => handleToggleSetting('exportPalletMandatory', !systemSettings.exportPalletMandatory, `قانون بسته‌بندی صادرات/داخلی ${!systemSettings.exportPalletMandatory ? 'فعال' : 'غیرفعال'} شد.`)}
+                  className={`p-1.5 rounded-full transition-all cursor-pointer ${
+                    systemSettings.exportPalletMandatory ? 'text-indigo-600 hover:text-indigo-700' : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  {systemSettings.exportPalletMandatory ? (
+                    <ToggleRight className="w-10 h-10" />
+                  ) : (
+                    <ToggleLeft className="w-10 h-10" />
+                  )}
+                </button>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-200/80 flex items-center justify-between text-[11px] text-slate-600 font-medium">
+                <span>کنترل فرم بارگیری انبار:</span>
+                <span className="font-bold text-slate-800">
+                  {systemSettings.exportPalletMandatory ? 'تفکیک اتوماتیک فیلدهای پالت (صادراتی) و فله (داخلی)' : 'فرم آزاد ثبت بار'}
+                </span>
+              </div>
+            </div>
+
+            {/* Setting 3: Edit Order Suspension */}
+            <div className={`p-5 rounded-2xl border transition-all ${
+              systemSettings.editSuspensionStrictness === 'STRICT_SUSPEND' 
+                ? 'bg-purple-50/40 border-purple-200' 
+                : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl border ${
+                    systemSettings.editSuspensionStrictness === 'STRICT_SUSPEND' 
+                      ? 'bg-purple-100 text-purple-700 border-purple-300' 
+                      : 'bg-slate-200 text-slate-500 border-slate-300'
+                  }`}>
+                    <Lock className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                      <span>تعلیق خودکار سفارش در هر مرحله هنگام ویرایش نمایندگی</span>
+                      <span className={`px-2 py-0.5 text-[10px] font-black rounded-full ${
+                        systemSettings.editSuspensionStrictness === 'STRICT_SUSPEND' ? 'bg-purple-600 text-white' : 'bg-slate-300 text-slate-700'
+                      }`}>
+                        {systemSettings.editSuspensionStrictness === 'STRICT_SUSPEND' ? 'تعلیق قطعی' : 'اطلاع‌رسانی بدون توقف'}
+                      </span>
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      چنانچه سفارشی توسط نمایندگی ویرایش شود، تا زمان تایید مجدد توسط مدیر بازرگانی آن سفارش در هر مرحله‌ای که باشد غیرفعال و متوقف می‌گردد. پس از تایید، به صورت متمایز نمایش داده می‌شود.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isUpdatingSettings}
+                  onClick={() => handleToggleSetting('editSuspensionStrictness', systemSettings.editSuspensionStrictness === 'STRICT_SUSPEND' ? 'NOTIFY_ONLY' : 'STRICT_SUSPEND', 'قانون تعلیق سفارشات ویرایش شده تغییر یافت.')}
+                  className={`p-1.5 rounded-full transition-all cursor-pointer ${
+                    systemSettings.editSuspensionStrictness === 'STRICT_SUSPEND' ? 'text-purple-600 hover:text-purple-700' : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  {systemSettings.editSuspensionStrictness === 'STRICT_SUSPEND' ? (
+                    <ToggleRight className="w-10 h-10" />
+                  ) : (
+                    <ToggleLeft className="w-10 h-10" />
+                  )}
+                </button>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-200/80 flex items-center justify-between text-[11px] text-slate-600 font-medium">
+                <span>رفتار سیستم:</span>
+                <span className="font-bold text-slate-800">
+                  {systemSettings.editSuspensionStrictness === 'STRICT_SUSPEND' ? 'توقف فرآیند تا تایید مجدد بازرگانی + نشانگر متمایز' : 'ادامه فرآیند بدون توقف'}
+                </span>
+              </div>
+            </div>
+
+            {/* Setting 4: Warehouse Discrepancy Referral */}
+            <div className={`p-5 rounded-2xl border transition-all ${
+              systemSettings.warehouseDiscrepancyReferral 
+                ? 'bg-amber-50/40 border-amber-200' 
+                : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl border ${
+                    systemSettings.warehouseDiscrepancyReferral 
+                      ? 'bg-amber-100 text-amber-700 border-amber-300' 
+                      : 'bg-slate-200 text-slate-500 border-slate-300'
+                  }`}>
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                      <span>ارجاع مغایرت بارگیری/ناوگان توسط انباردار به فروش</span>
+                      <span className={`px-2 py-0.5 text-[10px] font-black rounded-full ${
+                        systemSettings.warehouseDiscrepancyReferral ? 'bg-amber-600 text-white' : 'bg-slate-300 text-slate-700'
+                      }`}>
+                        {systemSettings.warehouseDiscrepancyReferral ? 'فعال' : 'غیرفعال'}
+                      </span>
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      در صورت مغایرت متراژ یا تعداد بار با وسیله نقلیه، مسئول انبار مجاز به تغییر ارقام سفارش نیست اما می‌تواند سفارش را جهت تصمیم‌گیری و اصلاح مستقیماً به واحد فروش ارجاع دهد.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isUpdatingSettings}
+                  onClick={() => handleToggleSetting('warehouseDiscrepancyReferral', !systemSettings.warehouseDiscrepancyReferral, `ارجاع مغایرت انبار ${!systemSettings.warehouseDiscrepancyReferral ? 'فعال' : 'غیرفعال'} شد.`)}
+                  className={`p-1.5 rounded-full transition-all cursor-pointer ${
+                    systemSettings.warehouseDiscrepancyReferral ? 'text-amber-600 hover:text-amber-700' : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  {systemSettings.warehouseDiscrepancyReferral ? (
+                    <ToggleRight className="w-10 h-10" />
+                  ) : (
+                    <ToggleLeft className="w-10 h-10" />
+                  )}
+                </button>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-200/80 flex items-center justify-between text-[11px] text-slate-600 font-medium">
+                <span>قابلیت انبار:</span>
+                <span className="font-bold text-slate-800">
+                  {systemSettings.warehouseDiscrepancyReferral ? 'فرم اختصاصی ثبت علت مغایرت و ارجاع به فروش' : 'فقط بارگیری یا توقف'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* End-to-End Workflow Diagram / Flowchart Summary */}
+          <div className="p-6 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl text-white border border-slate-800 shadow-sm space-y-4">
+            <div className="flex items-center gap-2.5 text-amber-300">
+              <Layers className="w-5 h-5" />
+              <h4 className="text-sm font-black">دیاگرام جریان یکپارچه سفارش (ثبت نمایندگی تا صدور پروانه خروج)</h4>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              {/* Step 1 */}
+              <div className="p-3.5 bg-slate-800/80 rounded-xl border border-slate-700/80 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="w-6 h-6 rounded-full bg-indigo-500/30 text-indigo-300 text-xs font-mono font-black flex items-center justify-center border border-indigo-400/40">۱</span>
+                  <span className="text-[10px] text-indigo-300 font-bold">نمایندگی</span>
+                </div>
+                <div className="text-xs font-bold text-white">ثبت و ویرایش سفارش</div>
+                <p className="text-[11px] text-slate-400 leading-tight">در صورت ویرایش، سفارش تا تایید مجدد مدیریت تعلیق می‌شود.</p>
+              </div>
+
+              {/* Step 2 */}
+              <div className="p-3.5 bg-slate-800/80 rounded-xl border border-slate-700/80 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="w-6 h-6 rounded-full bg-emerald-500/30 text-emerald-300 text-xs font-mono font-black flex items-center justify-center border border-emerald-400/40">۲</span>
+                  <span className="text-[10px] text-emerald-300 font-bold">مدیر بازرگانی</span>
+                </div>
+                <div className="text-xs font-bold text-white">بررسی مالی و تایید</div>
+                <p className="text-[11px] text-slate-400 leading-tight">تایید اولویت مالی، سفارشات جدید یا سفارشات ویرایش‌شده نمایندگی.</p>
+              </div>
+
+              {/* Step 3 */}
+              <div className="p-3.5 bg-slate-800/80 rounded-xl border border-slate-700/80 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="w-6 h-6 rounded-full bg-cyan-500/30 text-cyan-300 text-xs font-mono font-black flex items-center justify-center border border-cyan-400/40">۳</span>
+                  <span className="text-[10px] text-cyan-300 font-bold">شرکت باربری</span>
+                </div>
+                <div className="text-xs font-bold text-white">تخصیص و ویرایش ناوگان</div>
+                <p className="text-[11px] text-slate-400 leading-tight">معرفی راننده، شماره پلاک، بارنامه رسمی و امکان ویرایش ناوگان.</p>
+              </div>
+
+              {/* Step 4 */}
+              <div className="p-3.5 bg-slate-800/80 rounded-xl border border-slate-700/80 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="w-6 h-6 rounded-full bg-amber-500/30 text-amber-300 text-xs font-mono font-black flex items-center justify-center border border-amber-400/40">۴</span>
+                  <span className="text-[10px] text-amber-300 font-bold">انبار محصول</span>
+                </div>
+                <div className="text-xs font-bold text-white">بارگیری (پالت / فله)</div>
+                <p className="text-[11px] text-slate-400 leading-tight">صدور حواله خروج انبار یا ارجاع مغایرت متراژ/ناوگان به فروش.</p>
+              </div>
+
+              {/* Step 5 */}
+              <div className="p-3.5 bg-slate-800/80 rounded-xl border border-slate-700/80 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="w-6 h-6 rounded-full bg-rose-500/30 text-rose-300 text-xs font-mono font-black flex items-center justify-center border border-rose-400/40">۵</span>
+                  <span className="text-[10px] text-rose-300 font-bold">گیت حراست</span>
+                </div>
+                <div className="text-xs font-bold text-white">کنترل و صدور پروانه خروج</div>
+                <p className="text-[11px] text-slate-400 leading-tight">دریافت بارنامه، برگ خروج، ثبت پلمپ و ترخیص نهایی خودرو.</p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

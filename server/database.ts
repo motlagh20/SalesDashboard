@@ -159,7 +159,9 @@ function seedJsonIfEmpty() {
       { id: 'usr-4', username: 'rep_rasht', fullName: 'آقای سهراب پوربخش', phoneNumber: '09110000003', role: 'REPRESENTATIVE', agentCode: 'AG-2019', shippingCompanyId: null, isEnabled: 1, password: '123456' },
       { id: 'usr-5', username: 'rep_shiraz', fullName: 'آقای کریم نمازی', phoneNumber: '09170000004', role: 'REPRESENTATIVE', agentCode: 'AG-7023', shippingCompanyId: null, isEnabled: 1, password: '123456' },
       { id: 'usr-6', username: 'factory', fullName: 'مسئول فروش کارخانه', phoneNumber: '09110000005', role: 'FACTORY_TRANSPORT', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: '123456' },
-      { id: 'usr-7', username: 'shipping_transit', fullName: 'باربری ترانزیت طبرستان', phoneNumber: '09110000006', role: 'SHIPPING_COMPANY', agentCode: null, shippingCompanyId: 'sc-1', isEnabled: 1, password: '123456' }
+      { id: 'usr-7', username: 'shipping_transit', fullName: 'باربری ترانزیت طبرستان', phoneNumber: '09110000006', role: 'SHIPPING_COMPANY', agentCode: null, shippingCompanyId: 'sc-1', isEnabled: 1, password: '123456' },
+      { id: 'usr-8', username: 'warehouse', fullName: 'مسئول انبار محصول (بارگیری و صدور حواله)', phoneNumber: '09110000008', role: 'PRODUCT_WAREHOUSE', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: '123456' },
+      { id: 'usr-9', username: 'security_gate', fullName: 'افسر انتظامات و حراست گیت خروج', phoneNumber: '09110000009', role: 'SECURITY_GATE', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: '123456' }
     ];
     changed = true;
   } else {
@@ -173,6 +175,42 @@ function seedJsonIfEmpty() {
         fullName: 'ادمین ارشد نرم‌افزار',
         phoneNumber: '09120000000',
         role: 'SYSTEM_ADMIN',
+        agentCode: null,
+        shippingCompanyId: null,
+        isEnabled: 1,
+        password: '123456'
+      });
+      changed = true;
+    }
+
+    // Ensure PRODUCT_WAREHOUSE exists
+    const hasWarehouse = data.app_users.some((u: any) => u.username === 'warehouse' || u.role === 'PRODUCT_WAREHOUSE' || u.phoneNumber === '09110000008');
+    if (!hasWarehouse) {
+      console.log("📦 [Mock Seed] Auto-inserting missing PRODUCT_WAREHOUSE user...");
+      data.app_users.push({
+        id: 'usr-8',
+        username: 'warehouse',
+        fullName: 'مسئول انبار محصول (بارگیری و صدور حواله)',
+        phoneNumber: '09110000008',
+        role: 'PRODUCT_WAREHOUSE',
+        agentCode: null,
+        shippingCompanyId: null,
+        isEnabled: 1,
+        password: '123456'
+      });
+      changed = true;
+    }
+
+    // Ensure SECURITY_GATE exists
+    const hasSecurity = data.app_users.some((u: any) => u.username === 'security_gate' || u.role === 'SECURITY_GATE' || u.phoneNumber === '09110000009');
+    if (!hasSecurity) {
+      console.log("👮 [Mock Seed] Auto-inserting missing SECURITY_GATE user...");
+      data.app_users.push({
+        id: 'usr-9',
+        username: 'security_gate',
+        fullName: 'افسر انتظامات و گیت حراست',
+        phoneNumber: '09110000009',
+        role: 'SECURITY_GATE',
         agentCode: null,
         shippingCompanyId: null,
         isEnabled: 1,
@@ -1302,6 +1340,12 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "orders", "deliveryLocationUrl", "TEXT NULL");
     await ensureColumnExists(db, "orders", "hasPendingEdit", "TINYINT(1) DEFAULT 0");
     await ensureColumnExists(db, "orders", "pendingEditData", "TEXT NULL");
+    await ensureColumnExists(db, "orders", "warehouseDetails", "LONGTEXT NULL");
+    await ensureColumnExists(db, "orders", "securityGateDetails", "LONGTEXT NULL");
+    await ensureColumnExists(db, "orders", "exitPermitNumber", "VARCHAR(100) NULL");
+    await ensureColumnExists(db, "orders", "loadedPalletsCount", "INT NULL");
+    await ensureColumnExists(db, "orders", "weighbridgeNet", "INT NULL");
+    await ensureColumnExists(db, "orders", "securitySealNumber", "VARCHAR(100) NULL");
 
     // products primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, imageUrl
     await ensureColumnExists(db, "products", "primaryUnit", "VARCHAR(50) NULL");

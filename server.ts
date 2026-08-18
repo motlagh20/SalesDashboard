@@ -83,6 +83,42 @@ async function startServer() {
     }
   }
 
+  // Global System Settings persistence
+  const SYSTEM_SETTINGS_FILE = path.join(process.cwd(), 'data', 'system_settings.json');
+  let globalSystemSettings = {
+    securityGateEnabled: true,
+    exportPalletMandatory: true,
+    editSuspensionStrictness: "STRICT_SUSPEND",
+    warehouseDiscrepancyReferral: true
+  };
+
+  try {
+    if (fs.existsSync(SYSTEM_SETTINGS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SYSTEM_SETTINGS_FILE, 'utf-8'));
+      globalSystemSettings = { ...globalSystemSettings, ...data };
+    }
+  } catch (e) {
+    console.error("Error reading system settings file:", e);
+  }
+
+  function getSystemSettings() {
+    return globalSystemSettings;
+  }
+
+  function saveSystemSettings(newSettings: Partial<typeof globalSystemSettings>) {
+    globalSystemSettings = { ...globalSystemSettings, ...newSettings };
+    try {
+      const dir = path.dirname(SYSTEM_SETTINGS_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(SYSTEM_SETTINGS_FILE, JSON.stringify(globalSystemSettings, null, 2), 'utf-8');
+    } catch (e) {
+      console.error("Error writing system settings file:", e);
+    }
+    return globalSystemSettings;
+  }
+
   function extractActor(req: express.Request) {
     let userId = (req.headers["x-user-id"] as string) || req.body?.actorUserId || "system";
     let userName = "";
@@ -852,8 +888,26 @@ async function startServer() {
           vehicleType: o.vehicleType || null,
           hasPendingEdit: !!o.hasPendingEdit,
           pendingEditData: o.pendingEditData || null,
+          recentlyEditedNotice: o.recentlyEditedNotice || null,
+          packagingType: o.packagingType || (o.isExportOrder ? 'PALLET' : 'BULK'),
           statusHistory: historyMap[o.id] || []
         };
+
+        if (o.warehouseDiscrepancy) {
+          try {
+            formatted.warehouseDiscrepancy = typeof o.warehouseDiscrepancy === 'string' ? JSON.parse(o.warehouseDiscrepancy) : o.warehouseDiscrepancy;
+          } catch {
+            formatted.warehouseDiscrepancy = o.warehouseDiscrepancy;
+          }
+        }
+
+        if (o.securityDetained) {
+          try {
+            formatted.securityDetained = typeof o.securityDetained === 'string' ? JSON.parse(o.securityDetained) : o.securityDetained;
+          } catch {
+            formatted.securityDetained = o.securityDetained;
+          }
+        }
 
         if (o.driverName || o.driverPhone || o.licensePlate || o.shippingAgency || o.billOfLadingNumber) {
           formatted.vehicleDetails = {
@@ -866,6 +920,23 @@ async function startServer() {
             billOfLadingNumber: o.billOfLadingNumber
           };
         }
+
+        if (o.warehouseDetails) {
+          try {
+            formatted.warehouseDetails = typeof o.warehouseDetails === 'string' ? JSON.parse(o.warehouseDetails) : o.warehouseDetails;
+          } catch {
+            formatted.warehouseDetails = o.warehouseDetails;
+          }
+        }
+
+        if (o.securityGateDetails) {
+          try {
+            formatted.securityGateDetails = typeof o.securityGateDetails === 'string' ? JSON.parse(o.securityGateDetails) : o.securityGateDetails;
+          } catch {
+            formatted.securityGateDetails = o.securityGateDetails;
+          }
+        }
+
         return formatted;
       });
 
@@ -1214,6 +1285,8 @@ function compactItemsJson(itemsInput: any): string | null {
 
         updateFields.push("hasPendingEdit = 0");
         updateFields.push("pendingEditData = NULL");
+        updateFields.push("recentlyEditedNotice = ?");
+        updateParams.push("اصلاحیه نمایندگی توسط مدیریت بازرگانی تایید و اعمال گردید (اطلاعات سفارش به‌روز شد)");
 
         updateParams.push(id);
 
@@ -1235,6 +1308,20 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/approve-edit:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Dismiss recently edited banner
+  app.patch("/api/orders/:id/dismiss-edit-notice", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      await db.query("UPDATE orders SET recentlyEditedNotice = NULL WHERE id = ?", [id]);
+      clearAllRouteCaches();
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/dismiss-edit-notice:", err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -1627,6 +1714,369 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/return-to-sales:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // SYSTEM SETTINGS API (Security Gate Module Toggle, etc.)
+  app.get("/api/system-settings", (req, res) => {
+    res.json(getSystemSettings());
+  });
+
+  app.patch("/api/system-settings", (req, res) => {
+    try {
+      const current = getSystemSettings();
+      const updated = {
+        ...current,
+        ...req.body
+      };
+      saveSystemSettings(updated);
+      res.json({ success: true, settings: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // FLEET / VEHICLE EDITING BY SHIPPING COMPANY OR FACTORY TRANSPORT
+  app.patch("/api/orders/:id/update-vehicle", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const { vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, billOfLadingNumber } = req.body;
+      const updatedAt = new Date().toISOString();
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        await connection.query(`
+          UPDATE orders SET 
+            vehicleType = ?,
+            driverName = ?,
+            driverPhone = ?,
+            licensePlate = ?,
+            shippingAgency = ?,
+            estimatedArrival = ?,
+            billOfLadingNumber = ?
+          WHERE id = ?
+        `, [vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival || null, billOfLadingNumber || null, id]);
+
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          VALUES (?, ?, ?, ?)
+        `, [id, "VEHICLE_ASSIGNED", updatedAt, `ویرایش مشخصات ناوگان حمل و راننده توسط باربری: ${vehicleType} به رانندگی ${driverName} (پلاک: ${licensePlate})${billOfLadingNumber ? ` - شماره بارنامه: ${billOfLadingNumber}` : ''}`]);
+
+        // Auto-register driver into permanent_drivers list if not already present
+        if (driverName && driverPhone) {
+          const [existingDrivers] = await connection.query(
+            "SELECT id FROM permanent_drivers WHERE driverPhone = ? OR (driverName = ? AND licensePlate = ?)",
+            [driverPhone, driverName, licensePlate]
+          ) as any[];
+
+          if (!existingDrivers || existingDrivers.length === 0) {
+            const newDriverId = `drv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+            await connection.query(
+              "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 1)",
+              [newDriverId, driverName, driverPhone, licensePlate, vehicleType || 'تریلی ۱۸ چرخ لبه‌دار', shippingAgency || null]
+            );
+            const redis = getRedisClient();
+            if (redis) await redis.del("permanent_drivers_list");
+          }
+        }
+
+        await connection.commit();
+        clearAllRouteCaches();
+        res.json({ success: true });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/update-vehicle:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // WAREHOUSE DISCREPANCY REPORT & RETURN TO SALES
+  app.patch("/api/orders/:id/warehouse-discrepancy", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const { reason, requestedQuantity, reporterName } = req.body;
+      const updatedAt = new Date().toISOString();
+
+      const discrepancyObj = {
+        reason: reason || 'مغایرت متراژ یا تعداد بار با گنجایش ناوگان یا خط تولید',
+        requestedQuantity: requestedQuantity ? Number(requestedQuantity) : undefined,
+        reporterName: reporterName || 'مسئول انبار محصول',
+        reportedAt: updatedAt
+      };
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        await connection.query(`
+          UPDATE orders SET 
+            warehouseDiscrepancy = ?
+          WHERE id = ?
+        `, [JSON.stringify(discrepancyObj), id]);
+
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          VALUES (?, ?, ?, ?)
+        `, [id, "VEHICLE_ASSIGNED", updatedAt, `⚠️ اعلام مغایرت بار توسط انبار (${discrepancyObj.reporterName}): ${discrepancyObj.reason}${discrepancyObj.requestedQuantity ? ` (مقدار پیشنهادی بارگیری: ${discrepancyObj.requestedQuantity})` : ''} - ارجاع به مدیریت فروش جهت تصمیم‌گیری`]);
+
+        await connection.commit();
+        clearAllRouteCaches();
+        res.json({ success: true, discrepancy: discrepancyObj });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/warehouse-discrepancy:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 1. WAREHOUSE LOADING & EXIT PERMIT ISSUANCE
+  app.patch("/api/orders/:id/warehouse-load", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const { 
+        loadedPalletsCount, 
+        actualQuantity, 
+        packagingType,
+        exitPermitNumber, 
+        weighbridgeGross, 
+        weighbridgeTare, 
+        weighbridgeNet, 
+        warehouseKeeperName, 
+        warehouseNotes, 
+        productionBatch, 
+        packageQualityConfirmed 
+      } = req.body;
+      
+      const loadedAt = new Date().toISOString();
+      const settings = getSystemSettings();
+      // If security gate is enabled, go to WAREHOUSE_LOADED; otherwise directly LOADED_AND_DISPATCHED
+      const status = settings.securityGateEnabled ? "WAREHOUSE_LOADED" : "LOADED_AND_DISPATCHED";
+
+      const warehouseDetailsObj = {
+        loadedPalletsCount: Number(loadedPalletsCount) || 0,
+        actualQuantity: Number(actualQuantity) || 0,
+        packagingType: packagingType || 'BULK',
+        exitPermitNumber: exitPermitNumber || `WH-${Date.now().toString().slice(-6)}`,
+        weighbridgeGross: Number(weighbridgeGross) || 0,
+        weighbridgeTare: Number(weighbridgeTare) || 0,
+        weighbridgeNet: Number(weighbridgeNet) || 0,
+        warehouseKeeperName: warehouseKeeperName || 'مسئول انبار محصول',
+        loadedAt,
+        warehouseNotes: warehouseNotes || null,
+        productionBatch: productionBatch || null,
+        packageQualityConfirmed: !!packageQualityConfirmed
+      };
+
+      const warehouseDetailsJson = JSON.stringify(warehouseDetailsObj);
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        await connection.query(`
+          UPDATE orders SET 
+            status = ?,
+            warehouseDetails = ?,
+            exitPermitNumber = ?,
+            loadedPalletsCount = ?,
+            weighbridgeNet = ?,
+            packagingType = ?,
+            warehouseDiscrepancy = NULL
+          WHERE id = ?
+        `, [
+          status, 
+          warehouseDetailsJson, 
+          warehouseDetailsObj.exitPermitNumber, 
+          warehouseDetailsObj.loadedPalletsCount, 
+          warehouseDetailsObj.weighbridgeNet, 
+          warehouseDetailsObj.packagingType,
+          id
+        ]);
+
+        const packagingLabel = warehouseDetailsObj.packagingType === 'PALLET' 
+          ? `${warehouseDetailsObj.loadedPalletsCount} پالت صادراتی` 
+          : `${warehouseDetailsObj.actualQuantity.toLocaleString('fa-IR')} قالب فله‌ای چیدمان روی کفی`;
+
+        const historyComment = settings.securityGateEnabled
+          ? `ثبت بارگیری انبار محصول: صدور برگه حواله خروج شماره ${warehouseDetailsObj.exitPermitNumber} (${packagingLabel}${warehouseDetailsObj.weighbridgeNet ? ` به وزن خالص ${warehouseDetailsObj.weighbridgeNet.toLocaleString('fa-IR')} کیلوگرم` : ''}) - ارجاع به گیت حراست کارخانه جهت بازرسی نهایی و خروج`
+          : `ثبت بارگیری انبار محصول: صدور حواله خروج ${warehouseDetailsObj.exitPermitNumber} (${packagingLabel}) - به دلیل غیرفعال بودن گیت حراست، محموله مستقیماً ترخیص و عازم مقصد گردید.`;
+
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          VALUES (?, ?, ?, ?)
+        `, [id, status, loadedAt, historyComment]);
+
+        await connection.commit();
+        clearAllRouteCaches();
+
+        await recordActivity(
+          req,
+          "ثبت بارگیری و صدور حواله خروج انبار",
+          `ثبت بارگیری سفارش کد ${id} با شماره حواله ${warehouseDetailsObj.exitPermitNumber} (${packagingLabel}) توسط ${warehouseDetailsObj.warehouseKeeperName}`,
+          "ORDERS"
+        );
+
+        res.json({ success: true, warehouseDetails: warehouseDetailsObj, status });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/warehouse-load:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // SECURITY GATE DETAIN & INTERCEPT ORDER
+  app.patch("/api/orders/:id/security-detain", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const { reason, officerName, action } = req.body; // action: 'RETURNED_TO_WAREHOUSE' | 'RETURNED_TO_SHIPPING'
+      const updatedAt = new Date().toISOString();
+
+      const targetStatus = action === 'RETURNED_TO_SHIPPING' ? 'VEHICLE_ASSIGNED' : 'WAREHOUSE_LOADED';
+
+      const detainedObj = {
+        reason: reason || 'ممانعت از خروج به دلیل عدم تطابق مدارک، پلاک یا نقص فیزیکی بار',
+        officerName: officerName || 'افسر انتظامات و حراست کارخانه',
+        detainedAt: updatedAt,
+        action: action || 'RETURNED_TO_WAREHOUSE'
+      };
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        await connection.query(`
+          UPDATE orders SET 
+            status = ?,
+            securityDetained = ?,
+            securityGateDetails = NULL
+          WHERE id = ?
+        `, [targetStatus, JSON.stringify(detainedObj), id]);
+
+        const actionLabel = action === 'RETURNED_TO_SHIPPING' 
+          ? 'عودت به شرکت باربری و ترابری جهت اصلاح ناوگان' 
+          : 'توقیف در گیت و عودت به انبار محصول جهت بازبینی و رفع نقص بارگیری';
+
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          VALUES (?, ?, ?, ?)
+        `, [id, targetStatus, updatedAt, `🛑 توقیف و ممانعت از خروج در گیت حراست توسط ${detainedObj.officerName} به دلیل: ${detainedObj.reason} (${actionLabel})`]);
+
+        await connection.commit();
+        clearAllRouteCaches();
+        res.json({ success: true, detained: detainedObj, targetStatus });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/security-detain:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2. SECURITY GATE FINAL CLEARANCE & DISPATCH
+  app.patch("/api/orders/:id/security-clearance", async (req, res) => {
+    try {
+      const db = getDbPool();
+      const { id } = req.params;
+      const { 
+        officerName, 
+        gatePassNumber,
+        plateMatchConfirmed, 
+        driverIdConfirmed, 
+        permitMatchConfirmed, 
+        billOfLadingChecked,
+        warehouseSlipChecked,
+        sealNumber, 
+        securityNotes 
+      } = req.body;
+
+      const gateExitAt = new Date().toISOString();
+      const status = "LOADED_AND_DISPATCHED";
+
+      const securityGateDetailsObj = {
+        gatePassNumber: gatePassNumber || `GATE-PASS-${Date.now().toString().slice(-6)}`,
+        officerName: officerName || 'افسر انتظامات و حراست کارخانه',
+        gateExitAt,
+        plateMatchConfirmed: plateMatchConfirmed !== false,
+        driverIdConfirmed: driverIdConfirmed !== false,
+        permitMatchConfirmed: permitMatchConfirmed !== false,
+        billOfLadingChecked: billOfLadingChecked !== false,
+        warehouseSlipChecked: warehouseSlipChecked !== false,
+        sealNumber: sealNumber || null,
+        securityNotes: securityNotes || null
+      };
+
+      const securityGateDetailsJson = JSON.stringify(securityGateDetailsObj);
+
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        await connection.query(`
+          UPDATE orders SET 
+            status = ?,
+            securityGateDetails = ?,
+            securitySealNumber = ?,
+            securityDetained = NULL
+          WHERE id = ?
+        `, [
+          status, 
+          securityGateDetailsJson, 
+          securityGateDetailsObj.sealNumber, 
+          id
+        ]);
+
+        const historyComment = `تایید نهایی حراست و صدور پروانه الکترونیکی خروج شماره ${securityGateDetailsObj.gatePassNumber}: دریافت و کنترل بارنامه رسمی باربری، تطبیق برگ خروج انبار و پلاک فیزیکی توسط ${securityGateDetailsObj.officerName}${securityGateDetailsObj.sealNumber ? ` (شماره پلمپ: ${securityGateDetailsObj.sealNumber})` : ''} - خودرو با موفقیت ترخیص و عازم مقصد گردید.`;
+
+        await connection.query(`
+          INSERT INTO order_history (orderId, status, updatedAt, comment)
+          VALUES (?, ?, ?, ?)
+        `, [id, status, gateExitAt, historyComment]);
+
+        await connection.commit();
+        clearAllRouteCaches();
+
+        await recordActivity(
+          req,
+          "تایید خروج و صدور مجوز از گیت حراست",
+          `ترخیص و صدور پروانه خروج ${securityGateDetailsObj.gatePassNumber} برای سفارش ${id} توسط افسر حراست (${securityGateDetailsObj.officerName})`,
+          "ORDERS"
+        );
+
+        res.json({ success: true, securityGateDetails: securityGateDetailsObj });
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/orders/:id/security-clearance:", err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -2429,6 +2879,22 @@ function compactItemsJson(itemsInput: any): string | null {
       );
     }
     res.json({ success: true, sandboxEnabled: globalSandboxEnabled });
+  });
+
+  // SYSTEM SETTINGS ENDPOINTS
+  app.get("/api/system-settings", (req, res) => {
+    res.json(getSystemSettings());
+  });
+
+  app.post("/api/system-settings", (req, res) => {
+    const updated = saveSystemSettings(req.body);
+    recordActivity(
+      req,
+      "تغییر تنظیمات سیستم",
+      `تنظیمات سامانه بروزرسانی شد: گیت حراست = ${updated.securityGateEnabled ? 'فعال' : 'غیرفعال'}`,
+      "SYSTEM"
+    );
+    res.json({ success: true, settings: updated });
   });
 
   app.post("/api/system/activity-logs", (req, res) => {

@@ -468,143 +468,21 @@ export default function CommercialAnalyticsDashboard({
 
       </div>
 
-      {/* Visual Analytics Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="commercial-charts-section">
-        {/* Chart 1: Order Funnel / Pipeline Stage Bar Meter */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
-            <div>
-              <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-amber-600" />
-                <span>نمودار قیف و جریان سفارشات بازرگانی (Order Pipeline Funnel)</span>
-              </h3>
-              <p className="text-slate-400 text-xs mt-1">توزیع سفارشات و وزن محموله‌ها در مراحل ۵‌گانه خط بازرگانی و کارخانه</p>
-            </div>
-            <span className="text-xs font-bold text-slate-500 font-mono bg-slate-100 px-3 py-1 rounded-lg">
-              مجموع: {filteredByPeriodOrders.length} سفارش
-            </span>
-          </div>
-
-          <div className="space-y-4 pt-1">
-            {/* Funnel Stage 1: Received / Pending Approval */}
-            <div>
-              <div className="flex justify-between text-xs font-bold mb-1.5">
-                <span className="text-amber-800 flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                  ۱. سفارشات رسیده (منتظر تایید بازرگانی)
-                </span>
-                <span className="text-slate-700 font-mono">
-                  {receivedPendingOrders.length} سفارش ({receivedPendingOrders.reduce((s, o) => s + o.quantity, 0).toLocaleString()} قالب)
-                </span>
-              </div>
-              <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200/60">
-                <div
-                  className="h-full bg-gradient-to-r from-amber-400 to-amber-600 rounded-full transition-all duration-700"
-                  style={{
-                    width: `${filteredByPeriodOrders.length > 0 ? Math.max(8, (receivedPendingOrders.length / filteredByPeriodOrders.length) * 100) : 0}%`
-                  }}
-                ></div>
-              </div>
-            </div>
-
-            {/* Funnel Stage 2: Approved / Dispatched to Factory Queue */}
-            <div>
-              <div className="flex justify-between text-xs font-bold mb-1.5">
-                <span className="text-indigo-800 flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
-                  ۲. تایید شده بازرگانی (در صف واحد فروش کارخانه)
-                </span>
-                <span className="text-slate-700 font-mono">
-                  {filteredByPeriodOrders.filter(o => o.status === 'APPROVED_BY_SALES').length} سفارش
-                </span>
-              </div>
-              <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200/60">
-                <div
-                  className="h-full bg-gradient-to-r from-indigo-500 to-indigo-700 rounded-full transition-all duration-700"
-                  style={{
-                    width: `${filteredByPeriodOrders.length > 0 ? Math.max(8, (filteredByPeriodOrders.filter(o => o.status === 'APPROVED_BY_SALES').length / filteredByPeriodOrders.length) * 100) : 0}%`
-                  }}
-                ></div>
-              </div>
-            </div>
-
-            {/* Funnel Stage 3: Referred to Shipping Companies */}
-            <div>
-              <div className="flex justify-between text-xs font-bold mb-1.5">
-                <span className="text-blue-800 flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
-                  ۳. ارجاع شده به شرکت‌های حمل و نقل همکار
-                </span>
-                <span className="text-slate-700 font-mono">
-                  {filteredByPeriodOrders.filter(o => o.status === 'SENT_TO_SHIPPING').length} سفارش
-                </span>
-              </div>
-              <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200/60">
-                <div
-                  className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all duration-700"
-                  style={{
-                    width: `${filteredByPeriodOrders.length > 0 ? Math.max(8, (filteredByPeriodOrders.filter(o => o.status === 'SENT_TO_SHIPPING').length / filteredByPeriodOrders.length) * 100) : 0}%`
-                  }}
-                ></div>
-              </div>
-            </div>
-
-            {/* Funnel Stage 4: Driver & Truck Assigned */}
-            <div>
-              <div className="flex justify-between text-xs font-bold mb-1.5">
-                <span className="text-cyan-800 flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
-                  ۴. تخصیص خودرو، پلاک راننده و صادرکننده بارنامه
-                </span>
-                <span className="text-slate-700 font-mono">
-                  {filteredByPeriodOrders.filter(o => o.status === 'DRIVER_ASSIGNED').length} سفارش
-                </span>
-              </div>
-              <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200/60">
-                <div
-                  className="h-full bg-gradient-to-r from-cyan-400 to-cyan-600 rounded-full transition-all duration-700"
-                  style={{
-                    width: `${filteredByPeriodOrders.length > 0 ? Math.max(8, (filteredByPeriodOrders.filter(o => o.status === 'DRIVER_ASSIGNED').length / filteredByPeriodOrders.length) * 100) : 0}%`
-                  }}
-                ></div>
-              </div>
-            </div>
-
-            {/* Funnel Stage 5: Completed & Delivered */}
-            <div>
-              <div className="flex justify-between text-xs font-bold mb-1.5">
-                <span className="text-emerald-800 flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                  ۵. بارگیری کامل، ارسال و تحویل به مشتری (خاتمه یافته)
-                </span>
-                <span className="text-slate-700 font-mono">
-                  {completedOrders.length} سفارش ({completedOrders.reduce((s, o) => s + o.quantity, 0).toLocaleString()} قالب)
-                </span>
-              </div>
-              <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200/60">
-                <div
-                  className="h-full bg-gradient-to-r from-emerald-500 to-emerald-700 rounded-full transition-all duration-700"
-                  style={{
-                    width: `${filteredByPeriodOrders.length > 0 ? Math.max(8, (completedOrders.length / filteredByPeriodOrders.length) * 100) : 0}%`
-                  }}
-                ></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Chart 2: Top Selling Products Donut Breakdown */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="border-b border-slate-100 pb-3">
-            <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
-              <PieIcon className="w-5 h-5 text-indigo-600" />
+      {/* Visual Analytics 2-Column Section: Product Market Share & Province Destinations */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" id="commercial-charts-section">
+        
+        {/* Chart 1: Top Selling Products Breakdown */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3.5">
+          <div className="border-b border-slate-100 pb-2.5 flex items-center justify-between">
+            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+              <PieIcon className="w-4 h-4 text-indigo-600" />
               <span>پرفروش‌ترین سفال‌ها و محصولات</span>
             </h3>
-            <p className="text-slate-400 text-xs mt-1">سهم بازار سفال سقف و آجر براساس تعداد سفارشات</p>
+            <span className="text-[11px] text-slate-400 font-sans">سهم براساس تعداد سفارش</span>
           </div>
 
-          {/* Donut Legend */}
-          <div className="space-y-3 pt-2">
+          {/* Product Distribution List */}
+          <div className="space-y-2.5 pt-1">
             {productDistribution.map((prod, idx) => {
               const colors = ['bg-amber-500', 'bg-indigo-600', 'bg-blue-500', 'bg-emerald-500', 'bg-purple-500'];
               const textColors = ['text-amber-700', 'text-indigo-700', 'text-blue-700', 'text-emerald-700', 'text-purple-700'];
@@ -613,18 +491,18 @@ export default function CommercialAnalyticsDashboard({
                 <div key={prod.name} className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-100 space-y-1">
                   <div className="flex items-center justify-between text-xs">
                     <span className={`font-bold flex items-center gap-2 ${textColors[idx % colors.length]}`}>
-                      <span className={`w-2.5 h-2.5 rounded-full ${colors[idx % colors.length]}`}></span>
+                      <span className={`w-2 h-2 rounded-full ${colors[idx % colors.length]}`}></span>
                       {prod.name}
                     </span>
                     <span className="font-mono font-bold text-slate-800">{prod.percent}%</span>
                   </div>
-                  <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                  <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
                     <div
                       className={`h-full ${colors[idx % colors.length]} rounded-full`}
                       style={{ width: `${prod.percent}%` }}
                     ></div>
                   </div>
-                  <span className="text-[10.5px] text-slate-400 block text-left font-mono">
+                  <span className="text-[10px] text-slate-400 block text-left font-mono">
                     {prod.qty.toLocaleString()} قالب
                   </span>
                 </div>
@@ -632,111 +510,40 @@ export default function CommercialAnalyticsDashboard({
             })}
           </div>
         </div>
-      </div>
 
-      {/* Regional & SLA Alerts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" id="commercial-regional-sla">
-        {/* Box 1: Regional Geographical Distribution */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
-              <MapPin className="w-5 h-5 text-rose-600" />
-              <span>توزیع جغرافیایی و مقاصد اصلی ارسال بار</span>
+        {/* Chart 2: Regional Geographical Distribution */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3.5">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-rose-600" />
+              <span>توزیع استانی و مقاصد اصلی ارسال بار</span>
             </h3>
-            <span className="text-xs font-bold text-rose-700 bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-200">
+            <span className="text-[10.5px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
               برترین استان‌ها
             </span>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-2 pt-1">
             {provinceDistribution.map((item, idx) => (
-              <div key={item.province} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="w-6 h-6 rounded-lg bg-rose-100 text-rose-800 text-xs font-bold flex items-center justify-center">
+              <div key={item.province} className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-5 h-5 rounded-lg bg-rose-100 text-rose-800 text-[11px] font-bold flex items-center justify-center">
                     {idx + 1}
                   </span>
                   <div>
                     <span className="font-bold text-xs text-slate-800 block">{item.province}</span>
-                    <span className="text-[11px] text-slate-500">{item.count} سفارش صادرشده</span>
+                    <span className="text-[10.5px] text-slate-500">{item.count} سفارش صادرشده</span>
                   </div>
                 </div>
                 <div className="text-left">
                   <span className="font-mono font-bold text-xs text-slate-800 block">{item.qty.toLocaleString()} قالب</span>
-                  <span className="text-[10px] text-slate-400 font-sans">تخمین بارگیری کامل</span>
+                  <span className="text-[9.5px] text-slate-400 font-sans">تخمین بارگیری</span>
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Box 2: Smart Commercial Bottlenecks & SLA Alerts */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-amber-500" />
-              <span>هوشمندسازی هشدارهای گلوگاه و تاخیر سفارشات</span>
-            </h3>
-            <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
-              نیاز به توجه بازرگانی
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {/* Alert 1: Overdue orders */}
-            <div className="p-3.5 bg-rose-50/90 rounded-xl border border-rose-200/80 flex items-start gap-3">
-              <div className="p-2 bg-rose-100 text-rose-700 rounded-lg shrink-0">
-                <Clock className="w-4 h-4" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <strong className="text-xs text-rose-900 font-extrabold">سفارشات دارای تاخیر زمانی (خارج از SLA)</strong>
-                  <span className="px-2 py-0.5 bg-rose-600 text-white font-mono font-bold text-xs rounded-full">
-                    {averageMetrics.overdueCount} سفارش
-                  </span>
-                </div>
-                <p className="text-[11px] text-rose-700 mt-1 leading-relaxed">
-                  سفارشاتی که زمان سپری شده آن‌ها از حد مجاز ۳۶ یا ۴۸ ساعت گذشته است و نیازمند پیگیری با واحد باربری یا تولید کارخانه هستند.
-                </p>
-              </div>
-            </div>
-
-            {/* Alert 2: At risk orders */}
-            <div className="p-3.5 bg-amber-50/90 rounded-xl border border-amber-200/80 flex items-start gap-3">
-              <div className="p-2 bg-amber-100 text-amber-700 rounded-lg shrink-0">
-                <Zap className="w-4 h-4" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <strong className="text-xs text-amber-900 font-extrabold">سفارشات در آستانه تاخیر (هشدار زرد)</strong>
-                  <span className="px-2 py-0.5 bg-amber-500 text-slate-950 font-mono font-bold text-xs rounded-full">
-                    {averageMetrics.atRiskCount} سفارش
-                  </span>
-                </div>
-                <p className="text-[11px] text-amber-800 mt-1 leading-relaxed">
-                  بیش از ۷۵٪ زمان مجاز این سفارشات سپری شده است. پیشنهاد می‌شود وضعیت بارگیری آنها بررسی گردد.
-                </p>
-              </div>
-            </div>
-
-            {/* Alert 3: On Schedule Fulfillment Summary */}
-            <div className="p-3.5 bg-emerald-50/90 rounded-xl border border-emerald-200/80 flex items-start gap-3">
-              <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg shrink-0">
-                <CheckCircle2 className="w-4 h-4" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <strong className="text-xs text-emerald-900 font-extrabold">سفارشات در وضعیت مطلوب و نرمال</strong>
-                  <span className="px-2 py-0.5 bg-emerald-600 text-white font-mono font-bold text-xs rounded-full">
-                    {Math.max(0, ordersWithSLA.filter(o => o.status !== 'CANCELLED').length - averageMetrics.overdueCount - averageMetrics.atRiskCount)} سفارش
-                  </span>
-                </div>
-                <p className="text-[11px] text-emerald-800 mt-1 leading-relaxed">
-                  تولید، بارگیری و ترخیص این سفارشات مطابق استاندارد پیش‌بینی شده در حال انجام بوده و تاخیری در تحویل گزارش نشده است.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Main SLA & Estimated Completion Time Table per Order */}

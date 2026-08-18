@@ -891,13 +891,19 @@ export function BaseDefinitionsDashboard({
                         }
 
                         let roleColor = 'bg-slate-100 text-slate-800';
-                        let roleLabel = 'ناشناس';
+                        let roleLabel = 'کاربر سیستم';
                         if (u.role === 'SALES_MANAGER') {
                           roleColor = 'bg-amber-100 text-amber-800 border border-amber-200';
                           roleLabel = 'مدیریت بازرگانی';
                         } else if (u.role === 'FACTORY_TRANSPORT') {
                           roleColor = 'bg-blue-100 text-blue-800 border border-blue-200';
                           roleLabel = 'ترابری کارخانه';
+                        } else if (u.role === 'PRODUCT_WAREHOUSE') {
+                          roleColor = 'bg-teal-100 text-teal-800 border border-teal-200';
+                          roleLabel = 'انبار محصول (بارگیری و حواله)';
+                        } else if (u.role === 'SECURITY_GATE') {
+                          roleColor = 'bg-slate-800 text-amber-300 border border-slate-700';
+                          roleLabel = 'گیت حراست و انتظامات';
                         } else if (u.role === 'REPRESENTATIVE') {
                           roleColor = 'bg-emerald-100 text-emerald-800 border border-emerald-200';
                           roleLabel = 'نمایندگی رسمی';
@@ -907,6 +913,9 @@ export function BaseDefinitionsDashboard({
                         } else if (u.role === 'DRIVER') {
                           roleColor = 'bg-cyan-100 text-cyan-800 border border-cyan-200';
                           roleLabel = 'راننده ترابری';
+                        } else if (u.role === 'SYSTEM_ADMIN') {
+                          roleColor = 'bg-rose-100 text-rose-900 border border-rose-200';
+                          roleLabel = 'ادمین ارشد سیستم';
                         }
 
                         return (
@@ -1045,9 +1054,12 @@ export function BaseDefinitionsDashboard({
                   >
                     <option value="REPRESENTATIVE">نمایندگی رسمی فروش</option>
                     <option value="SALES_MANAGER">مدیریت بازرگانی و فروش</option>
-                    <option value="FACTORY_TRANSPORT">ترابری و بارگیری کارخانه</option>
+                    <option value="FACTORY_TRANSPORT">ترابری و برنامه بارگیری کارخانه</option>
+                    <option value="PRODUCT_WAREHOUSE">انبار محصول (بارگیری و صدور حواله)</option>
+                    <option value="SECURITY_GATE">گیت حراست و ترخیص نهایی</option>
                     <option value="SHIPPING_COMPANY">شرکت حمل و نقل باربری</option>
                     <option value="DRIVER">راننده اختصاصی ناوگان</option>
+                    <option value="SYSTEM_ADMIN">ادمین ارشد سیستم</option>
                   </select>
                 </div>
 
