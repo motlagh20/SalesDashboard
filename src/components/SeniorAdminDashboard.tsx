@@ -199,66 +199,85 @@ export default function SeniorAdminDashboard({
   const fetchSystemLogsAndStats = async () => {
     setIsRefreshingMonitor(true);
     try {
-      // 1. Fetch activity logs
-      const resLogs = await fetch('/api/system/activity-logs?limit=100');
-      if (resLogs.ok) {
-        const ct = resLogs.headers.get('content-type') || '';
+      // 1. Try high-speed unified monitor-data endpoint first
+      const resUnified = await fetch('/api/system/monitor-data?limit=100');
+      if (resUnified.ok) {
+        const ct = resUnified.headers.get('content-type') || '';
         if (ct.includes('application/json')) {
-          const data = await resLogs.json();
+          const data = await resUnified.json();
           if (data.logs && Array.isArray(data.logs)) {
             setActivityLogs(data.logs);
           }
-        }
-      }
-
-      // 2. Fetch system metrics
-      const resMetrics = await fetch('/api/system/metrics');
-      if (resMetrics.ok) {
-        const ct = resMetrics.headers.get('content-type') || '';
-        if (ct.includes('application/json')) {
-          const data = await resMetrics.json();
-          if (data.success) {
-            setSystemMetrics(data);
+          if (data.metrics) {
+            setSystemMetrics(data.metrics);
           }
+          if (data.errorLogs) {
+            setLogsConsoleContent(data.errorLogs);
+          }
+          if (data.systemSettings) {
+            setSystemSettings(prev => ({ ...prev, ...data.systemSettings }));
+          }
+          if (typeof data.userCount === 'number') {
+            setRegisteredUsersCount(data.userCount);
+          }
+          return;
         }
       }
+    } catch {
+      // fallback to individual calls if unified call is unavailable
+    }
 
-      // 3. Fetch error logs console
-      const resErr = await fetch('/api/system/error-logs');
-      if (resErr.ok) {
-        const ct = resErr.headers.get('content-type') || '';
-        if (ct.includes('application/json')) {
-          const data = await resErr.json();
+    try {
+      // Fallback: Individual calls
+      const [resLogs, resMetrics, resErr, resUsers, resSettings] = await Promise.allSettled([
+        fetch('/api/system/activity-logs?limit=100'),
+        fetch('/api/system/metrics'),
+        fetch('/api/system/error-logs'),
+        fetch('/api/users'),
+        fetch('/api/system-settings')
+      ]);
+
+      if (resLogs.status === 'fulfilled' && resLogs.value.ok) {
+        try {
+          const data = await resLogs.value.json();
+          if (data.logs && Array.isArray(data.logs)) setActivityLogs(data.logs);
+        } catch {}
+      }
+
+      if (resMetrics.status === 'fulfilled' && resMetrics.value.ok) {
+        try {
+          const data = await resMetrics.value.json();
+          if (data.success) setSystemMetrics(data);
+        } catch {}
+      }
+
+      if (resErr.status === 'fulfilled' && resErr.value.ok) {
+        try {
+          const data = await resErr.value.json();
           setLogsConsoleContent(data.logs || 'هیچ خطایی در سیستم ثبت نشده است.');
-        }
+        } catch {}
       }
 
-      // 4. Fetch users count & online status
-      const resUsers = await fetch('/api/users');
-      if (resUsers.ok) {
-        const ct = resUsers.headers.get('content-type') || '';
-        if (ct.includes('application/json')) {
-          const data = await resUsers.json();
+      if (resUsers.status === 'fulfilled' && resUsers.value.ok) {
+        try {
+          const data = await resUsers.value.json();
           if (Array.isArray(data)) {
             setRegisteredUsersCount(data.length);
             setUsersList(data);
           }
-        }
+        } catch {}
       }
 
-      // 5. Fetch system settings
-      const resSettings = await fetch('/api/system-settings');
-      if (resSettings.ok) {
-        const ct = resSettings.headers.get('content-type') || '';
-        if (ct.includes('application/json')) {
-          const data = await resSettings.json();
+      if (resSettings.status === 'fulfilled' && resSettings.value.ok) {
+        try {
+          const data = await resSettings.value.json();
           if (data && typeof data === 'object') {
             setSystemSettings(prev => ({ ...prev, ...data }));
           }
-        }
+        } catch {}
       }
     } catch (err) {
-      console.error('Error fetching system logs and stats:', err);
+      console.warn('Silent note: system logs refresh encountered transient issue:', err);
     } finally {
       setIsRefreshingMonitor(false);
     }
