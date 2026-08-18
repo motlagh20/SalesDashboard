@@ -476,8 +476,29 @@ export default function App() {
     }
   };
 
-  // Load data from production Express API
+  // Load data from production Express API with high-speed unified bootstrap & fallback
   const refreshAllData = async (bypassCache: boolean = false) => {
+    try {
+      const bootstrapUrl = bypassCache ? `/api/sync/bootstrap?_t=${Date.now()}` : '/api/sync/bootstrap';
+      const res = await fetch(bootstrapUrl);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.products)) {
+          setProducts(data.products);
+          setAgents(data.agents || []);
+          setShippingCompanies(data.shippingCompanies || []);
+          setPermanentDrivers(data.permanentDrivers || []);
+          setOrders(data.orders || []);
+          if (typeof data.sandboxEnabled === 'boolean') {
+            setSandboxEnabled(data.sandboxEnabled);
+          }
+          return;
+        }
+      }
+    } catch (bootstrapErr) {
+      console.warn("[API] Bootstrap endpoint unavailable, falling back to individual calls:", bootstrapErr);
+    }
+
     const fetchWithFallback = async (url: string, setter: (data: any) => void) => {
       try {
         const fetchUrl = bypassCache ? `${url}?_t=${Date.now()}` : url;
@@ -506,7 +527,7 @@ export default function App() {
     refreshAllData();
     // Periodic background sync only when a user is actively logged in
     if (!currentUser) return;
-    const interval = setInterval(() => refreshAllData(false), 12000);
+    const interval = setInterval(() => refreshAllData(false), 10000);
     return () => clearInterval(interval);
   }, [currentUser]);
 

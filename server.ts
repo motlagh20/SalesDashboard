@@ -170,6 +170,170 @@ async function startServer() {
     });
   });
 
+  // Unified Ultra-Fast Sync Bootstrap API Endpoint (Fetches all datasets in a single HTTP round-trip)
+  app.get("/api/sync/bootstrap", async (req, res) => {
+    try {
+      const db = getDbPool();
+      
+      const [
+        [prodRows],
+        [agentRows],
+        [scRows],
+        [driverRows],
+        [orderRows],
+        [historyRows]
+      ] = await Promise.all([
+        db.query("SELECT * FROM products"),
+        db.query("SELECT * FROM agents"),
+        db.query("SELECT * FROM shipping_companies"),
+        db.query("SELECT * FROM permanent_drivers"),
+        db.query("SELECT * FROM orders ORDER BY priorityIndex ASC, createdAt DESC"),
+        db.query("SELECT * FROM order_history ORDER BY updatedAt ASC")
+      ]) as any[];
+
+      const products = (prodRows || []).map((p: any) => ({
+        ...p,
+        isEnabled: !!p.isEnabled
+      }));
+
+      const agents = (agentRows || []).map((a: any) => {
+        let territories = a.territories;
+        if (territories && typeof territories === 'string') {
+          try {
+            territories = JSON.parse(territories);
+          } catch {
+            territories = [];
+          }
+        }
+        return {
+          ...a,
+          territories: Array.isArray(territories) ? territories : [],
+          isExportAgent: !!a.isExportAgent,
+          isEnabled: !!a.isEnabled
+        };
+      });
+
+      const shippingCompanies = (scRows || []).map((sc: any) => ({
+        ...sc,
+        isEnabled: !!sc.isEnabled
+      }));
+
+      const permanentDrivers = (driverRows || []).map((d: any) => ({
+        ...d,
+        isEnabled: !!d.isEnabled
+      }));
+
+      const historyMap: Record<string, any[]> = {};
+      for (const h of historyRows || []) {
+        if (!historyMap[h.orderId]) {
+          historyMap[h.orderId] = [];
+        }
+        historyMap[h.orderId].push({
+          status: h.status,
+          updatedAt: h.updatedAt,
+          comment: h.comment
+        });
+      }
+
+      const orders = (orderRows || []).map((o: any) => {
+        const formatted: any = {
+          id: o.id,
+          orderNumber: o.orderNumber,
+          customerName: o.customerName,
+          agentCode: o.agentCode,
+          productId: o.productId,
+          productName: o.productName,
+          quantity: o.quantity,
+          unit: o.unit,
+          destinationCity: o.destinationCity,
+          exactAddress: o.exactAddress,
+          phoneNumber: o.phoneNumber,
+          buyerName: o.buyerName,
+          notes: o.notes,
+          createdAt: o.createdAt,
+          sentToFactoryAt: o.sentToFactoryAt,
+          status: o.status,
+          priorityIndex: o.priorityIndex,
+          rejectionReason: o.rejectionReason,
+          itemsJson: o.itemsJson,
+          paymentTrackingCode: o.paymentTrackingCode,
+          paymentReceiptUrl: o.paymentReceiptUrl || null,
+          paymentReceiptName: o.paymentReceiptName || null,
+          shippingCompanyId: o.shippingCompanyId,
+          isExportOrder: !!o.isExportOrder,
+          destinationCountry: o.destinationCountry,
+          deliveryLocationUrl: o.deliveryLocationUrl || null,
+          vehicleType: o.vehicleType || null,
+          hasPendingEdit: !!o.hasPendingEdit,
+          pendingEditData: o.pendingEditData || null,
+          recentlyEditedNotice: o.recentlyEditedNotice || null,
+          packagingType: o.packagingType || (o.isExportOrder ? 'PALLET' : 'BULK'),
+          statusHistory: historyMap[o.id] || []
+        };
+
+        if (o.warehouseDiscrepancy) {
+          try {
+            formatted.warehouseDiscrepancy = typeof o.warehouseDiscrepancy === 'string' ? JSON.parse(o.warehouseDiscrepancy) : o.warehouseDiscrepancy;
+          } catch {
+            formatted.warehouseDiscrepancy = o.warehouseDiscrepancy;
+          }
+        }
+
+        if (o.securityDetained) {
+          try {
+            formatted.securityDetained = typeof o.securityDetained === 'string' ? JSON.parse(o.securityDetained) : o.securityDetained;
+          } catch {
+            formatted.securityDetained = o.securityDetained;
+          }
+        }
+
+        if (o.driverName || o.driverPhone || o.licensePlate || o.shippingAgency || o.billOfLadingNumber) {
+          formatted.vehicleDetails = {
+            vehicleType: o.vehicleType,
+            driverName: o.driverName,
+            driverPhone: o.driverPhone,
+            licensePlate: o.licensePlate,
+            shippingAgency: o.shippingAgency,
+            estimatedArrival: o.estimatedArrival,
+            billOfLadingNumber: o.billOfLadingNumber
+          };
+        }
+
+        if (o.warehouseDetails) {
+          try {
+            formatted.warehouseDetails = typeof o.warehouseDetails === 'string' ? JSON.parse(o.warehouseDetails) : o.warehouseDetails;
+          } catch {
+            formatted.warehouseDetails = o.warehouseDetails;
+          }
+        }
+
+        if (o.securityGateDetails) {
+          try {
+            formatted.securityGateDetails = typeof o.securityGateDetails === 'string' ? JSON.parse(o.securityGateDetails) : o.securityGateDetails;
+          } catch {
+            formatted.securityGateDetails = o.securityGateDetails;
+          }
+        }
+
+        return formatted;
+      });
+
+      res.json({
+        products,
+        agents,
+        shippingCompanies,
+        permanentDrivers,
+        orders,
+        systemSettings: getSystemSettings(),
+        sandboxEnabled: globalSandboxEnabled,
+        timestamp: Date.now()
+      });
+    } catch (err: any) {
+      console.error("Error in GET /api/sync/bootstrap:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Serve the uploadable logo.png from root workspace
   app.get("/logo.png", (req, res) => {
     const logoPath = path.join(process.cwd(), "logo.png");

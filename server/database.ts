@@ -50,7 +50,14 @@ let isFallbackMode = false;
 let mockPoolInstance: MockPool | null = null;
 const JSON_FILE_PATH = path.join(process.cwd(), "server", "salesdashboard.json");
 
+// In-memory persistent object cache to eliminate sync disk I/O on every single query
+let inMemoryJsonDataCache: any = null;
+let saveDebounceTimer: NodeJS.Timeout | null = null;
+
 function loadJsonData(): any {
+  if (inMemoryJsonDataCache) {
+    return inMemoryJsonDataCache;
+  }
   if (!fs.existsSync(JSON_FILE_PATH)) {
     const initial = {
       products: [],
@@ -58,10 +65,12 @@ function loadJsonData(): any {
       shipping_companies: [],
       orders: [],
       order_history: [],
-      app_users: []
+      app_users: [],
+      permanent_drivers: []
     };
     fs.mkdirSync(path.dirname(JSON_FILE_PATH), { recursive: true });
     fs.writeFileSync(JSON_FILE_PATH, JSON.stringify(initial, null, 2), "utf8");
+    inMemoryJsonDataCache = initial;
     return initial;
   }
   try {
@@ -69,26 +78,41 @@ function loadJsonData(): any {
     const parsed = JSON.parse(raw);
     if (!parsed.app_users) parsed.app_users = [];
     if (!parsed.permanent_drivers) parsed.permanent_drivers = [];
+    inMemoryJsonDataCache = parsed;
     return parsed;
   } catch (err) {
     console.error("Error reading fallback JSON database:", err);
-    return {
+    inMemoryJsonDataCache = {
       products: [],
       agents: [],
       shipping_companies: [],
       orders: [],
       order_history: [],
-      app_users: []
+      app_users: [],
+      permanent_drivers: []
     };
+    return inMemoryJsonDataCache;
   }
 }
 
-function saveJsonData(data: any) {
-  try {
-    fs.mkdirSync(path.dirname(JSON_FILE_PATH), { recursive: true });
-    fs.writeFileSync(JSON_FILE_PATH, JSON.stringify(data, null, 2), "utf8");
-  } catch (err) {
-    console.error("Error writing fallback JSON database:", err);
+function saveJsonData(data: any, immediate: boolean = false) {
+  inMemoryJsonDataCache = data;
+  
+  const performWrite = () => {
+    try {
+      fs.mkdirSync(path.dirname(JSON_FILE_PATH), { recursive: true });
+      fs.writeFileSync(JSON_FILE_PATH, JSON.stringify(data, null, 2), "utf8");
+    } catch (err) {
+      console.error("Error writing fallback JSON database:", err);
+    }
+  };
+
+  if (immediate) {
+    if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+    performWrite();
+  } else {
+    if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+    saveDebounceTimer = setTimeout(performWrite, 100);
   }
 }
 
