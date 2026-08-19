@@ -477,7 +477,7 @@ export default function App() {
   };
 
   // Load data from production Express API with high-speed unified bootstrap & fallback
-  const refreshAllData = async (bypassCache: boolean = false) => {
+  const refreshAllData = async (bypassCache: boolean = true) => {
     try {
       const bootstrapUrl = bypassCache ? `/api/sync/bootstrap?_t=${Date.now()}` : '/api/sync/bootstrap';
       const res = await fetch(bootstrapUrl);
@@ -1399,6 +1399,17 @@ export default function App() {
             localStorage.setItem('tabarestan_user', JSON.stringify(user));
             setCurrentUser(user);
             setActiveRole(user.role);
+            if (user.role === 'REPRESENTATIVE') {
+              const allAgents = agents.length > 0 ? agents : PRESET_AGENTS;
+              const matchedAgent = allAgents.find(a => 
+                (user.agentCode && a.agentCode === user.agentCode) || 
+                (user.fullName && (a.fullName === user.fullName || a.alias === user.fullName))
+              );
+              if (matchedAgent) {
+                setSelectedAgent(matchedAgent.alias);
+              }
+            }
+            refreshAllData(true);
           }} 
           showToast={showToast} 
           sandboxEnabled={sandboxEnabled}

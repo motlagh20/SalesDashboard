@@ -330,8 +330,18 @@ export default function RepresentativeDashboard({
   const [searchQuery, setSearchQuery] = useState('');
   const [trackingFilter, setTrackingFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'DISPATCHED' | 'REJECTED'>('ALL');
 
-  // Filter orders for the selected agent
-  const agentOrders = orders.filter(o => o.customerName === selectedAgent);
+  // Filter orders for the selected agent with comprehensive code and alias matching
+  const agentOrders = orders.filter(o => {
+    if (currentUser?.role === 'REPRESENTATIVE' && currentUser.agentCode) {
+      if (o.agentCode === currentUser.agentCode) return true;
+    }
+    if (currentAgentObj) {
+      if (currentAgentObj.agentCode && o.agentCode === currentAgentObj.agentCode) return true;
+      if (currentAgentObj.alias && (o.customerName === currentAgentObj.alias || o.customerName === currentAgentObj.fullName)) return true;
+      if (currentAgentObj.fullName && (o.customerName === currentAgentObj.fullName || o.customerName === currentAgentObj.alias)) return true;
+    }
+    return o.customerName === selectedAgent || o.agentCode === selectedAgent;
+  });
 
   // Dynamic quantity preset shortcuts calculated from representative's historical orders
   const dynamicQuantityPresets = React.useMemo(() => {

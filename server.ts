@@ -173,15 +173,6 @@ async function startServer() {
   // Unified Ultra-Fast Sync Bootstrap API Endpoint (Fetches all datasets in a single HTTP round-trip)
   app.get("/api/sync/bootstrap", async (req, res) => {
     try {
-      const bypass = req.query._t !== undefined;
-      const cacheKey = "sync_bootstrap";
-      if (!bypass) {
-        const cached = getCachedRouteData(cacheKey);
-        if (cached) {
-          return res.json(cached);
-        }
-      }
-
       const db = getDbPool();
       
       const [
@@ -338,7 +329,6 @@ async function startServer() {
         timestamp: Date.now()
       };
 
-      setCachedRouteData(cacheKey, payload, 8); // 8 seconds cache
       res.json(payload);
     } catch (err: any) {
       console.error("Error in GET /api/sync/bootstrap:", err);
