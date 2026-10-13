@@ -30,6 +30,59 @@
     <!-- Suppress Vite dev HMR WebSocket connection errors (HMR disabled in AI Studio environment) -->
     <script>
       (function() {
+        try {
+          var NativeWS = window.WebSocket;
+          if (NativeWS) {
+            function MockHmrSocket(url, protocols) {
+              var isVite = (protocols === 'vite-hmr' || protocols === 'vite-ping') ||
+                           (typeof url === 'string' && (url.indexOf('token=') !== -1 || url.indexOf('vite') !== -1));
+              if (!isVite) {
+                return new NativeWS(url, protocols);
+              }
+              var target = new EventTarget();
+              var dummy = {
+                url: String(url),
+                readyState: 0,
+                CONNECTING: 0,
+                OPEN: 1,
+                CLOSING: 2,
+                CLOSED: 3,
+                send: function() {},
+                close: function() {
+                  dummy.readyState = 3;
+                  var ev = new Event('close');
+                  target.dispatchEvent(ev);
+                  if (typeof dummy.onclose === 'function') dummy.onclose(ev);
+                },
+                addEventListener: function(t, fn, opt) { target.addEventListener(t, fn, opt); },
+                removeEventListener: function(t, fn, opt) { target.removeEventListener(t, fn, opt); },
+                dispatchEvent: function(ev) { return target.dispatchEvent(ev); },
+                onopen: null,
+                onclose: null,
+                onerror: null,
+                onmessage: null
+              };
+              dummy.OPEN = 1;
+              dummy.CLOSED = 3;
+              dummy.CONNECTING = 0;
+              dummy.CLOSING = 2;
+              setTimeout(function() {
+                dummy.readyState = 1;
+                var ev = new Event('open');
+                target.dispatchEvent(ev);
+                if (typeof dummy.onopen === 'function') dummy.onopen(ev);
+              }, 5);
+              return dummy;
+            }
+            MockHmrSocket.CONNECTING = NativeWS.CONNECTING || 0;
+            MockHmrSocket.OPEN = NativeWS.OPEN || 1;
+            MockHmrSocket.CLOSING = NativeWS.CLOSING || 2;
+            MockHmrSocket.CLOSED = NativeWS.CLOSED || 3;
+            MockHmrSocket.prototype = NativeWS.prototype;
+            window.WebSocket = MockHmrSocket;
+          }
+        } catch (e) {}
+
         function isViteHmrError(err) {
           if (!err) return false;
           var str = (err.message || '') + ' ' + (err.stack || '') + ' ' + String(err);
