@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Order, Product, OrderStatus, Agent, AppUser } from '../types';
 import { PRESET_AGENTS } from '../data';
 import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary, EXPORT_COUNTRIES, getBordersForCountry } from '../data/iranLocations';
+import { TerritoryBadgeList } from './TerritoryBadgeList';
 import { toEnglishDigits } from '../utils/numberUtils';
 import { serializeItemsJson, parseAndHydrateItemsJson } from '../utils/itemsJsonHelper';
 import { reverseGeocode, extractCoordsFromUrl, checkCityInTerritory } from '../utils/reverseGeocode';
@@ -1454,14 +1455,17 @@ export default function RepresentativeDashboard({
                     </div>
 
                     {/* Territory Scope Info Box */}
-                    <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 text-xs space-y-1">
+                    <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 text-xs space-y-2">
                       <div className="flex items-center gap-1.5 text-sky-950 font-bold">
                         <ShieldCheck className="w-4 h-4 text-sky-600" />
                         <span>محدوده مجاز ثبت سفارش نمایندگی شما:</span>
                       </div>
-                      <p className="text-sky-800 font-bold mr-5">
-                        {formatTerritoriesSummary(agentTerritories)}
-                      </p>
+                      <div className="mr-5 space-y-1.5">
+                        <TerritoryBadgeList territories={agentTerritories} fallbackArea={currentAgentObj.area} />
+                        <p className="text-[11px] text-sky-800 font-medium">
+                          {formatTerritoriesSummary(agentTerritories)}
+                        </p>
+                      </div>
                     </div>
 
                     {/* Export Agent Toggle */}

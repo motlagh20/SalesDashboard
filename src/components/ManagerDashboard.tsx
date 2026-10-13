@@ -10,6 +10,8 @@ import { parseAndHydrateItemsJson, serializeItemsJson } from '../utils/itemsJson
 import PermanentDriversManager from './PermanentDriversManager';
 import CommercialAnalyticsDashboard from './CommercialAnalyticsDashboard';
 import { BaseDefinitionsDashboard } from './BaseDefinitionsDashboard';
+import { TerritorySelector } from './TerritorySelector';
+import { TerritoryBadgeList } from './TerritoryBadgeList';
 import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary } from '../data/iranLocations';
 import { 
   BarChart3,
@@ -2025,9 +2027,10 @@ export default function ManagerDashboard({
                           )}
                           {!agent.isEnabled && <span className="text-[9px] bg-rose-100 text-rose-700 py-0.5 px-2 rounded-full font-bold">غیرفعال‌شده</span>}
                         </div>
-                        <p className="text-[11px] text-slate-600 mt-1 font-sans">
-                          💼 مسئول: <strong>{agent.fullName}</strong> • محدوده: {agent.area}
-                        </p>
+                        <div className="text-[11px] text-slate-600 mt-1 font-sans flex items-center gap-1.5 flex-wrap">
+                          <span>💼 مسئول: <strong>{agent.fullName}</strong> • حوزه سرپرستی:</span>
+                          <TerritoryBadgeList territories={agent.territories} fallbackArea={agent.area} />
+                        </div>
                         {agent.personType === 'LEGAL' ? (
                           <div className="text-[10px] text-slate-600 font-mono mt-1 bg-indigo-50/50 p-1.5 rounded border border-indigo-100/80 space-y-0.5">
                             <div>🏛️ شرکت: <strong className="text-indigo-950 font-sans">{agent.companyName || '-'}</strong></div>
@@ -2303,159 +2306,12 @@ export default function ManagerDashboard({
                   />
                 </div>
 
-                {/* Territory Selection Component */}
-                <div className="bg-slate-50/80 border border-slate-200 rounded-lg p-3 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-slate-800 text-xs font-bold flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>تعیین محدوده فعالیت و قلمرو مجاز نمایندگی</span>
-                    </label>
-                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium">
-                      {newAgentTerritories.length === 0 ? 'سراسر کشور' : `${newAgentTerritories.length} استان ثبت‌شده`}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-500 leading-relaxed">
-                    می‌توانید کل یک استان یا شهرهای خاصی از یک استان را برای این نماینده تعیین کنید. در زمان ثبت سفارش توسط نماینده، فقط لیست شهرهای مجاز در این محدوده نمایش داده خواهد شد.
-                  </p>
-
-                  {/* Current Assigned Territories List */}
-                  {newAgentTerritories.length > 0 && (
-                    <div className="space-y-1.5 bg-white p-2.5 rounded-md border border-slate-200">
-                      <div className="text-[10px] font-bold text-slate-600 mb-1">استان‌ها و شهرهای تخصیص داده شده:</div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {newAgentTerritories.map((t) => (
-                          <div key={t.province} className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] px-2.5 py-1 rounded-md font-sans">
-                            <span className="font-bold">{t.province}:</span>
-                            <span>{t.allCities ? 'کل استان' : (t.cities && t.cities.length > 0 ? t.cities.join('، ') : 'همه شهرها')}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveTerritoryRule(t.province)}
-                              className="text-rose-500 hover:text-rose-700 hover:bg-rose-100 rounded p-0.5 transition-colors mr-1 cursor-pointer"
-                              title="حذف این استان از محدوده"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Territory Adding Controls */}
-                  <div className="bg-white p-2.5 rounded-md border border-slate-200 space-y-2">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[10px] text-slate-600 font-bold mb-1">انتخاب استان:</label>
-                        <select
-                          value={builderProvince}
-                          onChange={(e) => {
-                            const p = e.target.value;
-                            setBuilderProvince(p);
-                            setBuilderSelectedCities(getCitiesForProvince(p));
-                          }}
-                          className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans cursor-pointer"
-                        >
-                          {IRAN_PROVINCES.map(p => (
-                            <option key={p.name} value={p.name}>{p.name}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] text-slate-600 font-bold mb-1">نوع پوشش در استان:</label>
-                        <div className="flex items-center gap-3 py-1">
-                          <label className="flex items-center gap-1 cursor-pointer text-xs text-slate-700 select-none">
-                            <input
-                              type="radio"
-                              name="builderAllCities"
-                              checked={builderAllCities}
-                              onChange={() => setBuilderAllCities(true)}
-                              className="accent-emerald-600 cursor-pointer"
-                            />
-                            <span className="font-medium">کل استان (تمام شهرها)</span>
-                          </label>
-                          <label className="flex items-center gap-1 cursor-pointer text-xs text-slate-700 select-none">
-                            <input
-                              type="radio"
-                              name="builderAllCities"
-                              checked={!builderAllCities}
-                              onChange={() => {
-                                setBuilderAllCities(false);
-                                if (builderSelectedCities.length === 0) {
-                                  setBuilderSelectedCities(getCitiesForProvince(builderProvince));
-                                }
-                              }}
-                              className="accent-emerald-600 cursor-pointer"
-                            />
-                            <span className="font-medium">شهرهای خاص</span>
-                          </label>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Cities Selector if 'شهرهای خاص' selected */}
-                    {!builderAllCities && (
-                      <div className="pt-2 border-t border-slate-100 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold text-slate-600">
-                            شهرهای مجاز در استان {builderProvince}:
-                          </span>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setBuilderSelectedCities(getCitiesForProvince(builderProvince))}
-                              className="text-[10px] text-emerald-700 hover:underline cursor-pointer"
-                            >
-                              انتخاب همه
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setBuilderSelectedCities([])}
-                              className="text-[10px] text-rose-600 hover:underline cursor-pointer"
-                            >
-                              پاکسازی
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-1 bg-slate-50/50 rounded border border-slate-100">
-                          {getCitiesForProvince(builderProvince).map(cityName => {
-                            const isSelected = builderSelectedCities.includes(cityName);
-                            return (
-                              <button
-                                type="button"
-                                key={cityName}
-                                onClick={() => {
-                                  if (isSelected) {
-                                    setBuilderSelectedCities(builderSelectedCities.filter(c => c !== cityName));
-                                  } else {
-                                    setBuilderSelectedCities([...builderSelectedCities, cityName]);
-                                  }
-                                }}
-                                className={`text-[10px] px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
-                                  isSelected 
-                                    ? 'bg-emerald-600 text-white border-emerald-600 font-bold' 
-                                    : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300'
-                                }`}
-                              >
-                                {cityName}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={handleAddTerritoryRule}
-                      className="w-full mt-1 bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200 hover:border-emerald-300 text-xs py-1.5 px-3 rounded-md font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>ثبت/بروزرسانی محدوده استان {builderProvince}</span>
-                    </button>
-                  </div>
-                </div>
+                {/* Modern Territory Selector Component */}
+                <TerritorySelector
+                  value={newAgentTerritories}
+                  onChange={setNewAgentTerritories}
+                  onSummaryChange={setNewAgentArea}
+                />
 
                 {/* Export Agent Toggle Option */}
                 <div className="bg-sky-50/80 border border-sky-200/80 rounded-xl p-3">

@@ -17,7 +17,10 @@ import {
   ArrowRight,
   Sparkles
 } from 'lucide-react';
-import { Agent, Product, ShippingCompany, UserRole } from '../types';
+import { Agent, Product, ShippingCompany, UserRole, TerritoryAssignment } from '../types';
+import { TerritorySelector } from './TerritorySelector';
+import { TerritoryBadgeList } from './TerritoryBadgeList';
+import { formatTerritoriesSummary } from '../data/iranLocations';
 
 export interface BaseDefinitionsDashboardProps {
   agents: Agent[];
@@ -86,6 +89,7 @@ export function BaseDefinitionsDashboard({
   const [newAgentAlias, setNewAgentAlias] = useState('');
   const [newAgentCode, setNewAgentCode] = useState('');
   const [newAgentArea, setNewAgentArea] = useState('');
+  const [newAgentTerritories, setNewAgentTerritories] = useState<TerritoryAssignment[]>([]);
   const [newAgentFullName, setNewAgentFullName] = useState('');
   const [newAgentPhone, setNewAgentPhone] = useState('');
   const [newAgentAddress, setNewAgentAddress] = useState('');
@@ -102,6 +106,7 @@ export function BaseDefinitionsDashboard({
     setNewAgentAlias(agent.alias);
     setNewAgentCode(agent.agentCode);
     setNewAgentArea(agent.area);
+    setNewAgentTerritories(agent.territories && Array.isArray(agent.territories) ? [...agent.territories] : []);
     setNewAgentFullName(agent.fullName);
     setNewAgentPhone(agent.phoneNumber);
     setNewAgentAddress(agent.address);
@@ -119,6 +124,7 @@ export function BaseDefinitionsDashboard({
     setNewAgentAlias('');
     setNewAgentCode('');
     setNewAgentArea('');
+    setNewAgentTerritories([]);
     setNewAgentFullName('');
     setNewAgentPhone('');
     setNewAgentAddress('');
@@ -138,11 +144,16 @@ export function BaseDefinitionsDashboard({
       return;
     }
 
+    const summaryArea = newAgentTerritories.length > 0
+      ? formatTerritoriesSummary(newAgentTerritories)
+      : (newAgentArea.trim() || 'سراسر کشور');
+
     const payload: Agent = {
       id: editingAgent ? editingAgent.id : `agent-${Date.now()}`,
       alias: newAgentAlias.trim(),
       agentCode: newAgentCode.trim(),
-      area: newAgentArea.trim(),
+      area: summaryArea,
+      territories: newAgentTerritories,
       fullName: newAgentFullName.trim(),
       phoneNumber: newAgentPhone.trim(),
       address: newAgentAddress.trim(),
@@ -573,9 +584,10 @@ export function BaseDefinitionsDashboard({
                           )}
                           {!agent.isEnabled && <span className="text-[9px] bg-rose-100 text-rose-700 py-0.5 px-2 rounded-full font-bold">غیرفعال‌شده</span>}
                         </div>
-                        <p className="text-[11px] text-slate-600 mt-1 font-sans">
-                          💼 مسئول: <strong>{agent.fullName}</strong> • محدوده: {agent.area}
-                        </p>
+                        <div className="text-[11px] text-slate-600 mt-1 font-sans flex items-center gap-1.5 flex-wrap">
+                          <span>💼 مسئول: <strong>{agent.fullName}</strong> • حوزه سرپرستی:</span>
+                          <TerritoryBadgeList territories={agent.territories} fallbackArea={agent.area} />
+                        </div>
                         {agent.personType === 'LEGAL' ? (
                           <div className="text-[10px] text-slate-600 font-mono mt-1 bg-indigo-50/50 p-1.5 rounded border border-indigo-100/80 space-y-0.5">
                             <div>🏛️ شرکت: <strong className="text-indigo-950 font-sans">{agent.companyName || '-'}</strong></div>
@@ -786,16 +798,12 @@ export function BaseDefinitionsDashboard({
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1">حوزه سرپرستی / استان و شهر</label>
-                  <input
-                    type="text"
-                    placeholder="مثال: مازندران - ساری و حومه"
-                    value={newAgentArea}
-                    onChange={(e) => setNewAgentArea(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans"
-                  />
-                </div>
+                {/* Modern Territory Selector */}
+                <TerritorySelector
+                  value={newAgentTerritories}
+                  onChange={setNewAgentTerritories}
+                  onSummaryChange={setNewAgentArea}
+                />
 
                 {/* Export Agent Checkbox */}
                 <div className="bg-sky-50/70 border border-sky-200/80 p-2 rounded-xl flex items-center gap-2">
