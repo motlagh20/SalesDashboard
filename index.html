@@ -26,6 +26,32 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+    <!-- Suppress Vite dev HMR WebSocket connection errors (HMR disabled in AI Studio environment) -->
+    <script>
+      (function() {
+        function isViteHmrError(err) {
+          if (!err) return false;
+          var str = (err.message || '') + ' ' + (err.stack || '') + ' ' + String(err);
+          return str.indexOf('WebSocket') !== -1 ||
+                 str.indexOf('vite-hmr') !== -1 ||
+                 str.indexOf('@vite/client') !== -1 ||
+                 str.indexOf('createWebSocketModuleRunnerTransport') !== -1;
+        }
+        window.addEventListener('error', function(e) {
+          if (isViteHmrError(e.error) || isViteHmrError(e.message)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function(e) {
+          if (isViteHmrError(e.reason)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-900 font-sans selection:bg-amber-500 selection:text-white">
     <div id="root"></div>

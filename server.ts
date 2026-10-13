@@ -1,4 +1,5 @@
 import express from "express";
+import http from "http";
 import compression from "compression";
 import path from "path";
 import fs from "fs";
@@ -3268,10 +3269,15 @@ function compactItemsJson(itemsInput: any): string | null {
 
   // --- Vite / Frontend Serving ---
 
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== "production") {
     console.log("Starting in DEVELOPMENT mode with Vite dev middleware...");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: { server: httpServer }
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -3284,7 +3290,7 @@ function compactItemsJson(itemsInput: any): string | null {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`[OK] Server running on http://0.0.0.0:${PORT}`);
   });
 }
