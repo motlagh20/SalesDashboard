@@ -16,6 +16,11 @@ const LOG_FILE_PATH = path.join(process.cwd(), "server", "db_errors.log");
  */
 export function writeServerErrorLog(operation: string, error: any, reqBody?: any) {
   try {
+    // Skip expected or non-critical error noise
+    if (!error || error.code === 'ER_DUP_ENTRY' || error.name === 'AbortError' || error.message?.includes('aborted')) {
+      return;
+    }
+
     const timestamp = new Date().toISOString();
     const errorDetails = {
       timestamp,
@@ -37,11 +42,11 @@ Request Body: ${errorDetails.requestBody}
 Stack Trace: ${errorDetails.stack}
 ----------------------------------------------------------------------\n`;
 
-    fs.mkdirSync(path.dirname(LOG_FILE_PATH), { recursive: true });
-    fs.appendFileSync(LOG_FILE_PATH, logLine, "utf8");
-    console.log(`📝 [Logger] Database error recorded in db_errors.log for: ${operation}`);
-  } catch (err) {
-    console.error("❌ Failed to write to error log file:", err);
+    fs.mkdir(path.dirname(LOG_FILE_PATH), { recursive: true }, () => {
+      fs.appendFile(LOG_FILE_PATH, logLine, "utf8", () => {});
+    });
+  } catch {
+    // Silently continue without blocking execution
   }
 }
 
@@ -958,7 +963,14 @@ function executeQuery(sql: string, values: any[] = []): any {
     return [{ affectedRows: 1 }];
   }
 
-  console.warn("⚠️ Unmatched SQL in mock provider:", sql);
+  // 22. user_activity_logs handling in mock provider
+  if (/INSERT\s+INTO\s+user_activity_logs/i.test(cleanSql)) {
+    return [{ affectedRows: 1 }];
+  }
+  if (/SELECT\s+.*FROM\s+user_activity_logs/i.test(cleanSql)) {
+    return [inMemoryActivityLogs.slice(0, 100), []];
+  }
+
   return [[], []];
 }
 
@@ -1497,6 +1509,20 @@ export function clearInMemoryActivityLogs() {
   inMemoryActivityLogs.length = 0;
 }
 
+const WORTHLESS_LOG_ACTIONS = new Set([
+  'خروج از سیستم',
+  'ورود به سیستم',
+  'فعالسازی شبیه‌ساز',
+  'غیرفعالسازی و پنهان‌سازی شبیه‌ساز',
+  'ثبت/بروزرسانی لوکیشن تخلیه بار',
+  'تغییر وضعیت فعال‌سازی محصول',
+  'تغییر وضعیت نمایندگی',
+  'تغییر وضعیت باربری',
+  'تغییر وضعیت راننده',
+  'تغییر وضعیت حساب کاربر',
+  'بررسی وضعیت'
+]);
+
 export async function logUserActivity(log: {
   userId?: string;
   userName: string;
@@ -1507,6 +1533,11 @@ export async function logUserActivity(log: {
   ipAddress?: string;
   status?: 'SUCCESS' | 'WARNING' | 'ERROR';
 }) {
+  // 1. Immediately drop trivial or noise actions with zero overhead
+  if (!log?.action || WORTHLESS_LOG_ACTIONS.has(log.action.trim())) {
+    return;
+  }
+
   const logEntry = {
     id: `act-${Date.now()}-${Math.floor(Math.random()*1000)}`,
     userId: log.userId || 'SYSTEM',
@@ -1520,35 +1551,41 @@ export async function logUserActivity(log: {
     createdAt: new Date().toISOString()
   };
 
+  // Keep a compact in-memory ring-buffer
   inMemoryActivityLogs.unshift(logEntry);
-  if (inMemoryActivityLogs.length > 300) inMemoryActivityLogs.pop();
+  if (inMemoryActivityLogs.length > 100) inMemoryActivityLogs.pop();
 
-  try {
-    const db = getDbPool();
-    await db.query(`
-      INSERT INTO user_activity_logs (id, userId, userName, userRole, action, details, module, ipAddress, status, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      logEntry.id, logEntry.userId, logEntry.userName, logEntry.userRole,
-      logEntry.action, logEntry.details, logEntry.module, logEntry.ipAddress,
-      logEntry.status, logEntry.createdAt
-    ]);
-  } catch (err: any) {
-    console.error("Could not write activity log to MySQL:", err.message);
+  // Only execute database query if connected to physical database
+  if (!isFallbackMode) {
+    try {
+      const db = getDbPool();
+      await db.query(`
+        INSERT INTO user_activity_logs (id, userId, userName, userRole, action, details, module, ipAddress, status, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        logEntry.id, logEntry.userId, logEntry.userName, logEntry.userRole,
+        logEntry.action, logEntry.details, logEntry.module, logEntry.ipAddress,
+        logEntry.status, logEntry.createdAt
+      ]);
+    } catch {
+      // Silently ignore logging failures to avoid slowing down operational requests
+    }
   }
 }
 
 export async function getUserActivityLogs(limit = 100): Promise<any[]> {
-  try {
-    const db = getDbPool();
-    const [rows] = await db.query(`
-      SELECT * FROM user_activity_logs ORDER BY createdAt DESC LIMIT ?
-    `, [limit]) as any[];
-    if (Array.isArray(rows) && rows.length > 0) {
-      return rows;
+  if (!isFallbackMode) {
+    try {
+      const db = getDbPool();
+      const [rows] = await db.query(`
+        SELECT * FROM user_activity_logs ORDER BY createdAt DESC LIMIT ?
+      `, [limit]) as any[];
+      if (Array.isArray(rows) && rows.length > 0) {
+        return rows;
+      }
+    } catch {
+      // Silently fall back to in-memory logs
     }
-  } catch (err: any) {
-    console.error("Error fetching activity logs from MySQL:", err.message);
   }
   return inMemoryActivityLogs.slice(0, limit);
 }

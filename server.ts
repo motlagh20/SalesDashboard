@@ -353,12 +353,10 @@ async function startServer() {
       if (redis) {
         const cached = await redis.get("products_list");
         if (cached) {
-          console.log("⚡ [Redis] Products cache hit!");
           return res.json(JSON.parse(cached));
         }
       }
       
-      console.log("🔄 [DB] Products cache miss. Querying MariaDB...");
       const db = getDbPool();
       const [rows] = await db.query("SELECT * FROM products");
       const products = (rows as any[]).map(p => ({
@@ -419,13 +417,6 @@ async function startServer() {
       const redis = getRedisClient();
       if (redis) await redis.del("products_list");
 
-      await recordActivity(
-        req,
-        "تغییر وضعیت فعال‌سازی محصول",
-        `تغییر وضعیت فعال/غیرفعال بودن محصول کد ${id}`,
-        "PRODUCTS"
-      );
-      
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PATCH /api/products/:id/toggle:", err);
@@ -495,12 +486,10 @@ async function startServer() {
       if (redis) {
         const cached = await redis.get("agents_list");
         if (cached) {
-          console.log("⚡ [Redis] Agents cache hit!");
           return res.json(JSON.parse(cached));
         }
       }
       
-      console.log("🔄 [DB] Agents cache miss. Querying MariaDB...");
       const db = getDbPool();
       const [rows] = await db.query("SELECT * FROM agents");
       const agents = (rows as any[]).map(a => {
@@ -604,13 +593,6 @@ async function startServer() {
       const redis = getRedisClient();
       if (redis) await redis.del("agents_list");
 
-      await recordActivity(
-        req,
-        "تغییر وضعیت نمایندگی",
-        `تغییر وضعیت فعال/غیرفعال بودن نمایندگی کد ${id}`,
-        "REPRESENTATIVE"
-      );
-      
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PATCH /api/agents/:id/toggle:", err);
@@ -705,12 +687,10 @@ async function startServer() {
       if (redis) {
         const cached = await redis.get("shipping_companies_list");
         if (cached) {
-          console.log("⚡ [Redis] Shipping Companies cache hit!");
           return res.json(JSON.parse(cached));
         }
       }
       
-      console.log("🔄 [DB] Shipping Companies cache miss. Querying MariaDB...");
       const db = getDbPool();
       const [rows] = await db.query("SELECT * FROM shipping_companies");
       const companies = (rows as any[]).map(sc => ({
@@ -1229,13 +1209,6 @@ function compactItemsJson(itemsInput: any): string | null {
         `, [updatedAt, deliveryLocationUrl ? "بروزرسانی موقعیت مکانی و لینک نقشه تخلیه بار" : "حذف/ثبت مجدد لوکیشن نقشه تخلیه بار", id]);
 
         await connection.commit();
-
-        await recordActivity(
-          req,
-          "ثبت/بروزرسانی لوکیشن تخلیه بار",
-          `بروزرسانی موقعیت جغرافیایی و نقشه سفارش کد ${id}`,
-          "ORDERS"
-        );
 
         res.json({ success: true });
       } catch (txErr) {
@@ -2412,18 +2385,6 @@ function compactItemsJson(itemsInput: any): string | null {
         return res.status(400).json({ error: "رمز عبور نادرست است." });
       }
 
-      // Record login activity in user_activity_logs asynchronously (non-blocking)
-      logUserActivity({
-        userId: user.id,
-        userName: user.fullName || user.username,
-        userRole: user.role,
-        action: "ورود به سیستم",
-        details: `ورود موفق کاربر (${user.fullName || user.username}) به پنل ${user.role}`,
-        module: "AUTH",
-        ipAddress: req.ip || "127.0.0.1",
-        status: "SUCCESS"
-      }).catch(logErr => console.error("Error logging user login activity:", logErr));
-
       res.json({
         success: true,
         user: {
@@ -3155,12 +3116,6 @@ function compactItemsJson(itemsInput: any): string | null {
     const { sandboxEnabled } = req.body;
     if (typeof sandboxEnabled === 'boolean') {
       saveSandboxConfig(sandboxEnabled);
-      recordActivity(
-        req,
-        sandboxEnabled ? "فعالسازی شبیه‌ساز" : "غیرفعالسازی و پنهان‌سازی شبیه‌ساز",
-        `وضعیت میانبرهای شبیه‌ساز (Sandbox) به ${sandboxEnabled ? 'فعال' : 'پنهان/غیرفعال'} تغییر یافت.`,
-        "SYSTEM"
-      );
     }
     res.json({ success: true, sandboxEnabled: globalSandboxEnabled });
   });
