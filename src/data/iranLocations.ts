@@ -208,15 +208,89 @@ export function getBordersForCountry(countryName: string): string[] {
   return c ? c.bordersAndCustoms : ['گمرک خروجی و مرز رسمی'];
 }
 
+export function normalizeProvinceName(raw?: string | null): string {
+  if (!raw) return '';
+  return raw
+    .trim()
+    .replace(/^(?:کل\s+)?استان\s+/, '')
+    .trim();
+}
+
 export function formatTerritoriesSummary(territories?: { province: string; allCities?: boolean; cities?: string[] }[]): string {
   if (!territories || territories.length === 0) {
     return 'سراسر کشور / تعیین‌نشده';
   }
   return territories.map(t => {
+    const cleanP = normalizeProvinceName(t.province);
     if (t.allCities) {
-      return `کل استان ${t.province}`;
+      return `کل استان ${cleanP}`;
     }
     const cityList = (t.cities && t.cities.length > 0) ? t.cities.join('، ') : 'کلیه شهرها';
-    return `استان ${t.province} (شهرهای: ${cityList})`;
+    return `استان ${cleanP} (شهرهای: ${cityList})`;
   }).join('؛ ');
 }
+
+/**
+ * Intelligently parse territory assignments from summary text representations (e.g. legacy area strings)
+ */
+export function parseTerritoriesFromArea(areaText?: string | null): { province: string; allCities: boolean; cities?: string[] }[] {
+  if (!areaText || typeof areaText !== 'string') return [];
+  const trimmed = areaText.trim();
+  if (!trimmed || trimmed === 'سراسر کشور' || trimmed === 'سراسر کشور / تعیین‌نشده' || trimmed === 'سراسر کشور (بدون محدودیت)') {
+    return [];
+  }
+
+  const results: { province: string; allCities: boolean; cities?: string[] }[] = [];
+  const foundProvinces = new Set<string>();
+
+  // Sort candidate provinces by length descending so longer names match before substrings
+  // (e.g., "کرمانشاه" before "کرمان", "خراسان رضوی" before "خراسان", "آذربایجان شرقی" before "آذربایجان")
+  const sortedProvinces = [...IRAN_PROVINCES].sort((a, b) => b.name.length - a.name.length);
+
+  let workingTrimmed = trimmed;
+  // Split by primary delimiters: semicolons or newlines
+  const segments = trimmed.split(/[؛;\n]/).map(s => s.trim()).filter(Boolean);
+
+  for (const seg of segments) {
+    let workingSeg = seg;
+    for (const p of sortedProvinces) {
+      if (!foundProvinces.has(p.name) && workingSeg.includes(p.name)) {
+        foundProvinces.add(p.name);
+
+        const citiesMatch = workingSeg.match(/\(شهرهای:\s*([^)]+)\)/);
+        if (citiesMatch) {
+          const cityNames = citiesMatch[1].split(/[،,]/).map(c => c.trim()).filter(Boolean);
+          results.push({
+            province: p.name,
+            allCities: false,
+            cities: cityNames
+          });
+        } else {
+          results.push({
+            province: p.name,
+            allCities: true
+          });
+        }
+
+        // Mask out matched province name to avoid substring collisions
+        workingSeg = workingSeg.split(p.name).join(' ');
+        workingTrimmed = workingTrimmed.split(p.name).join(' ');
+      }
+    }
+  }
+
+  // 2. Fallback search for any other province names mentioned (e.g. "استان اصفهان و یزد" or "مازندران، گیلان")
+  for (const p of sortedProvinces) {
+    if (!foundProvinces.has(p.name) && workingTrimmed.includes(p.name)) {
+      foundProvinces.add(p.name);
+      results.push({
+        province: p.name,
+        allCities: true
+      });
+      workingTrimmed = workingTrimmed.split(p.name).join(' ');
+    }
+  }
+
+  return results;
+}
+

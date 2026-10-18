@@ -12,7 +12,7 @@ import CommercialAnalyticsDashboard from './CommercialAnalyticsDashboard';
 import { BaseDefinitionsDashboard } from './BaseDefinitionsDashboard';
 import { TerritorySelector } from './TerritorySelector';
 import { TerritoryBadgeList } from './TerritoryBadgeList';
-import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary } from '../data/iranLocations';
+import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary, parseTerritoriesFromArea, normalizeProvinceName } from '../data/iranLocations';
 import { 
   BarChart3,
   Activity,
@@ -292,8 +292,68 @@ export default function ManagerDashboard({
     setNewAgentCode(agent.agentCode || '');
     setNewAgentPhone(agent.phoneNumber);
     setNewAgentAddress(agent.address);
-    setNewAgentArea(agent.area);
-    setNewAgentTerritories(agent.territories && Array.isArray(agent.territories) ? [...agent.territories] : []);
+    setNewAgentArea(agent.area || '');
+
+    // Robust territory parsing & restoration to ensure all assigned provinces are preserved
+    let initialTerritories: TerritoryAssignment[] = [];
+    if (agent.territories) {
+      if (Array.isArray(agent.territories)) {
+        initialTerritories = agent.territories.map(t => ({
+          ...t,
+          province: normalizeProvinceName(t.province),
+          allCities: t.allCities !== undefined ? !!t.allCities : !(t.cities && t.cities.length > 0)
+        }));
+      } else if (typeof agent.territories === 'string') {
+        try {
+          const parsed = JSON.parse(agent.territories);
+          if (Array.isArray(parsed)) {
+            initialTerritories = parsed.map((t: any) => ({
+              ...t,
+              province: normalizeProvinceName(t.province),
+              allCities: t.allCities !== undefined ? !!t.allCities : !(t.cities && t.cities.length > 0)
+            }));
+          } else if (parsed && typeof parsed === 'object') {
+            initialTerritories = [{
+              ...parsed,
+              province: normalizeProvinceName(parsed.province),
+              allCities: parsed.allCities !== undefined ? !!parsed.allCities : !(parsed.cities && parsed.cities.length > 0)
+            }];
+          }
+        } catch {}
+      } else if (typeof agent.territories === 'object') {
+        const tObj = agent.territories as any;
+        initialTerritories = [{
+          ...tObj,
+          province: normalizeProvinceName(tObj.province),
+          allCities: tObj.allCities !== undefined ? !!tObj.allCities : !(tObj.cities && tObj.cities.length > 0)
+        }];
+      }
+    }
+
+    // Deduplicate by clean province name
+    const seenProvinces = new Set<string>();
+    initialTerritories = initialTerritories.filter(t => {
+      const clean = normalizeProvinceName(t.province);
+      if (!clean || seenProvinces.has(clean)) return false;
+      seenProvinces.add(clean);
+      return true;
+    });
+
+    // If territories is empty or missing provinces that exist in area text, merge from area text
+    if (agent.area) {
+      const parsedFromArea = parseTerritoriesFromArea(agent.area).map(t => ({
+        ...t,
+        province: normalizeProvinceName(t.province)
+      }));
+      for (const item of parsedFromArea) {
+        const cleanItemProv = normalizeProvinceName(item.province);
+        if (cleanItemProv && !initialTerritories.some(t => normalizeProvinceName(t.province) === cleanItemProv)) {
+          initialTerritories.push(item);
+        }
+      }
+    }
+
+    setNewAgentTerritories(initialTerritories);
     setNewAgentIsExport(!!agent.isExportAgent);
     setAutoGenAgentCode(false);
   };
@@ -315,35 +375,6 @@ export default function ManagerDashboard({
     setNewAgentTerritories([]);
     setNewAgentIsExport(false);
     setAutoGenAgentCode(false);
-  };
-
-  // Helper to add or update province rule in newAgentTerritories
-  const handleAddTerritoryRule = () => {
-    if (!builderProvince) return;
-    const existingIndex = newAgentTerritories.findIndex(t => t.province === builderProvince);
-    const newRule: TerritoryAssignment = {
-      province: builderProvince,
-      allCities: builderAllCities,
-      cities: builderAllCities ? undefined : [...builderSelectedCities]
-    };
-
-    let updated: TerritoryAssignment[];
-    if (existingIndex >= 0) {
-      updated = [...newAgentTerritories];
-      updated[existingIndex] = newRule;
-    } else {
-      updated = [...newAgentTerritories, newRule];
-    }
-    setNewAgentTerritories(updated);
-    // Auto-update area text representation
-    setNewAgentArea(formatTerritoriesSummary(updated));
-    showToast(`محدوده استان ${builderProvince} با موفقیت اضافه/بروزرسانی شد.`, 'info');
-  };
-
-  const handleRemoveTerritoryRule = (provName: string) => {
-    const updated = newAgentTerritories.filter(t => t.province !== provName);
-    setNewAgentTerritories(updated);
-    setNewAgentArea(formatTerritoriesSummary(updated));
   };
 
   const startEditingProduct = (prod: Product) => {

@@ -140,10 +140,10 @@ function seedJsonIfEmpty() {
   if (!data.agents || data.agents.length === 0) {
     console.log("🌱 [Mock Seed] Seeding default agents...");
     data.agents = [
-      { id: 'ag-1', fullName: 'آقای حمیدرضا احمدی', alias: 'نمایندگی تهران (احمدی)', agentCode: 'AG-9081', phoneNumber: '09121111111', address: 'تهران، ابتدای جاده قدیم کرج، مجتمع تجاری پایتخت، پلاک ۱۲', area: 'استان تهران و حومه البرز', isEnabled: 1 },
-      { id: 'ag-2', fullName: 'آقای علیرضا رجایی', alias: 'نمایندگی اصفهان (رجایی)', agentCode: 'AG-6055', phoneNumber: '09132222222', address: 'اصفهان، بلوار فرودگاه، نرسیده به شهرک صنعتی جی، پلاک ۴۶', area: 'استان اصفهان و یزد', isEnabled: 1 },
-      { id: 'ag-3', fullName: 'آقای سهراب پوربخش', alias: 'نمایندگی رشت (پوربخش)', agentCode: 'AG-2019', phoneNumber: '09113333333', address: 'گیلان، رشت، کیلومتر ۵ جاده انزلی، جنب انبار فومن‌شیمی', area: 'استان گیلان و غربی مازندران', isEnabled: 1 },
-      { id: 'ag-4', fullName: 'آقای کریم نمازی', alias: 'نمایندگی شیراز (نمازی)', agentCode: 'AG-7023', phoneNumber: '09174444444', address: 'فارس، شیراز، بلوار امیرکبیر، روبروی باغ جنت، مجتمع سفال', area: 'استان فارس و استان بوشهر', isEnabled: 1 }
+      { id: 'ag-1', fullName: 'آقای حمیدرضا احمدی', alias: 'نمایندگی تهران (احمدی)', agentCode: 'AG-9081', phoneNumber: '09121111111', address: 'تهران، ابتدای جاده قدیم کرج، مجتمع تجاری پایتخت، پلاک ۱۲', area: 'کل استان تهران؛ کل استان البرز', territories: [{ province: 'تهران', allCities: true }, { province: 'البرز', allCities: true }], isExportAgent: true, isEnabled: 1 },
+      { id: 'ag-2', fullName: 'آقای علیرضا رجایی', alias: 'نمایندگی اصفهان (رجایی)', agentCode: 'AG-6055', phoneNumber: '09132222222', address: 'اصفهان، بلوار فرودگاه، نرسیده به شهرک صنعتی جی، پلاک ۴۶', area: 'کل استان اصفهان؛ کل استان یزد', territories: [{ province: 'اصفهان', allCities: true }, { province: 'یزد', allCities: true }], isExportAgent: false, isEnabled: 1 },
+      { id: 'ag-3', fullName: 'آقای سهراب پوربخش', alias: 'نمایندگی رشت (پوربخش)', agentCode: 'AG-2019', phoneNumber: '09113333333', address: 'گیلان، رشت، کیلومتر ۵ جاده انزلی، جنب انبار فومن‌شیمی', area: 'کل استان گیلان؛ کل استان مازندران', territories: [{ province: 'گیلان', allCities: true }, { province: 'مازندران', allCities: true }], isExportAgent: false, isEnabled: 1 },
+      { id: 'ag-4', fullName: 'آقای کریم نمازی', alias: 'نمایندگی شیراز (نمازی)', agentCode: 'AG-7023', phoneNumber: '09174444444', address: 'فارس، شیراز، بلوار امیرکبیر، روبروی باغ جنت، مجتمع سفال', area: 'کل استان فارس؛ کل استان بوشهر', territories: [{ province: 'فارس', allCities: true }, { province: 'بوشهر', allCities: true }], isExportAgent: false, isEnabled: 1 }
     ];
     changed = true;
   }
@@ -1207,7 +1207,9 @@ export async function bootstrapDatabase() {
         agentCode VARCHAR(50) NOT NULL UNIQUE,
         phoneNumber VARCHAR(20) NOT NULL,
         address TEXT,
-        area VARCHAR(100),
+        area LONGTEXT,
+        territories LONGTEXT,
+        isExportAgent TINYINT(1) DEFAULT 0,
         isEnabled TINYINT(1) DEFAULT 1,
         personType VARCHAR(20) DEFAULT 'REAL',
         companyName VARCHAR(150),
@@ -1354,6 +1356,19 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "app_users", "isEnabled", "TINYINT(1) DEFAULT 1");
     await ensureColumnExists(db, "app_users", "password", "VARCHAR(255) DEFAULT '123456'");
     await ensureColumnExists(db, "app_users", "lastSeenAt", "VARCHAR(50) NULL");
+
+    // Agents table columns
+    await ensureColumnExists(db, "agents", "territories", "LONGTEXT NULL");
+    await ensureColumnExists(db, "agents", "isExportAgent", "TINYINT(1) DEFAULT 0");
+    await ensureColumnExists(db, "agents", "personType", "VARCHAR(20) DEFAULT 'REAL'");
+    await ensureColumnExists(db, "agents", "companyName", "VARCHAR(150) NULL");
+    await ensureColumnExists(db, "agents", "registrationNumber", "VARCHAR(50) NULL");
+    await ensureColumnExists(db, "agents", "economicCode", "VARCHAR(50) NULL");
+    await ensureColumnExists(db, "agents", "nationalId", "VARCHAR(50) NULL");
+    await ensureColumnExists(db, "agents", "nationalCode", "VARCHAR(50) NULL");
+    try {
+      await db.query("ALTER TABLE agents MODIFY COLUMN area LONGTEXT NULL");
+    } catch (aErr: any) {}
 
     await ensureColumnExists(db, "orders", "sentToFactoryAt", "VARCHAR(50) NULL");
     await ensureColumnExists(db, "orders", "priorityIndex", "INT DEFAULT 0");

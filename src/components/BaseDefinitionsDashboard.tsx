@@ -20,7 +20,7 @@ import {
 import { Agent, Product, ShippingCompany, UserRole, TerritoryAssignment } from '../types';
 import { TerritorySelector } from './TerritorySelector';
 import { TerritoryBadgeList } from './TerritoryBadgeList';
-import { formatTerritoriesSummary } from '../data/iranLocations';
+import { formatTerritoriesSummary, parseTerritoriesFromArea, normalizeProvinceName } from '../data/iranLocations';
 
 export interface BaseDefinitionsDashboardProps {
   agents: Agent[];
@@ -93,7 +93,7 @@ export function BaseDefinitionsDashboard({
   const [newAgentFullName, setNewAgentFullName] = useState('');
   const [newAgentPhone, setNewAgentPhone] = useState('');
   const [newAgentAddress, setNewAgentAddress] = useState('');
-  const [newAgentPersonType, setNewAgentPersonType] = useState<'NATURAL' | 'LEGAL'>('NATURAL');
+  const [newAgentPersonType, setNewAgentPersonType] = useState<'REAL' | 'LEGAL'>('REAL');
   const [newAgentCompanyName, setNewAgentCompanyName] = useState('');
   const [newAgentNationalId, setNewAgentNationalId] = useState('');
   const [newAgentRegistrationNumber, setNewAgentRegistrationNumber] = useState('');
@@ -105,12 +105,72 @@ export function BaseDefinitionsDashboard({
     setEditingAgent(agent);
     setNewAgentAlias(agent.alias);
     setNewAgentCode(agent.agentCode);
-    setNewAgentArea(agent.area);
-    setNewAgentTerritories(agent.territories && Array.isArray(agent.territories) ? [...agent.territories] : []);
+    setNewAgentArea(agent.area || '');
+
+    // Robust territory parsing & restoration to ensure all assigned provinces are preserved
+    let initialTerritories: TerritoryAssignment[] = [];
+    if (agent.territories) {
+      if (Array.isArray(agent.territories)) {
+        initialTerritories = agent.territories.map(t => ({
+          ...t,
+          province: normalizeProvinceName(t.province),
+          allCities: t.allCities !== undefined ? !!t.allCities : !(t.cities && t.cities.length > 0)
+        }));
+      } else if (typeof agent.territories === 'string') {
+        try {
+          const parsed = JSON.parse(agent.territories);
+          if (Array.isArray(parsed)) {
+            initialTerritories = parsed.map((t: any) => ({
+              ...t,
+              province: normalizeProvinceName(t.province),
+              allCities: t.allCities !== undefined ? !!t.allCities : !(t.cities && t.cities.length > 0)
+            }));
+          } else if (parsed && typeof parsed === 'object') {
+            initialTerritories = [{
+              ...parsed,
+              province: normalizeProvinceName(parsed.province),
+              allCities: parsed.allCities !== undefined ? !!parsed.allCities : !(parsed.cities && parsed.cities.length > 0)
+            }];
+          }
+        } catch {}
+      } else if (typeof agent.territories === 'object') {
+        const tObj = agent.territories as any;
+        initialTerritories = [{
+          ...tObj,
+          province: normalizeProvinceName(tObj.province),
+          allCities: tObj.allCities !== undefined ? !!tObj.allCities : !(tObj.cities && tObj.cities.length > 0)
+        }];
+      }
+    }
+
+    // Deduplicate by clean province name
+    const seenProvinces = new Set<string>();
+    initialTerritories = initialTerritories.filter(t => {
+      const clean = normalizeProvinceName(t.province);
+      if (!clean || seenProvinces.has(clean)) return false;
+      seenProvinces.add(clean);
+      return true;
+    });
+
+    // If territories is empty or missing provinces that exist in area text, merge from area text
+    if (agent.area) {
+      const parsedFromArea = parseTerritoriesFromArea(agent.area).map(t => ({
+        ...t,
+        province: normalizeProvinceName(t.province)
+      }));
+      for (const item of parsedFromArea) {
+        const cleanItemProv = normalizeProvinceName(item.province);
+        if (cleanItemProv && !initialTerritories.some(t => normalizeProvinceName(t.province) === cleanItemProv)) {
+          initialTerritories.push(item);
+        }
+      }
+    }
+
+    setNewAgentTerritories(initialTerritories);
     setNewAgentFullName(agent.fullName);
     setNewAgentPhone(agent.phoneNumber);
     setNewAgentAddress(agent.address);
-    setNewAgentPersonType(agent.personType || 'NATURAL');
+    setNewAgentPersonType((agent.personType as any) === 'LEGAL' ? 'LEGAL' : 'REAL');
     setNewAgentCompanyName(agent.companyName || '');
     setNewAgentNationalId(agent.nationalId || '');
     setNewAgentRegistrationNumber(agent.registrationNumber || '');
@@ -128,7 +188,7 @@ export function BaseDefinitionsDashboard({
     setNewAgentFullName('');
     setNewAgentPhone('');
     setNewAgentAddress('');
-    setNewAgentPersonType('NATURAL');
+    setNewAgentPersonType('REAL');
     setNewAgentCompanyName('');
     setNewAgentNationalId('');
     setNewAgentRegistrationNumber('');
@@ -137,15 +197,20 @@ export function BaseDefinitionsDashboard({
     setNewAgentIsExport(false);
   };
 
-  const handleSaveAgent = (e: React.FormEvent) => {
+  const handleSaveAgent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAgentAlias.trim() || !newAgentCode.trim() || !newAgentFullName.trim()) {
       showToast('لطفاً عنوان نمایندگی، کد و نام مسئول را وارد نمایید.', 'error');
       return;
     }
 
-    const summaryArea = newAgentTerritories.length > 0
-      ? formatTerritoriesSummary(newAgentTerritories)
+    const normalizedTerritories = newAgentTerritories.map(t => ({
+      ...t,
+      province: normalizeProvinceName(t.province)
+    }));
+
+    const summaryArea = normalizedTerritories.length > 0
+      ? formatTerritoriesSummary(normalizedTerritories)
       : (newAgentArea.trim() || 'سراسر کشور');
 
     const payload: Agent = {
@@ -153,7 +218,7 @@ export function BaseDefinitionsDashboard({
       alias: newAgentAlias.trim(),
       agentCode: newAgentCode.trim(),
       area: summaryArea,
-      territories: newAgentTerritories,
+      territories: normalizedTerritories,
       fullName: newAgentFullName.trim(),
       phoneNumber: newAgentPhone.trim(),
       address: newAgentAddress.trim(),
@@ -168,11 +233,9 @@ export function BaseDefinitionsDashboard({
     };
 
     if (editingAgent) {
-      onUpdateAgent(payload);
-      showToast('اطلاعات نمایندگی با موفقیت به‌روزرسانی شد.', 'success');
+      await onUpdateAgent(payload);
     } else {
-      onAddAgent(payload);
-      showToast('نمایندگی جدید با موفقیت ثبت شد.', 'success');
+      await onAddAgent(payload);
     }
     cancelEditingAgent();
   };

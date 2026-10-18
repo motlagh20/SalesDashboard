@@ -3,11 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { reverseGeocode, checkCityInTerritory, ReverseGeocodeResult } from '../utils/reverseGeocode';
 import { TerritoryAssignment } from '../types';
+import {
+  resolveLocationCoordinates,
+  IRAN_PROVINCE_CENTERS,
+  IRAN_CITIES_COORDINATES,
+  normalizeLocationName
+} from '../data/iranCoordinates';
 import {
   X,
   MapPin,
@@ -18,7 +24,9 @@ import {
   Crosshair,
   Layers,
   FileText,
-  AlertTriangle
+  AlertTriangle,
+  LocateFixed,
+  Building2
 } from 'lucide-react';
 
 interface InteractiveMapPickerProps {
@@ -35,45 +43,37 @@ interface InteractiveMapPickerProps {
   initialLat?: number;
   initialLng?: number;
   cityHint?: string;
+  provinceHint?: string;
+  destinationSummary?: string;
   agentTerritories?: TerritoryAssignment[];
 }
-
-// Major cities coordinates in Iran for quick navigation
-const IRAN_MAJOR_CITIES: { name: string; lat: number; lng: number }[] = [
-  { name: 'تهران', lat: 35.6892, lng: 51.3890 },
-  { name: 'ساری / مازندران', lat: 36.5659, lng: 53.0586 },
-  { name: 'اصفهان', lat: 32.6546, lng: 51.6680 },
-  { name: 'مشهد', lat: 36.2972, lng: 59.6067 },
-  { name: 'تبریز', lat: 38.0800, lng: 46.2919 },
-  { name: 'شیراز', lat: 29.5918, lng: 52.5837 },
-  { name: 'رشت / گیلان', lat: 37.2808, lng: 49.5832 },
-  { name: 'اهواز', lat: 31.3183, lng: 48.6706 },
-  { name: 'کرج', lat: 35.8400, lng: 50.9391 },
-  { name: 'قم', lat: 34.6401, lng: 50.8764 },
-  { name: 'کرمان', lat: 30.2839, lng: 57.0834 },
-  { name: 'یزد', lat: 31.8974, lng: 54.3569 },
-  { name: 'ارومیه', lat: 37.5527, lng: 45.0761 },
-  { name: 'همدان', lat: 34.7989, lng: 48.5150 },
-  { name: 'کرمانشاه', lat: 34.3142, lng: 47.0650 },
-  { name: 'بندرعباس', lat: 27.1832, lng: 56.2666 }
-];
 
 export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
   isOpen,
   onClose,
   onConfirmLocation,
-  initialLat = 35.6892,
-  initialLng = 51.3890,
+  initialLat,
+  initialLng,
   cityHint = '',
+  provinceHint = '',
+  destinationSummary = '',
   agentTerritories = []
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markerInstanceRef = useRef<L.Marker | null>(null);
 
-  const [currentLat, setCurrentLat] = useState<number>(initialLat);
-  const [currentLng, setCurrentLng] = useState<number>(initialLng);
-  const [searchQuery, setSearchQuery] = useState('');
+  // Compute resolved target coordinates based on selected city & province
+  const resolvedTarget = useMemo(() => {
+    return resolveLocationCoordinates(cityHint, provinceHint, destinationSummary);
+  }, [cityHint, provinceHint, destinationSummary]);
+
+  const targetLat = initialLat !== undefined && initialLat !== 35.6892 ? initialLat : resolvedTarget.lat;
+  const targetLng = initialLng !== undefined && initialLng !== 51.3890 ? initialLng : resolvedTarget.lng;
+  const targetZoom = resolvedTarget.zoom || 13;
+
+  const [currentLat, setCurrentLat] = useState<number>(targetLat);
+  const [currentLng, setCurrentLng] = useState<number>(targetLng);
   const [isLocatingGps, setIsLocatingGps] = useState(false);
 
   // Address and Location state for reverse geocoding
@@ -82,23 +82,24 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
   const [isFetchingAddress, setIsFetchingAddress] = useState<boolean>(false);
   const [autoFillAddress, setAutoFillAddress] = useState<boolean>(true);
 
+  // Relevant quick-access cities for this province / selection
+  const relevantCities = useMemo(() => {
+    const normProv = normalizeLocationName(provinceHint);
+    if (normProv) {
+      const inProv = IRAN_CITIES_COORDINATES.filter(c => {
+        const pNorm = normalizeLocationName(c.province);
+        return pNorm === normProv || pNorm.includes(normProv) || normProv.includes(pNorm);
+      });
+      if (inProv.length > 0) return inProv;
+    }
+    // Fallback: provincial capitals
+    return IRAN_CITIES_COORDINATES.filter(c => c.isProvinceCapital).slice(0, 16);
+  }, [provinceHint]);
+
   // Check territory limit
   const territoryCheck = geocodeResult
     ? checkCityInTerritory(geocodeResult.city || '', geocodeResult.province, agentTerritories)
     : { isAllowed: true };
-
-  // Fetch address automatically when coordinates change
-  useEffect(() => {
-    if (!isOpen) return;
-    setIsFetchingAddress(true);
-    const timer = setTimeout(async () => {
-      const result = await reverseGeocode(currentLat, currentLng);
-      setGeocodeResult(result);
-      setFetchedAddress(result.addressText);
-      setIsFetchingAddress(false);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [currentLat, currentLng, isOpen]);
 
   // Custom DivIcon for high-visibility pulse red pin
   const createCustomPinIcon = () => {
@@ -117,29 +118,27 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
     });
   };
 
+  // Initialize and update Leaflet map whenever modal opens or city/province changes
   useEffect(() => {
-    if (!isOpen || !mapContainerRef.current) return;
-
-    // Check if cityHint matches any known city
-    let startLat = initialLat;
-    let startLng = initialLng;
-
-    if (cityHint) {
-      const matched = IRAN_MAJOR_CITIES.find(c => cityHint.includes(c.name));
-      if (matched) {
-        startLat = matched.lat;
-        startLng = matched.lng;
+    if (!isOpen) {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+        markerInstanceRef.current = null;
       }
+      return;
     }
 
-    setCurrentLat(startLat);
-    setCurrentLng(startLng);
+    if (!mapContainerRef.current) return;
 
-    // Initialize Leaflet map
+    setCurrentLat(targetLat);
+    setCurrentLng(targetLng);
+
+    // If map does not exist or container changed, create fresh map
     if (!mapInstanceRef.current) {
       const map = L.map(mapContainerRef.current, {
-        center: [startLat, startLng],
-        zoom: 13,
+        center: [targetLat, targetLng],
+        zoom: targetZoom,
         zoomControl: false
       });
 
@@ -153,7 +152,7 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
       L.control.zoom({ position: 'bottomright' }).addTo(map);
 
       // Add Marker
-      const marker = L.marker([startLat, startLng], {
+      const marker = L.marker([targetLat, targetLng], {
         draggable: true,
         icon: createCustomPinIcon()
       }).addTo(map);
@@ -178,23 +177,53 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
 
       mapInstanceRef.current = map;
     } else {
-      mapInstanceRef.current.setView([startLat, startLng], 13);
+      // Reposition and zoom cleanly to the newly selected city/province
+      mapInstanceRef.current.setView([targetLat, targetLng], targetZoom);
       if (markerInstanceRef.current) {
-        markerInstanceRef.current.setLatLng([startLat, startLng]);
+        markerInstanceRef.current.setLatLng([targetLat, targetLng]);
       }
     }
 
     // Force map invalidateSize after render to fix grey tile issue
-    const timer = setTimeout(() => {
+    const timer1 = setTimeout(() => {
       if (mapInstanceRef.current) {
         mapInstanceRef.current.invalidateSize();
       }
-    }, 200);
+    }, 150);
+
+    const timer2 = setTimeout(() => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+        mapInstanceRef.current.setView([targetLat, targetLng], targetZoom);
+        if (markerInstanceRef.current) {
+          markerInstanceRef.current.setLatLng([targetLat, targetLng]);
+        }
+      }
+    }, 350);
 
     return () => {
-      clearTimeout(timer);
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+        markerInstanceRef.current = null;
+      }
     };
-  }, [isOpen]);
+  }, [isOpen, targetLat, targetLng, targetZoom]);
+
+  // Fetch address automatically when coordinates change
+  useEffect(() => {
+    if (!isOpen) return;
+    setIsFetchingAddress(true);
+    const timer = setTimeout(async () => {
+      const result = await reverseGeocode(currentLat, currentLng);
+      setGeocodeResult(result);
+      setFetchedAddress(result.addressText);
+      setIsFetchingAddress(false);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [currentLat, currentLng, isOpen]);
 
   if (!isOpen) return null;
 
@@ -261,11 +290,19 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
               <MapPin className="w-5 h-5 text-rose-400" />
             </div>
             <div>
-              <h3 className="text-sm sm:text-base font-extrabold flex items-center gap-2">
-                <span>انتخاب دقیق محل تخلیه بار روی نقشه تعاملی</span>
-              </h3>
-              <p className="text-[11px] text-slate-300">
-                روی نقشه کلیک کنید یا نشانه قرمزرنگ را روی نقطه دقیق انبار/پروژه بکشید
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm sm:text-base font-extrabold">
+                  انتخاب دقیق محل تخلیه بار روی نقشه تعاملی
+                </h3>
+                {resolvedTarget.matchedName && (
+                  <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Building2 className="w-3 h-3 text-emerald-300" />
+                    <span>محدوده هدف: {resolvedTarget.matchedName}</span>
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-300 mt-0.5">
+                نقشه مستقیماً بر روی شهر انتخابی متمرکز شده است؛ با کلیک روی نقشه یا کشیدن نشانگر محل دقیق انبار/پروژه را تعیین کنید.
               </p>
             </div>
           </div>
@@ -278,7 +315,7 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
           </button>
         </div>
 
-        {/* Quick Toolbar */}
+        {/* Quick Toolbar with City Jump Buttons */}
         <div className="bg-slate-100 border-b border-slate-200 p-2.5 flex items-center gap-2 overflow-x-auto text-xs shrink-0">
           <button
             onClick={handleGetGpsLocation}
@@ -291,18 +328,29 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
 
           <span className="text-slate-300">|</span>
 
-          <span className="text-[11px] text-slate-500 font-bold shrink-0">پرش به شهر:</span>
+          <span className="text-[11px] text-slate-600 font-bold shrink-0 flex items-center gap-1">
+            <LocateFixed className="w-3.5 h-3.5 text-emerald-600" />
+            <span>پرش سریع به شهرهای منطقه:</span>
+          </span>
           <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
-            {IRAN_MAJOR_CITIES.map((c) => (
-              <button
-                key={c.name}
-                type="button"
-                onClick={() => handleCitySelect(c.lat, c.lng)}
-                className="bg-white hover:bg-slate-200 border border-slate-300 text-slate-700 text-[11px] font-bold px-2 py-1 rounded-md shrink-0 transition-colors"
-              >
-                {c.name}
-              </button>
-            ))}
+            {relevantCities.map((c) => {
+              const isCurrent = normalizeLocationName(c.name) === normalizeLocationName(cityHint);
+              return (
+                <button
+                  key={`${c.province}-${c.name}`}
+                  type="button"
+                  onClick={() => handleCitySelect(c.lat, c.lng)}
+                  className={`text-[11px] font-bold px-2.5 py-1 rounded-md shrink-0 transition-colors cursor-pointer border ${
+                    isCurrent
+                      ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                      : 'bg-white hover:bg-slate-200 border-slate-300 text-slate-700'
+                  }`}
+                  title={`پرش به ${c.name} (${c.province})`}
+                >
+                  {c.name}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -310,8 +358,12 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
         <div className="relative flex-1 w-full bg-slate-200">
           <div ref={mapContainerRef} className="absolute inset-0 w-full h-full z-10" />
 
-          {/* Coordinate Badge Overlay */}
-          <div className="absolute top-3 right-3 z-20 bg-slate-900/85 backdrop-blur-md text-white p-2.5 rounded-xl border border-slate-700/80 shadow-lg text-xs space-y-1 dir-ltr text-left">
+          {/* Coordinate & City Badge Overlay */}
+          <div className="absolute top-3 right-3 z-20 bg-slate-900/90 backdrop-blur-md text-white p-2.5 rounded-xl border border-slate-700/80 shadow-lg text-xs space-y-1.5 dir-ltr text-left">
+            <div className="flex items-center justify-between gap-3 text-[10px] text-slate-300 font-sans border-b border-slate-700/80 pb-1">
+              <span>{resolvedTarget.matchedName}</span>
+              <span className="text-emerald-400 font-bold">🎯 مرکز هدف</span>
+            </div>
             <div className="flex items-center gap-2 text-[11px] font-mono">
               <span className="text-rose-400 font-bold">LAT:</span>
               <span>{currentLat}</span>
@@ -359,7 +411,7 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
         {/* Footer Confirmation Bar */}
         <div className="bg-white border-t border-slate-200 p-3 sm:p-4 flex items-center justify-between gap-3 shrink-0">
           <div className="hidden md:block text-xs text-slate-600">
-            <strong>مختصات:</strong>{' '}
+            <strong>مختصات ثبت‌شده:</strong>{' '}
             <span className="font-mono text-sky-700 text-[11px] dir-ltr inline-block">
               {currentLat}, {currentLng}
             </span>
@@ -369,7 +421,7 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-4 py-2 rounded-xl transition-colors"
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-4 py-2 rounded-xl transition-colors cursor-pointer"
             >
               انصراف
             </button>
@@ -377,7 +429,7 @@ export const InteractiveMapPicker: React.FC<InteractiveMapPickerProps> = ({
             <button
               type="button"
               onClick={handleConfirm}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer"
             >
               <Check className="w-4 h-4" />
               <span>تأیید و انتخاب این موقعیت روی نقشه</span>

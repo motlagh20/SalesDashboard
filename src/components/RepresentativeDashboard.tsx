@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Order, Product, OrderStatus, Agent, AppUser } from '../types';
 import { PRESET_AGENTS } from '../data';
-import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary, EXPORT_COUNTRIES, getBordersForCountry } from '../data/iranLocations';
+import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary, EXPORT_COUNTRIES, getBordersForCountry, normalizeProvinceName } from '../data/iranLocations';
 import { TerritoryBadgeList } from './TerritoryBadgeList';
 import { toEnglishDigits } from '../utils/numberUtils';
 import { serializeItemsJson, parseAndHydrateItemsJson } from '../utils/itemsJsonHelper';
@@ -258,6 +258,8 @@ export default function RepresentativeDashboard({
   const [editNotes, setEditNotes] = useState('');
   const [editIsExportOrder, setEditIsExportOrder] = useState(false);
   const [editDestinationCountry, setEditDestinationCountry] = useState('');
+  const [editSelectedProvince, setEditSelectedProvince] = useState('');
+  const [editSelectedCity, setEditSelectedCity] = useState('');
   const [editItems, setEditItems] = useState<InvoiceItem[]>([]);
   const [editAddProductId, setEditAddProductId] = useState<string>('');
   const [editAddQuantity, setEditAddQuantity] = useState<number | ''>('');
@@ -274,14 +276,39 @@ export default function RepresentativeDashboard({
   
   // Calculate allowed provinces for this representative
   const allowedProvinces = agentTerritories.length > 0 
-    ? IRAN_PROVINCES.filter(p => agentTerritories.some(t => t.province === p.name))
+    ? IRAN_PROVINCES.filter(p => agentTerritories.some(t => normalizeProvinceName(t.province) === normalizeProvinceName(p.name)))
     : IRAN_PROVINCES;
 
-  const [selectedProvince, setSelectedProvince] = useState<string>('تهران');
-  const [selectedCity, setSelectedCity] = useState<string>('تهران');
+  const defaultProv = allowedProvinces[0]?.name || 'تهران';
+  const defaultCities = getCitiesForProvince(defaultProv);
+  const defaultRule = agentTerritories.find(t => normalizeProvinceName(t.province) === normalizeProvinceName(defaultProv));
+  const defaultAllowedCities = (defaultRule && !defaultRule.allCities && defaultRule.cities && defaultRule.cities.length > 0)
+    ? defaultCities.filter(c => defaultRule.cities!.includes(c))
+    : defaultCities;
+  const defaultCity = defaultAllowedCities[0] || defaultCities[0] || defaultProv;
+
+  const [selectedProvince, setSelectedProvince] = useState<string>(defaultProv);
+  const [selectedCity, setSelectedCity] = useState<string>(defaultCity);
+
+  // Synchronize when agent or territory changes
+  useEffect(() => {
+    if (allowedProvinces && allowedProvinces.length > 0) {
+      const isAllowed = allowedProvinces.some(p => normalizeProvinceName(p.name) === normalizeProvinceName(selectedProvince));
+      if (!isAllowed) {
+        const nextProv = allowedProvinces[0].name;
+        setSelectedProvince(nextProv);
+        const cities = getCitiesForProvince(nextProv);
+        const rule = agentTerritories.find(t => normalizeProvinceName(t.province) === normalizeProvinceName(nextProv));
+        const validCities = (rule && !rule.allCities && rule.cities && rule.cities.length > 0)
+          ? cities.filter(c => rule.cities!.includes(c))
+          : cities;
+        setSelectedCity(validCities[0] || cities[0] || nextProv);
+      }
+    }
+  }, [agentTerritories, allowedProvinces]);
 
   // Filter allowed cities when province changes
-  const currentTerritoryRule = agentTerritories.find(t => t.province === selectedProvince);
+  const currentTerritoryRule = agentTerritories.find(t => normalizeProvinceName(t.province) === normalizeProvinceName(selectedProvince));
   const rawProvinceCities = getCitiesForProvince(selectedProvince);
   const allowedCities = (currentTerritoryRule && !currentTerritoryRule.allCities && currentTerritoryRule.cities && currentTerritoryRule.cities.length > 0)
     ? rawProvinceCities.filter(c => currentTerritoryRule.cities!.includes(c))
@@ -504,7 +531,32 @@ export default function RepresentativeDashboard({
 
     setEditBuyerName(pendingData?.buyerName ?? ord.buyerName ?? '');
     setEditPhoneNumber(pendingData?.phoneNumber ?? ord.phoneNumber ?? '');
-    setEditDestinationCity(pendingData?.destinationCity ?? ord.destinationCity ?? '');
+    const rawDest = (pendingData?.destinationCity ?? ord.destinationCity ?? '').trim();
+    setEditDestinationCity(rawDest);
+
+    // Initialize edit province and city from allowedProvinces
+    let initProv = '';
+    let initCity = '';
+    if (rawDest && !rawDest.startsWith('صادرات')) {
+      const parts = rawDest.split(/[-–—/]/).map((s: string) => s.trim());
+      const matched = allowedProvinces.find(p => normalizeProvinceName(p.name) === normalizeProvinceName(parts[0]));
+      if (matched) {
+        initProv = matched.name;
+        initCity = parts[1] || '';
+      } else {
+        const found = allowedProvinces.find(p => rawDest.includes(p.name));
+        if (found) {
+          initProv = found.name;
+          initCity = rawDest.replace(found.name, '').replace(/[-–—/]/g, '').trim();
+        }
+      }
+    }
+    if (!initProv && allowedProvinces.length > 0) {
+      initProv = allowedProvinces[0].name;
+    }
+    setEditSelectedProvince(initProv);
+    setEditSelectedCity(initCity);
+
     setEditExactAddress(pendingData?.exactAddress ?? ord.exactAddress ?? '');
     setEditDeliveryLocationUrl(pendingData?.deliveryLocationUrl ?? ord.deliveryLocationUrl ?? '');
     setEditNotes(pendingData?.notes ?? ord.notes ?? '');
@@ -2208,7 +2260,9 @@ export default function RepresentativeDashboard({
       <InteractiveMapPicker
         isOpen={isFormMapPickerOpen}
         onClose={() => setIsFormMapPickerOpen(false)}
-        cityHint={destinationCity}
+        cityHint={selectedCity}
+        provinceHint={selectedProvince}
+        destinationSummary={destinationCity}
         agentTerritories={agentTerritories}
         onConfirmLocation={(url, lat, lng, addressText) => {
           setDeliveryLocationUrl(url);
@@ -2226,6 +2280,7 @@ export default function RepresentativeDashboard({
         isOpen={isEditMapPickerOpen}
         onClose={() => setIsEditMapPickerOpen(false)}
         cityHint={editDestinationCity}
+        destinationSummary={editDestinationCity}
         agentTerritories={agentTerritories}
         onConfirmLocation={(url, lat, lng, addressText) => {
           setEditDeliveryLocationUrl(url);
@@ -2468,16 +2523,90 @@ export default function RepresentativeDashboard({
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-slate-800 font-bold mb-1">شهر مقصد:</label>
-                    <input
-                      type="text"
-                      value={editDestinationCity}
-                      onChange={e => setEditDestinationCity(e.target.value)}
-                      placeholder="نام شهر یا استان مقصد"
-                      className="w-full bg-slate-50 hover:bg-white border-2 border-slate-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-2xs transition-all"
-                    />
-                  </div>
+                  {/* Destination Province & City for Domestic Order */}
+                  {!editIsExportOrder && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 col-span-1 sm:col-span-2 bg-emerald-50/40 p-2.5 rounded-xl border border-emerald-200/80">
+                      <div>
+                        <label className="block text-slate-800 font-bold mb-1 text-xs flex items-center justify-between">
+                          <span>استان مقصد (محدوده سرپرستی مجاز):</span>
+                          <span className="text-[10px] text-emerald-700 font-normal">{allowedProvinces.length} استان تحت پوشش</span>
+                        </label>
+                        <select
+                          value={editSelectedProvince}
+                          onChange={e => {
+                            const prov = e.target.value;
+                            setEditSelectedProvince(prov);
+                            const pCities = getCitiesForProvince(prov);
+                            const rule = agentTerritories.find(t => normalizeProvinceName(t.province) === normalizeProvinceName(prov));
+                            const validCities = (rule && !rule.allCities && rule.cities && rule.cities.length > 0)
+                              ? pCities.filter(c => rule.cities!.includes(c))
+                              : pCities;
+                            const firstCity = validCities[0] || pCities[0] || '';
+                            setEditSelectedCity(firstCity);
+                            setEditDestinationCity(firstCity ? `${prov} - ${firstCity}` : prov);
+                          }}
+                          className="w-full bg-white border-2 border-emerald-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-black cursor-pointer focus:outline-none focus:border-emerald-600 shadow-2xs"
+                        >
+                          {allowedProvinces.map(p => (
+                            <option key={p.name} value={p.name}>{p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-800 font-bold mb-1 text-xs">شهر مقصد:</label>
+                        {(() => {
+                          const pCities = getCitiesForProvince(editSelectedProvince);
+                          const rule = agentTerritories.find(t => normalizeProvinceName(t.province) === normalizeProvinceName(editSelectedProvince));
+                          const validCities = (rule && !rule.allCities && rule.cities && rule.cities.length > 0)
+                            ? pCities.filter(c => rule.cities!.includes(c))
+                            : pCities;
+
+                          return (
+                            <select
+                              value={validCities.includes(editSelectedCity) ? editSelectedCity : ''}
+                              onChange={e => {
+                                const c = e.target.value;
+                                setEditSelectedCity(c);
+                                setEditDestinationCity(editSelectedProvince ? `${editSelectedProvince} - ${c}` : c);
+                              }}
+                              className="w-full bg-white border-2 border-slate-300 rounded-xl py-2 px-2 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 shadow-2xs cursor-pointer"
+                            >
+                              <option value="">انتخاب از شهرهای مجاز استان...</option>
+                              {validCities.map(c => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          );
+                        })()}
+                      </div>
+
+                      <div className="col-span-1 sm:col-span-2">
+                        <label className="block text-[10px] text-slate-600 font-bold mb-1">خلاصه مقصد ثبت‌شده (شهر/استان):</label>
+                        <input
+                          type="text"
+                          value={editDestinationCity}
+                          onChange={e => setEditDestinationCity(e.target.value)}
+                          placeholder="مثال: تهران - لواسان"
+                          className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-3 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Export Order Destination */}
+                  {editIsExportOrder && (
+                    <div className="col-span-1 sm:col-span-2 bg-sky-50/50 p-2.5 rounded-xl border border-sky-200">
+                      <label className="block text-slate-800 font-bold mb-1 text-xs">کشور و مرز خروجی صادرات:</label>
+                      <input
+                        type="text"
+                        value={editDestinationCity}
+                        onChange={e => setEditDestinationCity(e.target.value)}
+                        placeholder="صادرات به عراق (مرز مهران)"
+                        className="w-full bg-white border-2 border-sky-300 rounded-xl py-2 px-3 text-xs text-slate-900 font-bold focus:outline-none focus:border-sky-600 shadow-2xs"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-slate-800 font-bold mb-1">نوع خودروی باربری:</label>

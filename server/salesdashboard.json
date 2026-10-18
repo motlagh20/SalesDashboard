@@ -69,7 +69,7 @@
       "agentCode": "AG-9081",
       "phoneNumber": "09121111111",
       "address": "تهران، ابتدای جاده قدیم کرج، مجتمع تجاری پایتخت، پلاک ۱۲",
-      "area": "استان تهران (شهرهای: لواسان، تهران)",
+      "area": "استان تهران (شهرهای: لواسان، تهران)؛ کل استان چهارمحال و بختیاری",
       "isEnabled": true,
       "territories": [
         {
@@ -79,9 +79,19 @@
             "لواسان",
             "تهران"
           ]
+        },
+        {
+          "province": "چهارمحال و بختیاری",
+          "allCities": true
         }
       ],
-      "isExportAgent": true
+      "isExportAgent": true,
+      "personType": "NATURAL",
+      "companyName": null,
+      "registrationNumber": null,
+      "economicCode": null,
+      "nationalId": null,
+      "nationalCode": null
     },
     {
       "id": "ag-2",
@@ -89,9 +99,26 @@
       "alias": "نمایندگی اصفهان (رجایی)",
       "agentCode": "AG-6055",
       "phoneNumber": "09132222222",
-      "address": "اصفهان، بلوار فرودگاه، نرسیده به شهرک صنعتی جی، پلاک ۴۶",
-      "area": "استان اصفهان و یزد",
-      "isEnabled": 1
+      "address": "اصفهان، بلوار فرودگاه",
+      "area": "کل استان اصفهان؛ کل استان یزد",
+      "isEnabled": true,
+      "territories": [
+        {
+          "province": "اصفهان",
+          "allCities": true
+        },
+        {
+          "province": "یزد",
+          "allCities": true
+        }
+      ],
+      "isExportAgent": false,
+      "personType": "REAL",
+      "companyName": null,
+      "registrationNumber": null,
+      "economicCode": null,
+      "nationalId": null,
+      "nationalCode": null
     },
     {
       "id": "ag-3",
@@ -100,8 +127,18 @@
       "agentCode": "AG-2019",
       "phoneNumber": "09113333333",
       "address": "گیلان، رشت، کیلومتر ۵ جاده انزلی، جنب انبار فومن‌شیمی",
-      "area": "استان گیلان و غربی مازندران",
-      "isEnabled": 1
+      "area": "کل استان گیلان؛ کل استان مازندران",
+      "isEnabled": 1,
+      "territories": [
+        {
+          "province": "گیلان",
+          "allCities": true
+        },
+        {
+          "province": "مازندران",
+          "allCities": true
+        }
+      ]
     },
     {
       "id": "ag-4",
@@ -110,8 +147,18 @@
       "agentCode": "AG-7023",
       "phoneNumber": "09174444444",
       "address": "فارس، شیراز، بلوار امیرکبیر، روبروی باغ جنت، مجتمع سفال",
-      "area": "استان فارس و استان بوشهر",
-      "isEnabled": 1
+      "area": "کل استان فارس؛ کل استان بوشهر",
+      "isEnabled": 1,
+      "territories": [
+        {
+          "province": "فارس",
+          "allCities": true
+        },
+        {
+          "province": "بوشهر",
+          "allCities": true
+        }
+      ]
     }
   ],
   "shipping_companies": [

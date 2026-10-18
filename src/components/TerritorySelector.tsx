@@ -11,7 +11,7 @@ import {
   Globe2, 
   Layers
 } from 'lucide-react';
-import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary } from '../data/iranLocations';
+import { IRAN_PROVINCES, getCitiesForProvince, formatTerritoriesSummary, normalizeProvinceName } from '../data/iranLocations';
 import { TerritoryAssignment } from '../types';
 
 interface TerritorySelectorProps {
@@ -22,26 +22,40 @@ interface TerritorySelectorProps {
 }
 
 export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
-  value,
+  value = [],
   onChange,
   onSummaryChange,
   className = '',
 }) => {
+  const safeValue = Array.isArray(value) ? value : [];
   const [selectedProvinceToAdd, setSelectedProvinceToAdd] = useState<string>('');
   const [provinceSearchQuery, setProvinceSearchQuery] = useState<string>('');
   const [citySearchQueries, setCitySearchQueries] = useState<Record<string, string>>({});
 
   // Synchronize summary text whenever territories change
   const updateTerritories = (newTerritories: TerritoryAssignment[]) => {
-    onChange(newTerritories);
+    // Ensure all province names are normalized and deduplicated
+    const seen = new Set<string>();
+    const normalized: TerritoryAssignment[] = [];
+    for (const t of newTerritories) {
+      const cleanProv = normalizeProvinceName(t.province);
+      if (cleanProv && !seen.has(cleanProv)) {
+        seen.add(cleanProv);
+        normalized.push({
+          ...t,
+          province: cleanProv
+        });
+      }
+    }
+    onChange(normalized);
     if (onSummaryChange) {
-      onSummaryChange(formatTerritoriesSummary(newTerritories));
+      onSummaryChange(formatTerritoriesSummary(normalized));
     }
   };
 
   // List of provinces not yet added
   const availableProvinces = IRAN_PROVINCES.filter(
-    p => !value.some(t => t.province === p.name)
+    p => !safeValue.some(t => normalizeProvinceName(t.province) === normalizeProvinceName(p.name))
   );
 
   // Filter available provinces by search query if typed
@@ -52,15 +66,16 @@ export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
   // Add a new province with DEFAULT = whole province (allCities: true)
   const handleAddProvince = (provinceName: string) => {
     if (!provinceName) return;
-    if (value.some(t => t.province === provinceName)) return;
+    const cleanName = normalizeProvinceName(provinceName);
+    if (safeValue.some(t => normalizeProvinceName(t.province) === cleanName)) return;
 
     const newRule: TerritoryAssignment = {
-      province: provinceName,
+      province: cleanName,
       allCities: true, // Default as specified: Whole province
       cities: undefined,
     };
 
-    const updated = [...value, newRule];
+    const updated = [...safeValue, newRule];
     updateTerritories(updated);
     setSelectedProvinceToAdd('');
     setProvinceSearchQuery('');
@@ -68,11 +83,13 @@ export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
 
   // Remove a province
   const handleRemoveProvince = (provinceName: string) => {
-    const updated = value.filter(t => t.province !== provinceName);
+    const cleanName = normalizeProvinceName(provinceName);
+    const updated = safeValue.filter(t => normalizeProvinceName(t.province) !== cleanName);
     updateTerritories(updated);
     // Cleanup city search query for that province
     setCitySearchQueries(prev => {
       const next = { ...prev };
+      delete next[cleanName];
       delete next[provinceName];
       return next;
     });
@@ -80,11 +97,13 @@ export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
 
   // Toggle coverage mode for a province (All Cities vs Specific Cities)
   const handleToggleMode = (provinceName: string, allCities: boolean) => {
-    const provinceCities = getCitiesForProvince(provinceName);
-    const updated = value.map(t => {
-      if (t.province === provinceName) {
+    const cleanName = normalizeProvinceName(provinceName);
+    const provinceCities = getCitiesForProvince(cleanName);
+    const updated = safeValue.map(t => {
+      if (normalizeProvinceName(t.province) === cleanName) {
         return {
           ...t,
+          province: cleanName,
           allCities,
           // When switching to specific cities for the first time, populate with all cities so user can exclude
           cities: allCities ? undefined : (t.cities && t.cities.length > 0 ? t.cities : [...provinceCities])
@@ -97,8 +116,9 @@ export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
 
   // Toggle a single city within a specific province
   const handleToggleCity = (provinceName: string, cityName: string) => {
-    const updated = value.map(t => {
-      if (t.province === provinceName) {
+    const cleanName = normalizeProvinceName(provinceName);
+    const updated = safeValue.map(t => {
+      if (normalizeProvinceName(t.province) === cleanName) {
         const currentCities = t.cities || [];
         const isSelected = currentCities.includes(cityName);
         const nextCities = isSelected
@@ -106,6 +126,7 @@ export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
           : [...currentCities, cityName];
         return {
           ...t,
+          province: cleanName,
           allCities: false,
           cities: nextCities,
         };
@@ -117,11 +138,13 @@ export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
 
   // Select all cities for a province
   const handleSelectAllCities = (provinceName: string) => {
-    const allCitiesList = getCitiesForProvince(provinceName);
-    const updated = value.map(t => {
-      if (t.province === provinceName) {
+    const cleanName = normalizeProvinceName(provinceName);
+    const allCitiesList = getCitiesForProvince(cleanName);
+    const updated = safeValue.map(t => {
+      if (normalizeProvinceName(t.province) === cleanName) {
         return {
           ...t,
+          province: cleanName,
           allCities: false,
           cities: [...allCitiesList],
         };
@@ -133,10 +156,12 @@ export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
 
   // Deselect / clear all cities for a province
   const handleClearCities = (provinceName: string) => {
-    const updated = value.map(t => {
-      if (t.province === provinceName) {
+    const cleanName = normalizeProvinceName(provinceName);
+    const updated = safeValue.map(t => {
+      if (normalizeProvinceName(t.province) === cleanName) {
         return {
           ...t,
+          province: cleanName,
           allCities: false,
           cities: [],
         };
@@ -171,11 +196,11 @@ export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
             <span className="text-[11px] px-2.5 py-1 rounded-md font-bold bg-emerald-50 text-emerald-800 border border-emerald-200/80">
-              {value.length === 0 ? 'سراسر کشور (بدون محدودیت)' : `${value.length} استان تخصیص‌یافته`}
+              {safeValue.length === 0 ? 'سراسر کشور (بدون محدودیت)' : `${safeValue.length} استان منتخب (${safeValue.map(v => v.province).join('، ')})`}
             </span>
-            {value.length > 0 && (
+            {safeValue.length > 0 && (
               <button
                 type="button"
                 onClick={handleResetAll}
@@ -188,66 +213,116 @@ export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
           </div>
         </div>
 
-        {/* Province Selection Input & Dropdown */}
-        <div className="space-y-2">
-          <label className="block text-[11px] font-bold text-slate-700">
-            افزودن استان جدید به حوزه سرپرستی:
-          </label>
+        {/* Province Selection Input, Dropdown & Multi-Province Grid */}
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <label className="block text-[11px] font-bold text-slate-700">
+              افزودن استان به حوزه سرپرستی (امکان انتخاب همزمان چند استان):
+            </label>
+            <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200/60 font-medium">
+              💡 با انتخاب از لیست، استان مستقیماً به کارت‌ها افزوده می‌شود
+            </span>
+          </div>
+
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <select
                 value={selectedProvinceToAdd}
-                onChange={(e) => setSelectedProvinceToAdd(e.target.value)}
+                onChange={(e) => {
+                  const chosen = e.target.value;
+                  if (chosen) {
+                    handleAddProvince(chosen);
+                  }
+                }}
                 className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all cursor-pointer font-sans"
               >
-                <option value="">-- انتخاب استان از لیست ({availableProvinces.length} استان باقی‌مانده) --</option>
+                <option value="">➕ انتخاب و افزودن سریع استان از لیست ({availableProvinces.length} استان باقی‌مانده)...</option>
                 {availableProvinces.map(p => (
                   <option key={p.name} value={p.name}>
-                    استان {p.name} ({p.cities.length} شهر)
+                    + افزودن استان {p.name} ({p.cities.length} شهر)
                   </option>
                 ))}
               </select>
             </div>
 
-            <button
-              type="button"
-              disabled={!selectedProvinceToAdd}
-              onClick={() => handleAddProvince(selectedProvinceToAdd)}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shrink-0 ${
-                selectedProvinceToAdd
-                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer active:scale-95'
-                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-              }`}
-            >
-              <Plus className="w-4 h-4" />
-              <span>افزودن استان به کارت‌ها</span>
-            </button>
+            {selectedProvinceToAdd && (
+              <button
+                type="button"
+                onClick={() => handleAddProvince(selectedProvinceToAdd)}
+                className="px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span>افزودن استان {selectedProvinceToAdd}</span>
+              </button>
+            )}
           </div>
 
-          {/* Quick-add pills for frequent provinces */}
-          {availableProvinces.length > 0 && (
-            <div className="pt-1 flex items-center gap-1.5 flex-wrap">
-              <span className="text-[10px] text-slate-500 flex items-center gap-1 font-medium">
-                <Layers className="w-3 h-3 text-slate-400" />
-                دسترسی سریع به استان‌ها:
+          {/* Searchable Province Chips Grid for Direct Multi-Selection */}
+          <div className="bg-white border border-slate-200/80 rounded-xl p-3 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
+              <span className="text-[10px] text-slate-600 flex items-center gap-1.5 font-bold">
+                <Layers className="w-3.5 h-3.5 text-emerald-600" />
+                فهرست کامل استان‌های کشور جهت انتخاب سریع چندگانه (کلیک برای افزودن/حذف):
               </span>
-              {availableProvinces.slice(0, 7).map(p => (
-                <button
-                  key={p.name}
-                  type="button"
-                  onClick={() => handleAddProvince(p.name)}
-                  className="text-[10px] bg-white hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 hover:border-emerald-300 border border-slate-200 px-2 py-0.5 rounded-md transition-colors cursor-pointer flex items-center gap-1"
-                >
-                  <span>+ {p.name}</span>
-                </button>
-              ))}
+
+              {/* Quick search input */}
+              <div className="relative w-full sm:w-48">
+                <input
+                  type="text"
+                  placeholder="جستجوی استان..."
+                  value={provinceSearchQuery}
+                  onChange={(e) => setProvinceSearchQuery(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-md px-2 py-1 pr-6 text-[11px] text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-1 focus:ring-emerald-500 font-sans"
+                />
+                <Search className="w-3 h-3 text-slate-400 absolute right-2 top-2" />
+              </div>
             </div>
-          )}
+
+            {/* All 31 Provinces Interactive Badges */}
+            <div className="flex items-center gap-1.5 flex-wrap max-h-36 overflow-y-auto p-1">
+              {IRAN_PROVINCES
+                .filter(p => !provinceSearchQuery.trim() || p.name.includes(provinceSearchQuery.trim()))
+                .map(p => {
+                  const isAssigned = safeValue.some(t => normalizeProvinceName(t.province) === normalizeProvinceName(p.name));
+                  return (
+                    <button
+                      key={p.name}
+                      type="button"
+                      onClick={() => {
+                        if (isAssigned) {
+                          handleRemoveProvince(p.name);
+                        } else {
+                          handleAddProvince(p.name);
+                        }
+                      }}
+                      className={`text-[10px] px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1 border select-none ${
+                        isAssigned
+                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                          : 'bg-slate-50 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border-slate-200 hover:border-emerald-300'
+                      }`}
+                      title={isAssigned ? `حذف استان ${p.name} از حوزه` : `افزودن استان ${p.name} به حوزه`}
+                    >
+                      {isAssigned ? (
+                        <>
+                          <Check className="w-3 h-3 text-white shrink-0" />
+                          <span>{p.name} (انتخاب‌شده)</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-slate-400 font-normal">+</span>
+                          <span>{p.name}</span>
+                        </>
+                      )}
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Empty State Indicator */}
-      {value.length === 0 && (
+      {safeValue.length === 0 && (
         <div className="bg-slate-50/50 border border-dashed border-slate-300 rounded-xl p-6 text-center space-y-2">
           <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
             <Globe2 className="w-5 h-5 text-slate-400" />
@@ -260,12 +335,12 @@ export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
       )}
 
       {/* Cards for each selected province */}
-      {value.length > 0 && (
+      {safeValue.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between text-slate-600 px-1">
             <span className="text-[11px] font-bold flex items-center gap-1.5 text-slate-700">
               <Building2 className="w-3.5 h-3.5 text-emerald-600" />
-              کارت‌های تفکیک‌شده استان‌های تحت سرپرستی ({value.length} استان):
+              کارت‌های تفکیک‌شده استان‌های تحت سرپرستی ({safeValue.length} استان):
             </span>
             <span className="text-[10px] text-slate-500">
               پیش‌فرض هر استان: «کل استان» با امکان انتخاب شهرهای خاص
@@ -273,23 +348,27 @@ export const TerritorySelector: React.FC<TerritorySelectorProps> = ({
           </div>
 
           <div className="grid grid-cols-1 gap-3">
-            {value.map((t) => {
-              const allProvinceCities = getCitiesForProvince(t.province);
+            {safeValue.map((t, idx) => {
+              const cleanProvName = normalizeProvinceName(t.province);
+              const allProvinceCities = getCitiesForProvince(cleanProvName);
               const selectedCities = t.allCities ? allProvinceCities : (t.cities || []);
-              const currentQuery = citySearchQueries[t.province] || '';
+              const currentQuery = citySearchQueries[cleanProvName] || citySearchQueries[t.province] || '';
               const filteredCities = allProvinceCities.filter(c => c.includes(currentQuery.trim()));
 
               return (
                 <div
-                  key={t.province}
+                  key={`${cleanProvName}-${idx}`}
                   className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden transition-all hover:border-slate-300"
                 >
                   {/* Card Header */}
                   <div className="bg-slate-50/90 border-b border-slate-200/80 px-4 py-3 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
                       <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-200"></span>
-                      <h4 className="text-sm font-bold text-slate-800">
-                        استان {t.province}
+                      <h4 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                        <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-mono font-bold">
+                          استان {idx + 1}
+                        </span>
+                        <span>استان {cleanProvName}</span>
                       </h4>
 
                       {/* Coverage status tag */}

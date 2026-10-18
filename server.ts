@@ -171,6 +171,89 @@ async function startServer() {
     });
   });
 
+  // Helper to reliably parse structured agent territories with fallback to area text
+  function parseServerTerritories(territories: any, areaText?: string): any[] {
+    let list: any[] = [];
+    if (territories) {
+      if (Array.isArray(territories)) {
+        list = territories;
+      } else if (typeof territories === 'string') {
+        try {
+          const parsed = JSON.parse(territories);
+          if (Array.isArray(parsed)) list = parsed;
+          else if (parsed && typeof parsed === 'object') list = [parsed];
+        } catch {}
+      } else if (typeof territories === 'object') {
+        list = [territories];
+      }
+    }
+
+    // Normalize and deduplicate existing list items
+    const seenProvs = new Set<string>();
+    const normalizedList: any[] = [];
+    for (const item of list) {
+      if (item && item.province) {
+        const cleanName = String(item.province).trim().replace(/^(?:کل\s+)?استان\s+/, '').trim();
+        if (cleanName && !seenProvs.has(cleanName)) {
+          seenProvs.add(cleanName);
+          normalizedList.push({
+            ...item,
+            province: cleanName,
+            allCities: item.allCities !== undefined ? !!item.allCities : !(item.cities && item.cities.length > 0)
+          });
+        }
+      }
+    }
+    list = normalizedList;
+
+    // Intelligent fallback & merge: parse province names from area text if missing from territories
+    if (areaText && typeof areaText === 'string') {
+      const trimmed = areaText.trim();
+      if (trimmed && trimmed !== 'سراسر کشور' && trimmed !== 'سراسر کشور / تعیین‌نشده' && trimmed !== 'سراسر کشور (بدون محدودیت)') {
+        const iranProvincesList = [
+          'تهران', 'مازندران', 'گیلان', 'اصفهان', 'فارس', 'خراسان رضوی', 'آذربایجان شرقی',
+          'آذربایجان غربی', 'البرز', 'خوزستان', 'کرمان', 'یزد', 'سمنان', 'قم', 'مرکزی',
+          'قزوین', 'کرمانشاه', 'همدان', 'لرستان', 'کردستان', 'گلستان', 'هرمزگان', 'بوشهر',
+          'سیستان و بلوچستان', 'اردبیل', 'زنجان', 'ایلام', 'چهارمحال و بختیاری',
+          'کهگیلویه و بویراحمد', 'خراسان جنوبی', 'خراسان شمالی'
+        ].sort((a, b) => b.length - a.length);
+
+        let workingTrimmed = trimmed;
+        const segments = trimmed.split(/[؛;\n]/).map(s => s.trim()).filter(Boolean);
+
+        for (const seg of segments) {
+          let workingSeg = seg;
+          for (const p of iranProvincesList) {
+            if (workingSeg.includes(p)) {
+              if (!seenProvs.has(p)) {
+                seenProvs.add(p);
+                const citiesMatch = workingSeg.match(/\(شهرهای:\s*([^)]+)\)/);
+                if (citiesMatch) {
+                  const cityNames = citiesMatch[1].split(/[،,]/).map(c => c.trim()).filter(Boolean);
+                  list.push({ province: p, allCities: false, cities: cityNames });
+                } else {
+                  list.push({ province: p, allCities: true });
+                }
+              }
+              workingSeg = workingSeg.split(p).join(' ');
+              workingTrimmed = workingTrimmed.split(p).join(' ');
+            }
+          }
+        }
+
+        // Secondary pass for any remaining province names
+        for (const p of iranProvincesList) {
+          if (!seenProvs.has(p) && workingTrimmed.includes(p)) {
+            seenProvs.add(p);
+            list.push({ province: p, allCities: true });
+            workingTrimmed = workingTrimmed.split(p).join(' ');
+          }
+        }
+      }
+    }
+    return list;
+  }
+
   // Unified Ultra-Fast Sync Bootstrap API Endpoint (Fetches all datasets in a single HTTP round-trip)
   app.get("/api/sync/bootstrap", async (req, res) => {
     try {
@@ -198,14 +281,7 @@ async function startServer() {
       }));
 
       const agents = (agentRows || []).map((a: any) => {
-        let territories = a.territories;
-        if (territories && typeof territories === 'string') {
-          try {
-            territories = JSON.parse(territories);
-          } catch {
-            territories = [];
-          }
-        }
+        const territories = parseServerTerritories(a.territories, a.area);
         return {
           ...a,
           territories: Array.isArray(territories) ? territories : [],
@@ -494,14 +570,7 @@ async function startServer() {
       const db = getDbPool();
       const [rows] = await db.query("SELECT * FROM agents");
       const agents = (rows as any[]).map(a => {
-        let territories = a.territories;
-        if (territories && typeof territories === 'string') {
-          try {
-            territories = JSON.parse(territories);
-          } catch (e) {
-            territories = [];
-          }
-        }
+        const territories = parseServerTerritories(a.territories, a.area);
         return {
           ...a,
           territories: Array.isArray(territories) ? territories : [],

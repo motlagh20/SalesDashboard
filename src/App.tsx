@@ -978,6 +978,13 @@ export default function App() {
   // 3d. Agent Management (Called by Sales Manager)
   const handleCreateAgent = async (newAgent: Agent): Promise<boolean> => {
     try {
+      // Optimistic local state update so new agent is immediately available in UI
+      setAgents(prev => {
+        const exists = prev.some(a => a.id === newAgent.id);
+        if (exists) return prev.map(a => a.id === newAgent.id ? newAgent : a);
+        return [...prev, newAgent];
+      });
+
       const response = await fetch('/api/agents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -986,11 +993,12 @@ export default function App() {
 
       if (response.ok) {
         showToast(`نمایندگی رسمی جدید (${newAgent.alias}) با موفقیت عضو شبکه شد.`, 'success');
-        refreshAllData();
+        await refreshAllData(true);
         return true;
       } else {
         const errorMsg = await getErrorMessage(response, 'خطا در ثبت نمایندگی در سرور');
         showToast(`خطا در ثبت نمایندگی: ${errorMsg}`, 'error');
+        await refreshAllData(true);
         return false;
       }
     } catch (err) {
@@ -1001,14 +1009,16 @@ export default function App() {
 
   const handleToggleAgentStatus = async (agentId: string) => {
     try {
+      setAgents(prev => prev.map(a => a.id === agentId ? { ...a, isEnabled: !a.isEnabled } : a));
       const response = await fetch(`/api/agents/${agentId}/toggle`, {
         method: 'PATCH'
       });
 
       if (response.ok) {
-        refreshAllData();
+        await refreshAllData(true);
       } else {
         showToast('خطا در تغییر وضعیت نمایندگی در سرور', 'error');
+        await refreshAllData(true);
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -1017,15 +1027,17 @@ export default function App() {
 
   const handleDeleteAgent = async (agentId: string) => {
     try {
+      setAgents(prev => prev.filter(a => a.id !== agentId));
       const response = await fetch(`/api/agents/${agentId}`, {
         method: 'DELETE'
       });
 
       if (response.ok) {
         showToast('نمایندگی از سیستم با موفقیت حذف گردید.', 'info');
-        refreshAllData();
+        await refreshAllData(true);
       } else {
         showToast('خطا در حذف نمایندگی در سرور', 'error');
+        await refreshAllData(true);
       }
     } catch (err) {
       showToast('خطای شبکه در ارتباط با سرور', 'error');
@@ -1034,6 +1046,9 @@ export default function App() {
 
   const handleUpdateAgent = async (agentData: Agent): Promise<boolean> => {
     try {
+      // Immediate local state update so editing or listing immediately reflects updated territories
+      setAgents(prev => prev.map(a => a.id === agentData.id ? { ...a, ...agentData } : a));
+
       const response = await fetch(`/api/agents/${agentData.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1041,11 +1056,12 @@ export default function App() {
       });
       if (response.ok) {
         showToast('اطلاعات نمایندگی با موفقیت به‌روزرسانی شد.', 'success');
-        refreshAllData();
+        await refreshAllData(true);
         return true;
       } else {
         const errorMsg = await getErrorMessage(response, 'خطا در ثبت تغییرات نمایندگی');
         showToast(`خطا در ثبت تغییرات نمایندگی: ${errorMsg}`, 'error');
+        await refreshAllData(true);
         return false;
       }
     } catch (err) {
