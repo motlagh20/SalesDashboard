@@ -10,7 +10,9 @@ interface LoginGateProps {
   onToggleSandbox?: () => void;
 }
 
-export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = true, onToggleSandbox }: LoginGateProps) {
+export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = false, onToggleSandbox }: LoginGateProps) {
+  const isProduction = import.meta.env.PROD || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+
   const [phoneNumber, setPhoneNumber] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [step, setStep] = useState<'PHONE_INPUT' | 'OTP_INPUT'>('PHONE_INPUT');
@@ -28,16 +30,18 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
   const [recoveryNewPassword, setRecoveryNewPassword] = useState('');
   const [recoveryOtp, setRecoveryOtp] = useState<string | null>(null);
 
-  // Default seeded users for Sandbox quick-access
-  const defaultAccounts = [
-    { name: 'ادمین ارشد نرم‌افزار (سیستم)', phone: '09120000000', username: 'admin', role: 'SYSTEM_ADMIN', icon: '🛡️' },
-    { name: 'آقای احمدی (مدیر بازرگانی)', phone: '09121111111', username: 'manager', role: 'SALES_MANAGER', icon: '👔' },
-    { name: 'آقای حمیدرضا احمدی (نماینده تهران)', phone: '09120000001', username: 'rep_tehran', role: 'REPRESENTATIVE', icon: '📱' },
-    { name: 'مسئول اول فروش کارخانه', phone: '09110000005', username: 'factory', role: 'FACTORY_TRANSPORT', icon: '🏭' },
-    { name: 'باربری ترانزیت همکار', phone: '09110000006', username: 'shipping_transit', role: 'SHIPPING_COMPANY', icon: '🚚' },
-    { name: 'مسئول انبار محصول (بارگیری و حواله)', phone: '09110000008', username: 'warehouse', role: 'PRODUCT_WAREHOUSE', icon: '📦' },
-    { name: 'افسر انتظامات و گیت حراست', phone: '09110000009', username: 'security_gate', role: 'SECURITY_GATE', icon: '👮' },
-  ];
+  // Default seeded users for Sandbox quick-access: strictly excluded from production bundles
+  const defaultAccounts = import.meta.env.DEV
+    ? [
+        { name: 'ادمین ارشد نرم‌افزار (سیستم)', phone: '09120000000', username: 'admin', role: 'SYSTEM_ADMIN', icon: '🛡️' },
+        { name: 'آقای احمدی (مدیر بازرگانی)', phone: '09121111111', username: 'manager', role: 'SALES_MANAGER', icon: '👔' },
+        { name: 'آقای حمیدرضا احمدی (نماینده تهران)', phone: '09120000001', username: 'rep_tehran', role: 'REPRESENTATIVE', icon: '📱' },
+        { name: 'مسئول اول فروش کارخانه', phone: '09110000005', username: 'factory', role: 'FACTORY_TRANSPORT', icon: '🏭' },
+        { name: 'باربری ترانزیت همکار', phone: '09110000006', username: 'shipping_transit', role: 'SHIPPING_COMPANY', icon: '🚚' },
+        { name: 'مسئول انبار محصول (بارگیری و حواله)', phone: '09110000008', username: 'warehouse', role: 'PRODUCT_WAREHOUSE', icon: '📦' },
+        { name: 'افسر انتظامات و گیت حراست', phone: '09110000009', username: 'security_gate', role: 'SECURITY_GATE', icon: '👮' },
+      ]
+    : [];
 
   // 1. Password Login
   const handlePasswordLogin = async (e: React.FormEvent) => {
@@ -244,8 +248,12 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
     }
   };
 
-  // Quick sandbox helper login (Instant 0-delay login for fast mobile access)
+  // Quick sandbox helper login (strictly blocked in production)
   const handleQuickLogin = async (acc: typeof defaultAccounts[0]) => {
+    if (isProduction || !sandboxEnabled) {
+      showToast('ورود سریع آزمایشی در محیط عملیاتی مسدود و غیرفعال است.', 'error');
+      return;
+    }
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
@@ -258,7 +266,7 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
       const res = await fetch('/api/auth/login-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loginKey: acc.username, password: '123456' })
+        body: JSON.stringify({ loginKey: acc.username, password: '123456', isSandbox: true, isQuickLogin: true })
       });
 
       if (res.ok) {
@@ -341,7 +349,7 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                 <div className="relative">
                   <input
                     type="text"
-                    placeholder="manager / rep_tehran یا 09121111111"
+                    placeholder="نام کاربری یا شماره همراه"
                     value={loginKey}
                     onChange={(e) => setLoginKey(e.target.value)}
                     disabled={loading}
@@ -365,7 +373,7 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                   >
                     بازیابی رمز عبور (فراموشی کلمه عبور)
                   </button>
-                  <label className="block text-slate-300 text-xs font-bold">کلمه عبور (پیش‌فرض: 123456):</label>
+                  <label className="block text-slate-300 text-xs font-bold">کلمه عبور:</label>
                 </div>
                 <div className="relative">
                   <input
@@ -593,8 +601,8 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
             </form>
           )}
 
-          {/* Sandbox Access Section */}
-          {sandboxEnabled && (
+          {/* Sandbox Access Section: strictly disabled and omitted in production */}
+          {!isProduction && sandboxEnabled && defaultAccounts.length > 0 && (
             <div className="pt-4 border-t border-slate-700/40 space-y-3" id="sandbox-login-section">
               <div className="flex items-center justify-between pb-1 border-b border-slate-700/20">
                 <span className="text-[10px] font-extrabold text-amber-400">⚒️ میانبر شبیه‌ساز ورود به عنوان تست (Sandbox):</span>

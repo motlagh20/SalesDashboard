@@ -47,24 +47,51 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [isIntroExpanded, setIsIntroExpanded] = useState<boolean>(false);
 
-  // Sandbox shortcut visible state
+  // Environment detection: in production, sandbox mode is strictly disabled
+  const isProduction = import.meta.env.PROD || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+
+  // Sandbox shortcut visible state: strictly default to false (fail-closed)
   const [sandboxEnabled, setSandboxEnabled] = useState<boolean>(() => {
-    const saved = localStorage.getItem('tabarestan_sandbox_enabled');
-    return saved !== null ? JSON.parse(saved) : true;
+    if (isProduction) return false;
+    try {
+      const saved = localStorage.getItem('tabarestan_sandbox_enabled');
+      return saved !== null ? JSON.parse(saved) === true : false;
+    } catch {
+      return false;
+    }
   });
 
-  // Fetch initial sandbox status from server on mount
+  // Fetch initial sandbox status from server on mount (unauthenticated, fail-closed)
   useEffect(() => {
+    if (isProduction) {
+      setSandboxEnabled(false);
+      try {
+        localStorage.removeItem('tabarestan_sandbox_enabled');
+      } catch {}
+      return;
+    }
+
     fetch('/api/system/sandbox-status')
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then(data => {
-        if (typeof data.sandboxEnabled === 'boolean') {
+        if (data && typeof data.sandboxEnabled === 'boolean') {
           setSandboxEnabled(data.sandboxEnabled);
-          localStorage.setItem('tabarestan_sandbox_enabled', JSON.stringify(data.sandboxEnabled));
+          try {
+            localStorage.setItem('tabarestan_sandbox_enabled', JSON.stringify(data.sandboxEnabled));
+          } catch {}
+        } else {
+          // Fail-closed
+          setSandboxEnabled(false);
         }
       })
-      .catch(err => console.error("Error loading sandbox status:", err));
-  }, []);
+      .catch(() => {
+        // Fail-closed on any network or server error
+        setSandboxEnabled(false);
+      });
+  }, [isProduction]);
 
   // Auto Lock States
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => {
@@ -139,12 +166,16 @@ export default function App() {
   };
 
   const handleToggleSandbox = () => {
+    if (isProduction) {
+      showToast('⚠️ امکان فعال‌سازی حالت شبیه‌ساز (Sandbox) در محیط عملیاتی وجود ندارد.', 'error');
+      return;
+    }
     setSandboxEnabled(prev => {
       const next = !prev;
       localStorage.setItem('tabarestan_sandbox_enabled', JSON.stringify(next));
       fetch('/api/system/sandbox-status', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ sandboxEnabled: next })
       }).catch(err => console.error("Error saving sandbox status:", err));
       showToast(next ? '🟢 میانبرهای شبیه‌ساز ورود به عنوان تست (Sandbox) فعال شدند.' : '🔴 میانبرهای شبیه‌ساز ورود به عنوان تست (Sandbox) غیرفعال و پنهان شدند.', 'info');
@@ -557,7 +588,7 @@ export default function App() {
           setPermanentDrivers(data.permanentDrivers || []);
           setOrders(data.orders || []);
           if (typeof data.sandboxEnabled === 'boolean') {
-            setSandboxEnabled(data.sandboxEnabled);
+            setSandboxEnabled(isProduction ? false : data.sandboxEnabled);
           }
           return;
         }
@@ -1606,8 +1637,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* Role Play Tester Nav strictly visible for SYSTEM_ADMIN or when sandboxEnabled is active */}
-      {(currentUser?.role === 'SYSTEM_ADMIN' || (sandboxEnabled && !currentUser)) && (
+      {/* Role Play Tester Nav strictly visible for SYSTEM_ADMIN or when sandboxEnabled is active in development */}
+      {!isProduction && (currentUser?.role === 'SYSTEM_ADMIN' || (sandboxEnabled && !currentUser)) && (
         <div className="bg-slate-800 text-slate-200 py-2 sm:py-2.5 border-b border-slate-700 shadow-inner" id="role-tester-bar">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">

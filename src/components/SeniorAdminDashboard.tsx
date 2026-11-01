@@ -110,7 +110,7 @@ export default function SeniorAdminDashboard({
   onDispatchAllToFactory,
   onSaveLocation,
   onClearTransactions,
-  sandboxEnabled = true,
+  sandboxEnabled = false,
   onToggleSandbox
 }: SeniorAdminDashboardProps) {
   const [activeAdminTab, setActiveAdminTab] = useState<'SYSTEM_MONITOR' | 'SYSTEM_DEFINITIONS' | 'PERMANENT_DRIVERS' | 'SEARCH_ORDERS' | 'WORKFLOW_SETTINGS'>('SYSTEM_MONITOR');

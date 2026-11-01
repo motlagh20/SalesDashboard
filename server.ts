@@ -147,12 +147,13 @@ async function startServer() {
     next();
   });
 
-  // Global Sandbox state persistence
+  // Global Sandbox state persistence (strictly fail-closed: defaults to false)
   const SANDBOX_CONFIG_FILE = path.join(process.cwd(), 'data', 'sandbox_config.json');
-  let globalSandboxEnabled = true;
+  let globalSandboxEnabled = false;
 
   try {
-    if (fs.existsSync(SANDBOX_CONFIG_FILE)) {
+    // In production, sandbox mode is unconditionally disabled (fail-closed)
+    if (!isProductionEnvironment() && fs.existsSync(SANDBOX_CONFIG_FILE)) {
       const data = JSON.parse(fs.readFileSync(SANDBOX_CONFIG_FILE, 'utf-8'));
       if (typeof data.sandboxEnabled === 'boolean') {
         globalSandboxEnabled = data.sandboxEnabled;
@@ -160,16 +161,21 @@ async function startServer() {
     }
   } catch (e) {
     console.error("Error reading sandbox config file:", e);
+    globalSandboxEnabled = false;
   }
 
   function saveSandboxConfig(enabled: boolean) {
-    globalSandboxEnabled = enabled;
+    if (isProductionEnvironment()) {
+      globalSandboxEnabled = false;
+      return;
+    }
+    globalSandboxEnabled = Boolean(enabled);
     try {
       const dir = path.dirname(SANDBOX_CONFIG_FILE);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      fs.writeFileSync(SANDBOX_CONFIG_FILE, JSON.stringify({ sandboxEnabled: enabled }), 'utf-8');
+      fs.writeFileSync(SANDBOX_CONFIG_FILE, JSON.stringify({ sandboxEnabled: globalSandboxEnabled }), 'utf-8');
     } catch (e) {
       console.error("Error writing sandbox config file:", e);
     }
@@ -518,7 +524,7 @@ async function startServer() {
         permanentDrivers,
         orders,
         systemSettings: getSystemSettings(),
-        sandboxEnabled: globalSandboxEnabled,
+        sandboxEnabled: isProductionEnvironment() ? false : globalSandboxEnabled,
         timestamp: Date.now()
       };
 
@@ -2894,12 +2900,16 @@ function compactItemsJson(itemsInput: any): string | null {
         return sendApiError(res, 400, verifyResult.error);
       }
 
+      // Check if user has default password or mustChangePassword
+      const isDefault = isDefaultPasswordOrMatches(user.password) || Boolean(user.mustChangePassword);
+
       const token = generateToken({ id: user.id, username: user.username, role: user.role });
       setAuthCookie(res, token, req);
 
       res.json({
         success: true,
         token,
+        mustChangePassword: isDefault,
         user: sanitizeUser(user)
       });
     } catch (err: any) {
@@ -2911,8 +2921,24 @@ function compactItemsJson(itemsInput: any): string | null {
   // --- PASSWORD LOGIN ---
   app.post("/api/auth/login-password", async (req, res) => {
     try {
+      // Reject any sandbox shortcut attempt in production or when sandbox is disabled
+      if (req.body?.isSandbox || req.body?.isQuickLogin || req.body?.shortcut) {
+        if (isProductionEnvironment() || !globalSandboxEnabled) {
+          return sendApiError(res, 403, "ورود از طریق میانبر آزمایشی (سندباکس) در این محیط غیرفعال و مسدود است.");
+        }
+      }
+
       const cleanKey = sanitizeString(req.body.loginKey, { allowEmpty: false, maxLength: 100, fieldName: "نام کاربری یا شماره همراه" });
       const cleanPass = sanitizeString(req.body.password, { allowEmpty: false, maxLength: 200, fieldName: "رمز عبور" });
+
+      // In production, strictly reject default demo credentials to prevent unauthorized access to production accounts
+      if (isProductionEnvironment() && isDefaultPassword(cleanPass)) {
+        return sendApiError(
+          res,
+          403,
+          "ورود با کلمه عبور پیش‌فرض/دمو در محیط عملیاتی مسدود است. لطفاً از طریق احراز هویت پیامکی اقدام به ورود و تعیین رمز عبور اختصاصی فرمایید."
+        );
+      }
 
       const db = getDbPool();
       // Look up by username, phone, or agent code
@@ -3117,11 +3143,10 @@ function compactItemsJson(itemsInput: any): string | null {
     res.json({ success: true, message: "با موفقیت خارج شدید." });
   });
 
-  // CHANGE PASSWORD INSIDE APP
-  app.post("/api/users/:id/change-password", async (req, res) => {
+  // CHANGE PASSWORD INSIDE APP (Strictly authenticated; enforces IDOR, role authorization, and token safety)
+  app.post("/api/users/:id/change-password", authenticate, async (req, res) => {
     try {
       const safeId = validateId(req.params.id, "شناسه کاربر");
-      const safeCurrent = sanitizeString(req.body.currentPassword, { allowEmpty: false, maxLength: 200, fieldName: "رمز عبور فعلی" });
       const safeNew = sanitizeString(req.body.newPassword, { allowEmpty: false, maxLength: 200, fieldName: "رمز عبور جدید" });
 
       const db = getDbPool();
@@ -3134,62 +3159,32 @@ function compactItemsJson(itemsInput: any): string | null {
 
       const user = matched[0];
       const targetRole = normalizeRole(user.role);
+      const isSelf = req.user.id === safeId;
+      const isAdmin = hasRole(req.user.role, ["SYSTEM_ADMIN"]);
 
-      // Check caller's token if provided
-      const token = extractToken(req);
-      let callerUser: any = null;
-      if (token) {
-        const payload = verifyToken(token);
-        if (payload && payload.userId) {
-          const [uRows] = await db.query("SELECT * FROM app_users WHERE id = ?", [payload.userId]);
-          const uMatched = uRows as any[];
-          if (uMatched.length > 0 && uMatched[0].isEnabled) {
-            callerUser = uMatched[0];
-            req.user = {
-              id: callerUser.id,
-              username: callerUser.username,
-              role: normalizeRole(callerUser.role),
-              fullName: callerUser.fullName,
-              agentCode: callerUser.agentCode,
-              shippingCompanyId: callerUser.shippingCompanyId,
-              isEnabled: !!callerUser.isEnabled
-            };
-          }
-        }
+      // 1. Authorization: Ordinary users can ONLY change their own password
+      // Only SYSTEM_ADMIN can perform administrative password resets
+      if (!isSelf && !isAdmin) {
+        return sendApiError(res, 403, "دسترسی غیرمجاز. شما مجوز تغییر رمز عبور این کاربر را ندارید.");
       }
 
-      // If token was provided and callerUser resolved:
-      if (callerUser) {
-        const callerRole = normalizeRole(callerUser.role);
-
-        // Requirement 3: A SALES_MANAGER must not change the password of a SYSTEM_ADMIN account
-        if (targetRole === "SYSTEM_ADMIN" && callerUser.id !== user.id && callerRole !== "SYSTEM_ADMIN") {
-          return sendApiError(res, 403, "مدیر بازرگانی مجاز به تغییر رمز عبور حساب مدیر ارشد سیستم نمی‌باشد.");
-        }
-
-        // Authorize: Only account owner or SYSTEM_ADMIN/SALES_MANAGER (for non-admin accounts) can change password
-        if (callerUser.id !== safeId && !hasRole(callerUser.role, ["SYSTEM_ADMIN", "SALES_MANAGER"])) {
-          return sendApiError(res, 403, "دسترسی غیرمجاز. شما مجوز تغییر رمز عبور این کاربر را ندارید.");
-        }
-      } else {
-        // If unauthenticated (no valid token/cookie):
-        // Primary root admin and SYSTEM_ADMIN accounts strictly require authenticated session
-        if (isPrimaryAdmin(user) || targetRole === "SYSTEM_ADMIN") {
-          return sendApiError(res, 401, "احراز هویت الزامی است. لطفاً ابتدا وارد شوید.");
-        }
+      // 2. Prevent non-primary admin from changing another SYSTEM_ADMIN password
+      if (!isSelf && targetRole === "SYSTEM_ADMIN" && !isPrimaryAdmin(req.user)) {
+        return sendApiError(res, 403, "تنها مدیر ارشد اصلی سیستم مجاز به تغییر رمز عبور سایر مدیران سیستم می‌باشد.");
       }
 
       const dbPassword = user.password || DEFAULT_PASSWORD_BCRYPT_HASH;
 
-      // Verify current password (unless caller is an authenticated SYSTEM_ADMIN changing another user's password)
-      const isSystemAdminCaller = callerUser && hasRole(callerUser.role, ["SYSTEM_ADMIN"]) && callerUser.id !== user.id;
-      if (!isSystemAdminCaller) {
+      // 3. Current password verification: Mandatory when user changes their own password
+      if (isSelf) {
+        const safeCurrent = sanitizeString(req.body.currentPassword, { allowEmpty: false, maxLength: 200, fieldName: "رمز عبور فعلی" });
         const verifyCurrent = await verifyPassword(safeCurrent, dbPassword);
         if (!verifyCurrent.valid) {
           return sendApiError(res, 400, "رمز عبور فعلی نادرست است.");
         }
       }
 
+      // 4. Password Complexity & Default Password Check
       const trimmedNew = safeNew.trim();
       if (trimmedNew.length < 6) {
         return sendApiError(res, 400, "رمز عبور جدید باید حداقل ۶ کاراکتر باشد.");
@@ -3202,20 +3197,31 @@ function compactItemsJson(itemsInput: any): string | null {
       const hashedNew = await hashPassword(trimmedNew);
       await db.query("UPDATE app_users SET password = ?, mustChangePassword = 0 WHERE id = ?", [hashedNew, safeId]);
 
-      // Generate a fresh session token for the user whose password was successfully changed
-      const freshToken = generateToken({ id: user.id, username: user.username, role: user.role });
-      setAuthCookie(res, freshToken, req);
-
       await logUserActivity({
-        userId: user.id,
-        userName: user.fullName || user.username,
-        userRole: user.role,
-        action: "تغییر کلمه عبور",
-        details: "کلمه عبور با موفقیت تغییر یافت و هش امن ذخیره گردید.",
+        userId: req.user.id,
+        userName: req.user.fullName || req.user.username,
+        userRole: req.user.role,
+        action: isSelf ? "تغییر کلمه عبور" : "بازنشانی کلمه عبور توسط ادمین",
+        details: isSelf
+          ? "کاربر رمز عبور خود را با موفقیت تغییر داد."
+          : `ادمین رمز عبور کاربر «${user.username}» (شناسه: ${safeId}) را بازنشانی کرد.`,
         module: "AUTH",
         ipAddress: req.ip || "127.0.0.1",
         status: "SUCCESS"
       }).catch(() => {});
+
+      // 5. Token & Session Cookie Handling:
+      // When an admin resets another user's password, DO NOT issue target user's token or modify admin's cookie!
+      if (!isSelf) {
+        return res.json({
+          success: true,
+          message: `کلمه عبور کاربر «${user.fullName || user.username}» توسط مدیر سیستم با موفقیت تغییر یافت.`
+        });
+      }
+
+      // When user changes their own password, issue a fresh token for their session
+      const freshToken = generateToken({ id: user.id, username: user.username, role: user.role });
+      setAuthCookie(res, freshToken, req);
 
       res.json({
         success: true,
@@ -3228,6 +3234,62 @@ function compactItemsJson(itemsInput: any): string | null {
         return sendApiError(res, err.statusCode, err.message);
       }
       console.error("Error in /api/users/change-password:", err);
+      return handleServerError(res, err, req.originalUrl || req.url);
+    }
+  });
+
+  // DEDICATED SCREEN UNLOCK ENDPOINT (Verifies identity without new session issuance or identity switching)
+  app.post("/api/auth/unlock", authenticate, async (req, res) => {
+    try {
+      const cleanPass = sanitizeString(req.body.password, { allowEmpty: false, maxLength: 200, fieldName: "رمز عبور" });
+      const clientIp = req.ip || "127.0.0.1";
+
+      const db = getDbPool();
+      const [rows] = await db.query("SELECT * FROM app_users WHERE id = ?", [req.user.id]);
+      const matched = rows as any[];
+      if (matched.length === 0) {
+        return sendApiError(res, 404, "کاربر یافت نشد.");
+      }
+
+      const user = matched[0];
+      if (!user.isEnabled) {
+        return sendApiError(res, 403, "حساب کاربری شما غیرفعال شده است.");
+      }
+
+      const dbPassword = user.password || DEFAULT_PASSWORD_BCRYPT_HASH;
+      const verifyResult = await verifyPassword(cleanPass, dbPassword);
+      if (!verifyResult.valid) {
+        await logUserActivity({
+          userId: user.id,
+          userName: user.fullName || user.username,
+          userRole: user.role,
+          action: "تلاش ناموفق بازگشایی قفل صفحه",
+          details: "رمز عبور وارد شده برای بازگشایی قفل خودکار نامعتبر بود.",
+          module: "AUTH",
+          ipAddress: clientIp,
+          status: "FAILED"
+        }).catch(() => {});
+        return sendApiError(res, 400, "رمز عبور وارد شده نادرست است.");
+      }
+
+      await logUserActivity({
+        userId: user.id,
+        userName: user.fullName || user.username,
+        userRole: user.role,
+        action: "بازگشایی قفل صفحه",
+        details: "قفل صفحه با موفقیت باز شد.",
+        module: "AUTH",
+        ipAddress: clientIp,
+        status: "SUCCESS"
+      }).catch(() => {});
+
+      // Success: Does NOT issue a new session or change cookies, confirms identity of currently locked user
+      res.json({
+        success: true,
+        message: "قفل صفحه با موفقیت باز شد."
+      });
+    } catch (err: any) {
+      console.error("Error in /api/auth/unlock:", err);
       return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
@@ -4053,18 +4115,25 @@ function compactItemsJson(itemsInput: any): string | null {
     }
   });
 
-  app.get("/api/system/sandbox-status", authenticate, (req, res) => {
-    res.json({ sandboxEnabled: globalSandboxEnabled });
+  // Unauthenticated sandbox status endpoint: allows unauthenticated fresh browser clients to detect sandbox mode
+  app.get("/api/system/sandbox-status", (req, res) => {
+    if (isProductionEnvironment()) {
+      return res.json({ sandboxEnabled: false, isProduction: true });
+    }
+    res.json({ sandboxEnabled: globalSandboxEnabled, isProduction: false });
   });
 
   app.post("/api/system/sandbox-status", authenticate, authorize("SYSTEM_ADMIN"), (req, res) => {
     try {
+      if (isProductionEnvironment()) {
+        return sendApiError(res, 403, "امکان فعال‌سازی حالت شبیه‌ساز (Sandbox) در محیط عملیاتی به دلایل امنیتی وجود ندارد.");
+      }
       const { sandboxEnabled } = req.body || {};
       if (typeof sandboxEnabled !== 'boolean') {
         return sendApiError(res, 400, "مقدار وضعیت سندباکس باید مقدار بولی (true/false) باشد.");
       }
       saveSandboxConfig(sandboxEnabled);
-      res.json({ success: true, sandboxEnabled: globalSandboxEnabled });
+      res.json({ success: true, sandboxEnabled: globalSandboxEnabled, isProduction: false });
     } catch (err: any) {
       console.error("Error in POST /api/system/sandbox-status:", err);
       return handleServerError(res, err, req.originalUrl || req.url);

@@ -1907,8 +1907,22 @@ export async function bootstrapDatabase() {
     dbMaintenanceError = null;
     console.log("✅ [Bootstrap] MariaDB tables checked and synchronized successfully!");
 
-    // Seed tables if empty
-    await seedDatabaseIfEmpty(db);
+    // Seed tables if empty (Development & Test only! Strictly disabled in production)
+    if (!isProductionEnvironment()) {
+      await seedDatabaseIfEmpty(db);
+    } else {
+      console.log("🔒 [Bootstrap] Production mode detected: Automatic database seeding is strictly DISABLED.");
+      // In production, check if app_users is empty and fail safely without creating insecure accounts
+      try {
+        const [uRows] = (await db.query("SELECT COUNT(*) as count FROM app_users")) as any[];
+        const count = (uRows && uRows[0]?.count !== undefined) ? uRows[0].count : 0;
+        if (count === 0) {
+          console.error("🚨 [Bootstrap Security Alert] Production database 'app_users' table is completely empty! Manual administrator provisioning is required.");
+        }
+      } catch (checkErr: any) {
+        console.warn("⚠️ [Bootstrap] Unable to verify user count in production:", checkErr.message);
+      }
+    }
 
     // Auto-migrate any unhashed passwords in MariaDB
     await migrateDatabasePasswords(db);
@@ -1955,6 +1969,10 @@ export async function bootstrapDatabase() {
 }
 
 async function seedDatabaseIfEmpty(db: mysql.Pool) {
+  if (isProductionEnvironment()) {
+    console.warn("🚨 [Security Guard] seedDatabaseIfEmpty called in production: execution aborted.");
+    return;
+  }
   try {
     // 1. Products
     const [prodRows] = await db.query("SELECT COUNT(*) as count FROM products") as any[];

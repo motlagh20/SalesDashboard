@@ -3,6 +3,7 @@ import crypto from "crypto";
 import dotenv from "dotenv";
 import { getDbPool } from "./database";
 import { sendApiError } from "./errorHandler";
+import { isDefaultPasswordOrMatches } from "./password";
 import {
   clearAuthCookie,
   setAuthCookie,
@@ -215,6 +216,7 @@ declare global {
         agentCode?: string | null;
         shippingCompanyId?: string | null;
         isEnabled?: boolean;
+        mustChangePassword?: boolean;
       };
     }
   }
@@ -479,6 +481,8 @@ export async function authenticate(req: express.Request, res: express.Response, 
       return sendApiError(res, 403, "حساب کاربری شما غیرفعال شده است. با مدیریت تماس بگیرید.");
     }
 
+    const mustChange = isDefaultPasswordOrMatches(user.password) || Boolean(user.mustChangePassword);
+
     // Role and identity strictly come from verified database record
     req.user = {
       id: String(user.id),
@@ -488,8 +492,32 @@ export async function authenticate(req: express.Request, res: express.Response, 
       role: normalizeRole(user.role),
       agentCode: user.agentCode || null,
       shippingCompanyId: user.shippingCompanyId || null,
-      isEnabled: !!user.isEnabled
+      isEnabled: !!user.isEnabled,
+      mustChangePassword: Boolean(mustChange)
     };
+
+    // Mandatory Password Change Backend Enforcement:
+    // If the account is flagged for mandatory password change (or has default password),
+    // strictly deny access to all application data APIs until password is changed.
+    if (mustChange) {
+      const targetUrl = (req.originalUrl || req.url || "").split("?")[0];
+      const normalizedPath = targetUrl.startsWith("/api") ? targetUrl : `/api${targetUrl}`;
+      const allowedPatterns = [
+        new RegExp(`^/api/users/${req.user.id}/change-password$`),
+        /^\/api\/auth\/logout$/,
+        /^\/api\/auth\/me$/,
+        /^\/api\/auth\/unlock$/,
+        /^\/api\/users\/heartbeat$/
+      ];
+      const isAllowed = allowedPatterns.some(pattern => pattern.test(normalizedPath));
+      if (!isAllowed) {
+        return sendApiError(
+          res,
+          403,
+          "جهت حفظ امنیت حساب کاربری، تغییر کلمه عبور پیش‌فرض/موقت الزامی است. دسترسی به سایر بخش‌های سامانه تا زمان تغییر رمز عبور مسدود می‌باشد."
+        );
+      }
+    }
 
     next();
   } catch (err: any) {

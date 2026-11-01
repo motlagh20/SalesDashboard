@@ -83,7 +83,7 @@ export default function ShippingCompanyDashboard({
   askConfirm,
   currentUser,
   onOpenEditProfile,
-  sandboxEnabled = true,
+  sandboxEnabled = false,
 }: ShippingCompanyDashboardProps) {
   // Select which shipping company is simulating/viewing
   const activeCompanies = shippingCompanies.filter(sc => sc.isEnabled);

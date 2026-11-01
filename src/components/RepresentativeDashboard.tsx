@@ -102,7 +102,7 @@ export default function RepresentativeDashboard({
   askConfirm,
   currentUser,
   onOpenEditProfile,
-  sandboxEnabled = true,
+  sandboxEnabled = false,
 }: RepresentativeDashboardProps) {
   const currentAgentObj = agents.find(a => a.alias === selectedAgent || a.agentCode === selectedAgent || a.id === selectedAgent || a.fullName === selectedAgent) || agents[0] || PRESET_AGENTS.find(a => a.alias === selectedAgent) || PRESET_AGENTS[0] || {
     id: 'unknown',

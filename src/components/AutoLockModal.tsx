@@ -73,18 +73,39 @@ export const LockScreenOverlay: React.FC<AutoLockModalProps> = ({
 
     setIsSubmitting(true);
 
-    // Validate password against current logged in user password
-    setTimeout(() => {
-      const correctPassword = currentUser.password || '123456';
-      if (passwordInput === correctPassword || passwordInput === 'admin123') {
-        onUnlock();
-        setPasswordInput('');
-        onShowToast('🔓 قفل صفحه با موفقیت باز شد.', 'success');
-      } else {
-        setErrorMsg('رمز عبور وارد شده اشتباه است. لطفاً دوباره تلاش کنید.');
-      }
-      setIsSubmitting(false);
-    }, 200);
+    // Validate password securely against the dedicated unlock endpoint
+    const token = localStorage.getItem('tabarestan_token');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    fetch('/api/auth/unlock', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ password: passwordInput.trim() })
+    })
+      .then(async res => {
+        if (res.ok) {
+          onUnlock();
+          setPasswordInput('');
+          onShowToast('🔓 قفل صفحه با موفقیت باز شد.', 'success');
+        } else if (res.status === 401) {
+          setErrorMsg('نشست کاری شما منقضی شده است. لطفاً مجدداً وارد حساب کاربری خود شوید.');
+          setTimeout(() => {
+            onLogout();
+          }, 1500);
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setErrorMsg(data.error || data.message || 'رمز عبور وارد شده اشتباه است. لطفاً دوباره تلاش کنید.');
+        }
+      })
+      .catch(() => {
+        setErrorMsg('خطا در برقراری ارتباط با وب‌سرور. لطفاً مجدداً تلاش کنید.');
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+      });
   };
 
   return (
