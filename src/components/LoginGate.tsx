@@ -60,11 +60,17 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
 
       if (res.ok) {
         const data = await res.json();
+        if (data.token) {
+          localStorage.setItem('tabarestan_token', data.token);
+        }
         showToast(`🌸 خوش آمدید، جناب ${data.user.fullName}`, 'success');
-        onLoginSuccess(data.user);
+        onLoginSuccess({
+          ...data.user,
+          mustChangePassword: Boolean(data.mustChangePassword)
+        });
       } else {
         const errorData = await res.json();
-        showToast(errorData.error || 'رمز عبور یا نام کاربری نادرست است.', 'error');
+        showToast(errorData.message || errorData.error || 'رمز عبور یا نام کاربری نادرست است.', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -98,12 +104,17 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
       if (res.ok) {
         const data = await res.json();
         setStep('OTP_INPUT');
-        setReceivedOtp(data.otp);
-        setOtpCode(data.otp); // Pre-fill OTP code on mobile for 1-tap verification
-        showToast('🔑 کد تایید پیامکی صادر گردید.', 'success');
+        const received = data.devOtp || data.otp || null;
+        setReceivedOtp(received);
+        if (received) {
+          setOtpCode(received);
+        } else {
+          setOtpCode('');
+        }
+        showToast('🔑 کد تایید پیامکی با موفقیت صادر گردید.', 'success');
       } else {
         const errorData = await res.json();
-        showToast(errorData.error || 'خطایی در ارسال کد تایید رخ داد.', 'error');
+        showToast(errorData.message || errorData.error || 'خطایی در ارسال کد تایید رخ داد.', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -120,7 +131,7 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
       document.activeElement.blur();
     }
     if (!otpCode.trim()) {
-      showToast('لطفا کد تایید ۴ رقمی را وارد کنید.', 'error');
+      showToast('لطفا کد تایید پیامکی را وارد کنید.', 'error');
       return;
     }
 
@@ -135,11 +146,14 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
 
       if (res.ok) {
         const data = await res.json();
+        if (data.token) {
+          localStorage.setItem('tabarestan_token', data.token);
+        }
         showToast(`🌸 خوش آمدید، جناب ${data.user.fullName}`, 'success');
         onLoginSuccess(data.user);
       } else {
         const errorData = await res.json();
-        showToast(errorData.error || 'کد تایید وارد شده اشتباه است.', 'error');
+        showToast(errorData.message || errorData.error || 'کد تایید وارد شده اشتباه است.', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -169,12 +183,18 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
 
       if (res.ok) {
         const data = await res.json();
-        setRecoveryOtp(data.otp);
+        const received = data.devOtp || data.otp || null;
+        setRecoveryOtp(received);
+        if (received) {
+          setRecoveryCode(received);
+        } else {
+          setRecoveryCode('');
+        }
         setLoginMode('RESET_PASS');
-        showToast('🔑 پیامک شبیه‌ساز بازیابی با موفقیت ارسال شد.', 'success');
+        showToast('🔑 کد تایید پیامکی بازیابی صادر گردید.', 'success');
       } else {
         const errorData = await res.json();
-        showToast(errorData.error || 'کاربری با این شماره همراه یافت نشد.', 'error');
+        showToast(errorData.message || errorData.error || 'کاربری با این شماره همراه یافت نشد.', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -214,7 +234,7 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
         setRecoveryOtp(null);
       } else {
         const errorData = await res.json();
-        showToast(errorData.error || 'کد تایید پیامکی نادرست است.', 'error');
+        showToast(errorData.message || errorData.error || 'کد تایید پیامکی نادرست است.', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -243,11 +263,17 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
 
       if (res.ok) {
         const data = await res.json();
+        if (data.token) {
+          localStorage.setItem('tabarestan_token', data.token);
+        }
         showToast(`🌸 خوش آمدید، جناب ${data.user.fullName}`, 'success');
-        onLoginSuccess(data.user);
+        onLoginSuccess({
+          ...data.user,
+          mustChangePassword: Boolean(data.mustChangePassword)
+        });
       } else {
         const errorData = await res.json();
-        showToast(errorData.error || 'خطا در ورود سریع با این حساب.', 'error');
+        showToast(errorData.message || errorData.error || 'خطا در ورود سریع با این حساب.', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -425,14 +451,14 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                   >
                     اصلاح شماره تلفن
                   </button>
-                  <label className="block text-slate-300 text-xs font-bold">کد تایید ۴ رقمی پیامکی:</label>
+                  <label className="block text-slate-300 text-xs font-bold">کد تایید پیامکی (OTP):</label>
                 </div>
 
                 <div className="relative">
                   <input
                     type="text"
-                    maxLength={4}
-                    placeholder="کد ۴ رقمی پیامک شده"
+                    maxLength={8}
+                    placeholder="کد پیامک شده را وارد کنید"
                     value={otpCode}
                     onChange={(e) => setOtpCode(e.target.value)}
                     disabled={loading}
@@ -515,12 +541,12 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
               )}
 
               <div className="space-y-1">
-                <label className="block text-slate-300 text-xs font-bold">کد تایید ۴ رقمی بازیابی:</label>
+                <label className="block text-slate-300 text-xs font-bold">کد تایید پیامکی بازیابی:</label>
                 <div className="relative">
                   <input
                     type="text"
-                    maxLength={4}
-                    placeholder="کد ۴ رقمی پیامک شده"
+                    maxLength={8}
+                    placeholder="کد پیامک شده را وارد کنید"
                     value={recoveryCode}
                     onChange={(e) => setRecoveryCode(e.target.value)}
                     disabled={loading}

@@ -2,17 +2,46 @@ import mysql from "mysql2/promise";
 import Redis from "ioredis";
 import fs from "fs";
 import path from "path";
+import { DEFAULT_PASSWORD_BCRYPT_HASH, isBcryptHash, hashPasswordSync, migrateDatabasePasswords, generateTemporaryPassword, isDefaultPassword } from "./password";
 
 // Lazy connection instances
 let pool: mysql.Pool | null = null;
 let redis: Redis | null = null;
 
 // Active error logging path
+// Active error logging path and size constraints
 const LOG_FILE_PATH = path.join(process.cwd(), "server", "db_errors.log");
+const MAX_LOG_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB bound
+
+/**
+ * Rotates the database error log file if its size exceeds the specified limit.
+ * Keeps at most 1 rotated backup file (db_errors.log.1) to bound disk usage.
+ */
+export function rotateLogFileIfNeeded(filePath: string = LOG_FILE_PATH, maxBytes: number = MAX_LOG_SIZE_BYTES): boolean {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const stats = fs.statSync(filePath);
+    if (stats.size >= maxBytes) {
+      const backupPath = `${filePath}.1`;
+      try {
+        if (fs.existsSync(backupPath)) {
+          fs.unlinkSync(backupPath);
+        }
+      } catch {}
+      try {
+        fs.renameSync(filePath, backupPath);
+      } catch {
+        fs.truncateSync(filePath, 0);
+      }
+      return true;
+    }
+  } catch {}
+  return false;
+}
 
 /**
  * Writes detailed database/server errors to a persistent log file in the workspace
- * so the user can easily see or retrieve exact SQL failures, duplicate key info, etc.
+ * with bounded log rotation to prevent unbounded disk growth.
  */
 export function writeServerErrorLog(operation: string, error: any, reqBody?: any) {
   try {
@@ -20,6 +49,8 @@ export function writeServerErrorLog(operation: string, error: any, reqBody?: any
     if (!error || error.code === 'ER_DUP_ENTRY' || error.name === 'AbortError' || error.message?.includes('aborted')) {
       return;
     }
+
+    rotateLogFileIfNeeded(LOG_FILE_PATH, MAX_LOG_SIZE_BYTES);
 
     const timestamp = new Date().toISOString();
     const errorDetails = {
@@ -42,24 +73,206 @@ Request Body: ${errorDetails.requestBody}
 Stack Trace: ${errorDetails.stack}
 ----------------------------------------------------------------------\n`;
 
-    fs.mkdir(path.dirname(LOG_FILE_PATH), { recursive: true }, () => {
-      fs.appendFile(LOG_FILE_PATH, logLine, "utf8", () => {});
-    });
+    fs.mkdirSync(path.dirname(LOG_FILE_PATH), { recursive: true });
+    fs.appendFileSync(LOG_FILE_PATH, logLine, "utf8");
   } catch {
     // Silently continue without blocking execution
   }
 }
 
-// Local Mock / Fallback database state & classes
+/**
+ * Detects whether the server is running in a production environment.
+ */
+export function isProductionEnvironment(): boolean {
+  const env = (process.env.NODE_ENV || "").toLowerCase().trim();
+  const appEnv = (process.env.APP_ENV || "").toLowerCase().trim();
+  return env === "production" || appEnv === "production";
+}
+
+/**
+ * Controlled database maintenance error for production outages.
+ */
+export class DatabaseMaintenanceError extends Error {
+  public statusCode: number = 503;
+  public isPublic: boolean = true;
+  constructor(message = "Database service is temporarily unavailable for maintenance. Please try again shortly.") {
+    super(message);
+    this.name = "DatabaseMaintenanceError";
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
+  }
+}
+
+/**
+ * Determines whether a given database error indicates network, connection, or service outage.
+ */
+export function isConnectionError(err: any): boolean {
+  if (!err) return false;
+  if (err instanceof DatabaseMaintenanceError) return true;
+  const code = err.code || err.errno;
+  const connectionCodes = [
+    "ECONNREFUSED",
+    "PROTOCOL_CONNECTION_LOST",
+    "ETIMEDOUT",
+    "EHOSTUNREACH",
+    "ENETUNREACH",
+    "ER_SERVER_SHUTDOWN",
+    "ER_CON_COUNT_ERROR",
+    "ER_ACCESS_DENIED_ERROR",
+    "ER_BAD_DB_ERROR",
+    "POOL_CLOSED",
+    "POOL_ENQUEUELIMIT",
+    "PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR",
+    "EPIPE",
+    "ECONNRESET"
+  ];
+  if (typeof code === "string" && connectionCodes.includes(code)) return true;
+  if (typeof err.message === "string") {
+    const msg = err.message.toLowerCase();
+    if (
+      msg.includes("connection lost") ||
+      msg.includes("econnrefused") ||
+      msg.includes("etimedout") ||
+      msg.includes("server shutdown") ||
+      msg.includes("maintenance mode") ||
+      msg.includes("cannot enqueue") ||
+      msg.includes("pool is closed") ||
+      msg.includes("econnreset")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Database state & failover guards
+let isDbHealthy = false;
+let dbMaintenanceError: DatabaseMaintenanceError | null = null;
 let isFallbackMode = false;
 let mockPoolInstance: MockPool | null = null;
+let recoveryProbeTimer: NodeJS.Timeout | null = null;
+let isProbing = false;
 const JSON_FILE_PATH = path.join(process.cwd(), "server", "salesdashboard.json");
+
+export function markDatabaseHealthy() {
+  const wasUnhealthy = !isDbHealthy;
+  isDbHealthy = true;
+  dbMaintenanceError = null;
+  if (wasUnhealthy) {
+    console.log("✅ [Database Recovery] MariaDB connectivity active and healthy.");
+  }
+  stopRecoveryProbe();
+}
+
+export function markDatabaseUnhealthy(err?: any) {
+  const wasHealthy = isDbHealthy;
+  isDbHealthy = false;
+  dbMaintenanceError = new DatabaseMaintenanceError(
+    "Database service is temporarily unavailable for maintenance. Please try again shortly."
+  );
+  if (wasHealthy) {
+    console.warn("⚠️ [Database Outage] MariaDB is marked UNHEALTHY. Entering maintenance mode.");
+  }
+  startRecoveryProbe();
+}
+
+function startRecoveryProbe() {
+  if (recoveryProbeTimer) return;
+  // Bounded recovery probe: checks connectivity every 3 seconds without flooding MariaDB
+  recoveryProbeTimer = setInterval(async () => {
+    if (isProbing) return;
+    isProbing = true;
+    try {
+      if (!pool) return;
+      await Promise.race([
+        pool.query("SELECT 1"),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 2000))
+      ]);
+      markDatabaseHealthy();
+    } catch {
+      // Still unreachable, wait for next cycle
+    } finally {
+      isProbing = false;
+    }
+  }, 3000);
+  if (recoveryProbeTimer.unref) {
+    recoveryProbeTimer.unref();
+  }
+}
+
+function stopRecoveryProbe() {
+  if (recoveryProbeTimer) {
+    clearInterval(recoveryProbeTimer);
+    recoveryProbeTimer = null;
+  }
+}
+
+export function isDatabaseHealthy(): boolean {
+  if (isProductionEnvironment()) {
+    return isDbHealthy;
+  }
+  if (isFallbackMode) {
+    return true; // Local dev mock database is active
+  }
+  return isDbHealthy;
+}
+
+export async function checkDatabaseHealth(): Promise<boolean> {
+  if (!isProductionEnvironment() && isFallbackMode) {
+    return true;
+  }
+  try {
+    const rawPool = pool || ensurePoolInitialized();
+    await Promise.race([
+      rawPool.query("SELECT 1"),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Database health ping timed out")), 2000)
+      )
+    ]);
+    markDatabaseHealthy();
+    return true;
+  } catch (err: any) {
+    markDatabaseUnhealthy(err);
+    return false;
+  }
+}
+
+export function isFallbackModeActive(): boolean {
+  return isFallbackMode;
+}
+
+// Testing overrides and state resets
+export function setDbHealthyForTesting(healthy: boolean) {
+  isDbHealthy = healthy;
+  if (!healthy) {
+    dbMaintenanceError = new DatabaseMaintenanceError();
+  } else {
+    dbMaintenanceError = null;
+  }
+}
+
+export function setDbPoolForTesting(overridePool: any) {
+  pool = overridePool;
+}
+
+export function resetDatabaseStateForTesting() {
+  isDbHealthy = false;
+  dbMaintenanceError = null;
+  isFallbackMode = false;
+  mockPoolInstance = null;
+  stopRecoveryProbe();
+  pool = null;
+}
 
 // In-memory persistent object cache to eliminate sync disk I/O on every single query
 let inMemoryJsonDataCache: any = null;
 let saveDebounceTimer: NodeJS.Timeout | null = null;
 
 function loadJsonData(): any {
+  if (isProductionEnvironment()) {
+    throw new DatabaseMaintenanceError("Access to local JSON fallback database is strictly forbidden in production. Database is in maintenance mode.");
+  }
   if (inMemoryJsonDataCache) {
     return inMemoryJsonDataCache;
   }
@@ -101,6 +314,14 @@ function loadJsonData(): any {
 }
 
 function saveJsonData(data: any, immediate: boolean = false) {
+  // Requirement 1: Prevent automatic production writes to JSON storage
+  if (isProductionEnvironment()) {
+    const errorMsg = "Production writes to local JSON storage are forbidden to protect data consistency. Database is in maintenance mode.";
+    console.error(`🚨 [Database Guard] ${errorMsg}`);
+    writeServerErrorLog("saveJsonData (Production Guard)", new Error(errorMsg));
+    throw new DatabaseMaintenanceError("Database service is temporarily unavailable for maintenance. Please try again shortly.");
+  }
+
   inMemoryJsonDataCache = data;
   
   const performWrite = () => {
@@ -122,6 +343,9 @@ function saveJsonData(data: any, immediate: boolean = false) {
 }
 
 function seedJsonIfEmpty() {
+  if (isProductionEnvironment()) {
+    return; // Requirement 2: Never seed or write to JSON storage in production
+  }
   const data = loadJsonData();
   let changed = false;
 
@@ -181,16 +405,17 @@ function seedJsonIfEmpty() {
   if (!data.app_users || data.app_users.length === 0) {
     console.log("🌱 [Mock Seed] Seeding default app users...");
     data.app_users = [
-      { id: 'usr-0', username: 'admin', fullName: 'ادمین ارشد نرم‌افزار', phoneNumber: '09120000000', role: 'SYSTEM_ADMIN', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: '123456' },
-      { id: 'usr-1', username: 'manager', fullName: 'آقای احمدی (مدیر بازرگانی)', phoneNumber: '09121111111', role: 'SALES_MANAGER', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: '123456' },
-      { id: 'usr-2', username: 'rep_tehran', fullName: 'آقای حمیدرضا احمدی', phoneNumber: '09120000001', role: 'REPRESENTATIVE', agentCode: 'AG-9081', shippingCompanyId: null, isEnabled: 1, password: '123456' },
-      { id: 'usr-3', username: 'rep_esfahan', fullName: 'آقای علیرضا رجایی', phoneNumber: '09130000002', role: 'REPRESENTATIVE', agentCode: 'AG-6055', shippingCompanyId: null, isEnabled: 1, password: '123456' },
-      { id: 'usr-4', username: 'rep_rasht', fullName: 'آقای سهراب پوربخش', phoneNumber: '09110000003', role: 'REPRESENTATIVE', agentCode: 'AG-2019', shippingCompanyId: null, isEnabled: 1, password: '123456' },
-      { id: 'usr-5', username: 'rep_shiraz', fullName: 'آقای کریم نمازی', phoneNumber: '09170000004', role: 'REPRESENTATIVE', agentCode: 'AG-7023', shippingCompanyId: null, isEnabled: 1, password: '123456' },
-      { id: 'usr-6', username: 'factory', fullName: 'مسئول فروش کارخانه', phoneNumber: '09110000005', role: 'FACTORY_TRANSPORT', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: '123456' },
-      { id: 'usr-7', username: 'shipping_transit', fullName: 'باربری ترانزیت طبرستان', phoneNumber: '09110000006', role: 'SHIPPING_COMPANY', agentCode: null, shippingCompanyId: 'sc-1', isEnabled: 1, password: '123456' },
-      { id: 'usr-8', username: 'warehouse', fullName: 'مسئول انبار محصول (بارگیری و صدور حواله)', phoneNumber: '09110000008', role: 'PRODUCT_WAREHOUSE', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: '123456' },
-      { id: 'usr-9', username: 'security_gate', fullName: 'افسر انتظامات و حراست گیت خروج', phoneNumber: '09110000009', role: 'SECURITY_GATE', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: '123456' }
+      { id: 'usr-0', username: 'admin', fullName: 'ادمین ارشد نرم‌افزار', phoneNumber: '09120000000', role: 'SYSTEM_ADMIN', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
+      { id: 'usr-1', username: 'manager', fullName: 'آقای احمدی (مدیر بازرگانی)', phoneNumber: '09121111111', role: 'SALES_MANAGER', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
+      { id: 'usr-2', username: 'rep_tehran', fullName: 'آقای حمیدرضا احمدی', phoneNumber: '09120000001', role: 'REPRESENTATIVE', agentCode: 'AG-9081', shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
+      { id: 'usr-3', username: 'rep_esfahan', fullName: 'آقای علیرضا رجایی', phoneNumber: '09130000002', role: 'REPRESENTATIVE', agentCode: 'AG-6055', shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
+      { id: 'usr-4', username: 'rep_rasht', fullName: 'آقای سهراب پوربخش', phoneNumber: '09110000003', role: 'REPRESENTATIVE', agentCode: 'AG-2019', shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
+      { id: 'usr-5', username: 'rep_shiraz', fullName: 'آقای کریم نمازی', phoneNumber: '09170000004', role: 'REPRESENTATIVE', agentCode: 'AG-7023', shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
+      { id: 'usr-6', username: 'factory', fullName: 'مسئول فروش کارخانه', phoneNumber: '09110000005', role: 'FACTORY_TRANSPORT', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
+      { id: 'usr-7', username: 'shipping_transit', fullName: 'باربری ترانزیت طبرستان', phoneNumber: '09110000006', role: 'SHIPPING_COMPANY', agentCode: null, shippingCompanyId: 'sc-1', isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
+      { id: 'usr-72', username: 'shipping_zayandeh', fullName: 'باربری زاینده‌رود طبرستان', phoneNumber: '09130000007', role: 'SHIPPING_COMPANY', agentCode: null, shippingCompanyId: 'sc-2', isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
+      { id: 'usr-8', username: 'warehouse', fullName: 'مسئول انبار محصول (بارگیری و صدور حواله)', phoneNumber: '09110000008', role: 'PRODUCT_WAREHOUSE', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
+      { id: 'usr-9', username: 'security_gate', fullName: 'افسر انتظامات و حراست گیت خروج', phoneNumber: '09110000009', role: 'SECURITY_GATE', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH }
     ];
     changed = true;
   } else {
@@ -207,7 +432,7 @@ function seedJsonIfEmpty() {
         agentCode: null,
         shippingCompanyId: null,
         isEnabled: 1,
-        password: '123456'
+        password: DEFAULT_PASSWORD_BCRYPT_HASH
       });
       changed = true;
     }
@@ -225,7 +450,7 @@ function seedJsonIfEmpty() {
         agentCode: null,
         shippingCompanyId: null,
         isEnabled: 1,
-        password: '123456'
+        password: DEFAULT_PASSWORD_BCRYPT_HASH
       });
       changed = true;
     }
@@ -243,7 +468,7 @@ function seedJsonIfEmpty() {
         agentCode: null,
         shippingCompanyId: null,
         isEnabled: 1,
-        password: '123456'
+        password: DEFAULT_PASSWORD_BCRYPT_HASH
       });
       changed = true;
     }
@@ -255,6 +480,9 @@ function seedJsonIfEmpty() {
 }
 
 function executeQuery(sql: string, values: any[] = []): any {
+  if (isProductionEnvironment()) {
+    throw new DatabaseMaintenanceError("Mock query execution is strictly forbidden in production. Database is in maintenance mode.");
+  }
   const cleanSql = sql.trim().replace(/\s+/g, " ");
   const jsonData = loadJsonData();
 
@@ -263,11 +491,69 @@ function executeQuery(sql: string, values: any[] = []): any {
   }
 
   // APP_USERS CUSTOM MOCK QUERIES
-  if (/SELECT\s+\*\s+FROM\s+app_users/i.test(cleanSql)) {
-    let result = jsonData.app_users || [];
+  if (/SELECT\s+.*?\s+FROM\s+app_users/i.test(cleanSql)) {
+    const allUsers = jsonData.app_users || [];
+
+    // 1. WHERE phoneNumber = ? AND id != ? (or id <> ?)
+    if (/WHERE\s+phoneNumber\s*=\s*\?\s*AND\s*id\s*(?:!=|<>)\s*\?/i.test(cleanSql)) {
+      const targetPhone = values[0] ? String(values[0]).trim().toLowerCase() : "";
+      const excludeId = values[1] ? String(values[1]).trim() : "";
+      const matched = allUsers.filter((u: any) =>
+        u.phoneNumber && String(u.phoneNumber).trim().toLowerCase() === targetPhone &&
+        String(u.id).trim() !== excludeId
+      );
+      return [matched, []];
+    }
+
+    // 2. WHERE (username = ? OR phoneNumber = ?) AND id != ?
+    if (/WHERE\s*\(?\s*username\s*=\s*\?\s*OR\s*phoneNumber\s*=\s*\?\s*\)?\s*AND\s*id\s*(?:!=|<>)\s*\?/i.test(cleanSql)) {
+      const uName = values[0] ? String(values[0]).trim().toLowerCase() : "";
+      const phone = values[1] ? String(values[1]).trim().toLowerCase() : "";
+      const excludeId = values[2] ? String(values[2]).trim() : "";
+      const matched = allUsers.filter((u: any) =>
+        ((u.username && String(u.username).trim().toLowerCase() === uName) ||
+         (u.phoneNumber && String(u.phoneNumber).trim().toLowerCase() === phone)) &&
+        String(u.id).trim() !== excludeId
+      );
+      return [matched, []];
+    }
+
+    // 3. WHERE username = ? OR phoneNumber = ?
+    if (/WHERE\s+username\s*=\s*\?\s*OR\s*phoneNumber\s*=\s*\?/i.test(cleanSql)) {
+      const uName = values[0] ? String(values[0]).trim().toLowerCase() : "";
+      const phone = values[1] ? String(values[1]).trim().toLowerCase() : "";
+      const matched = allUsers.filter((u: any) =>
+        (u.username && String(u.username).trim().toLowerCase() === uName) ||
+        (u.phoneNumber && String(u.phoneNumber).trim().toLowerCase() === phone)
+      );
+      return [matched, []];
+    }
+
+    // 4. WHERE id = ?
+    if (/WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
+      const targetId = values[0] ? String(values[0]).trim() : "";
+      const matched = allUsers.filter((u: any) => u.id && String(u.id).trim() === targetId);
+      return [matched, []];
+    }
+
+    // 5. WHERE username = ?
+    if (/WHERE\s+username\s*=\s*\?/i.test(cleanSql)) {
+      const uName = values[0] ? String(values[0]).trim().toLowerCase() : "";
+      const matched = allUsers.filter((u: any) => u.username && String(u.username).trim().toLowerCase() === uName);
+      return [matched, []];
+    }
+
+    // 6. WHERE phoneNumber = ?
+    if (/WHERE\s+phoneNumber\s*=\s*\?/i.test(cleanSql)) {
+      const phone = values[0] ? String(values[0]).trim().toLowerCase() : "";
+      const matched = allUsers.filter((u: any) => u.phoneNumber && String(u.phoneNumber).trim().toLowerCase() === phone);
+      return [matched, []];
+    }
+
+    // 7. General search / fallback
     if (values && values.length > 0) {
       const searchTerms = values.map((v) => (v ? String(v).trim().toLowerCase() : ""));
-      const matched = result.filter((u: any) => {
+      const matched = allUsers.filter((u: any) => {
         return searchTerms.some((term) => {
           if (!term) return false;
           return (
@@ -280,15 +566,29 @@ function executeQuery(sql: string, values: any[] = []): any {
       });
       return [matched, []];
     }
-    return [result, []];
+    return [allUsers, []];
   }
 
   if (/INSERT\s+INTO\s+app_users/i.test(cleanSql)) {
-    let id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, password;
-    if (values.length === 9) {
-      [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, , password] = values;
-    } else {
+    let id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled = 1, password, mustChangePassword = 0;
+    if (values.length === 10) {
+      [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password, mustChangePassword] = values;
+    } else if (values.length === 9) {
+      if (/mustChangePassword/i.test(cleanSql)) {
+        [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, password, mustChangePassword] = values;
+      } else {
+        [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password] = values;
+      }
+    } else if (values.length === 8) {
       [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, password] = values;
+    } else if (values.length === 6) {
+      [id, username, fullName, phoneNumber, agentCode, password] = values;
+      role = /REPRESENTATIVE/i.test(cleanSql) ? 'REPRESENTATIVE' : (/SHIPPING_COMPANY/i.test(cleanSql) ? 'SHIPPING_COMPANY' : 'USER');
+      if (role === 'SHIPPING_COMPANY') {
+        shippingCompanyId = agentCode;
+        agentCode = null;
+      }
+      mustChangePassword = 1;
     }
     if (jsonData.app_users.some((u: any) => u.username === username || u.phoneNumber === phoneNumber)) {
       const err: any = new Error("Duplicate entry to users");
@@ -296,6 +596,16 @@ function executeQuery(sql: string, values: any[] = []): any {
       err.errno = 1062;
       throw err;
     }
+    let finalPassword = password;
+    let finalMustChange = Number(mustChangePassword ?? 0);
+    if (!finalPassword || isDefaultPassword(finalPassword)) {
+      const tempPass = generateTemporaryPassword();
+      finalPassword = hashPasswordSync(tempPass);
+      finalMustChange = 1;
+    } else if (!isBcryptHash(finalPassword)) {
+      finalPassword = hashPasswordSync(finalPassword);
+    }
+
     jsonData.app_users.push({
       id,
       username,
@@ -304,17 +614,18 @@ function executeQuery(sql: string, values: any[] = []): any {
       role,
       agentCode: agentCode || null,
       shippingCompanyId: shippingCompanyId || null,
-      isEnabled: 1,
-      password: password || "123456"
+      isEnabled: Number(isEnabled ?? 1),
+      password: finalPassword,
+      mustChangePassword: finalMustChange
     });
     saveJsonData(jsonData);
     return [{ affectedRows: 1 }];
   }
 
   if (/UPDATE\s+app_users\s+SET/i.test(cleanSql)) {
-    if (/isEnabled\s+=\s+NOT\s+isEnabled/i.test(cleanSql) || /isEnabled\s+=\s+\?/i.test(cleanSql)) {
-      const isEnabledValue = /isEnabled\s+=\s+\?/i.test(cleanSql) ? values[0] : null;
-      const id = /isEnabled\s+=\s+\?/i.test(cleanSql) ? (isEnabledValue !== null ? values[1] : values[0]) : values[0];
+    if (/^\s*UPDATE\s+app_users\s+SET\s+isEnabled\s*=/i.test(cleanSql)) {
+      const isEnabledValue = /isEnabled\s*=\s*\?/i.test(cleanSql) ? values[0] : null;
+      const id = /isEnabled\s*=\s*\?/i.test(cleanSql) ? (isEnabledValue !== null ? values[1] : values[0]) : values[0];
       const usr = jsonData.app_users.find((u: any) => u.id === id);
       if (usr) {
         if (isEnabledValue !== null) {
@@ -324,18 +635,30 @@ function executeQuery(sql: string, values: any[] = []): any {
         }
         saveJsonData(jsonData);
       }
-    } else if (/password\s+=\s+\?\s+WHERE\s+phoneNumber\s+=\s+\?/i.test(cleanSql)) {
-      const [newPassword, phoneNumber] = values;
-      const usr = jsonData.app_users.find((u: any) => u.phoneNumber === phoneNumber);
-      if (usr) {
-        usr.password = newPassword;
-        saveJsonData(jsonData);
-      }
-    } else if (/password\s+=\s+\?\s+WHERE\s+id\s+=\s+\?/i.test(cleanSql)) {
-      const [newPassword, id] = values;
+    } else if (/password\s*=\s*\?/i.test(cleanSql) && /WHERE\s+id\s*=\s*\?/i.test(cleanSql) && values.length <= 3) {
+      const newPassword = values[0];
+      const id = values[values.length - 1];
       const usr = jsonData.app_users.find((u: any) => u.id === id);
       if (usr) {
-        usr.password = newPassword;
+        usr.password = isBcryptHash(newPassword) ? newPassword : hashPasswordSync(newPassword);
+        if (/mustChangePassword\s*=\s*0/i.test(cleanSql)) {
+          usr.mustChangePassword = 0;
+        } else if (/mustChangePassword\s*=\s*1/i.test(cleanSql)) {
+          usr.mustChangePassword = 1;
+        } else if (/mustChangePassword\s*=\s*\?/i.test(cleanSql) && values.length === 3) {
+          usr.mustChangePassword = Number(values[1]);
+        }
+        saveJsonData(jsonData);
+      }
+    } else if (/password\s*=\s*\?/i.test(cleanSql) && /WHERE\s+phoneNumber\s*=\s*\?/i.test(cleanSql) && values.length <= 3) {
+      const newPassword = values[0];
+      const phoneNumber = values[values.length - 1];
+      const usr = jsonData.app_users.find((u: any) => u.phoneNumber === phoneNumber);
+      if (usr) {
+        usr.password = isBcryptHash(newPassword) ? newPassword : hashPasswordSync(newPassword);
+        if (/mustChangePassword\s*=\s*0/i.test(cleanSql)) {
+          usr.mustChangePassword = 0;
+        }
         saveJsonData(jsonData);
       }
     } else if (/phoneNumber\s+=\s+\?\s+WHERE/i.test(cleanSql)) {
@@ -362,32 +685,29 @@ function executeQuery(sql: string, values: any[] = []): any {
         saveJsonData(jsonData);
       }
     } else {
-      const hasPassword = /password\s+=\s+\?/i.test(cleanSql);
-      if (hasPassword) {
-        const [username, fullName, phoneNumber, role, agentCode, shippingCompanyId, password, id] = values;
-        const usr = jsonData.app_users.find((u: any) => u.id === id);
-        if (usr) {
-          usr.username = username;
-          usr.fullName = fullName;
-          usr.phoneNumber = phoneNumber;
-          usr.role = role;
-          usr.agentCode = agentCode || null;
-          usr.shippingCompanyId = shippingCompanyId || null;
-          usr.password = password;
-          saveJsonData(jsonData);
+      const id = values[values.length - 1];
+      const usr = jsonData.app_users.find((u: any) => u.id === id);
+      if (usr) {
+        let idx = 0;
+        if (/username\s*=\s*\?/i.test(cleanSql)) usr.username = values[idx++];
+        if (/fullName\s*=\s*\?/i.test(cleanSql)) usr.fullName = values[idx++];
+        if (/phoneNumber\s*=\s*\?/i.test(cleanSql)) usr.phoneNumber = values[idx++];
+        if (/role\s*=\s*\?/i.test(cleanSql)) usr.role = values[idx++];
+        if (/agentCode\s*=\s*\?/i.test(cleanSql)) usr.agentCode = values[idx++] || null;
+        if (/shippingCompanyId\s*=\s*\?/i.test(cleanSql)) usr.shippingCompanyId = values[idx++] || null;
+        if (/isEnabled\s*=\s*\?/i.test(cleanSql)) usr.isEnabled = Number(values[idx++]);
+        if (/password\s*=\s*\?/i.test(cleanSql)) {
+          const rawPassword = values[idx++];
+          usr.password = isBcryptHash(rawPassword) ? rawPassword : hashPasswordSync(rawPassword);
         }
-      } else {
-        const [username, fullName, phoneNumber, role, agentCode, shippingCompanyId, id] = values;
-        const usr = jsonData.app_users.find((u: any) => u.id === id);
-        if (usr) {
-          usr.username = username;
-          usr.fullName = fullName;
-          usr.phoneNumber = phoneNumber;
-          usr.role = role;
-          usr.agentCode = agentCode || null;
-          usr.shippingCompanyId = shippingCompanyId || null;
-          saveJsonData(jsonData);
+        if (/mustChangePassword\s*=\s*\?/i.test(cleanSql)) {
+          usr.mustChangePassword = Number(values[idx++]);
+        } else if (/mustChangePassword\s*=\s*0/i.test(cleanSql)) {
+          usr.mustChangePassword = 0;
+        } else if (/mustChangePassword\s*=\s*1/i.test(cleanSql)) {
+          usr.mustChangePassword = 1;
         }
+        saveJsonData(jsonData);
       }
     }
     return [{ affectedRows: 1 }];
@@ -421,9 +741,24 @@ function executeQuery(sql: string, values: any[] = []): any {
     return [list, []];
   }
 
-  // 4. SELECT * FROM orders ORDER BY...
+  // 4. SELECT * FROM orders (supports WHERE agentCode = ?, WHERE shippingCompanyId = ?, WHERE 1 = 0, WHERE id = ?)
   if (/SELECT\s+\*\s+FROM\s+orders/i.test(cleanSql)) {
-    const list = [...jsonData.orders].sort((a, b) => {
+    let list = [...jsonData.orders];
+
+    if (/WHERE\s+1\s*=\s*0/i.test(cleanSql)) {
+      list = [];
+    } else if (/WHERE\s+agentCode\s*=\s*\?/i.test(cleanSql)) {
+      const targetAgentCode = values[0];
+      list = list.filter((o: any) => o.agentCode === targetAgentCode);
+    } else if (/WHERE\s+shippingCompanyId\s*=\s*\?/i.test(cleanSql)) {
+      const targetScId = values[0];
+      list = list.filter((o: any) => o.shippingCompanyId === targetScId);
+    } else if (/WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
+      const targetId = values[0];
+      list = list.filter((o: any) => o.id === targetId);
+    }
+
+    list.sort((a, b) => {
       if (a.priorityIndex !== b.priorityIndex) {
         return (a.priorityIndex || 0) - (b.priorityIndex || 0);
       }
@@ -432,9 +767,21 @@ function executeQuery(sql: string, values: any[] = []): any {
     return [list, []];
   }
 
-  // 5. SELECT * FROM order_history ORDER BY...
+  // 4b. SELECT ... FROM orders WHERE id = ?
+  if (/SELECT\s+.*?\s+FROM\s+orders\s+WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
+    const targetId = values[0];
+    const ord = jsonData.orders.find((o: any) => o.id === targetId);
+    return [ord ? [ord] : [], []];
+  }
+
+  // 5. SELECT * FROM order_history (supports WHERE orderId IN (?))
   if (/SELECT\s+\*\s+FROM\s+order_history/i.test(cleanSql)) {
-    const list = [...jsonData.order_history].sort((a, b) => {
+    let list = [...jsonData.order_history];
+    if (/WHERE\s+orderId\s+IN/i.test(cleanSql) && values[0]) {
+      const allowedIds = new Set(Array.isArray(values[0]) ? values[0] : [values[0]]);
+      list = list.filter((h: any) => allowedIds.has(h.orderId));
+    }
+    list.sort((a, b) => {
       return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
     });
     return [list, []];
@@ -975,10 +1322,21 @@ function executeQuery(sql: string, values: any[] = []): any {
 }
 
 class MockPool {
+  constructor() {
+    if (isProductionEnvironment()) {
+      throw new DatabaseMaintenanceError("MockPool cannot be initialized in production. Database is in maintenance mode.");
+    }
+  }
   async getConnection() {
+    if (isProductionEnvironment()) {
+      throw new DatabaseMaintenanceError("Database service is temporarily unavailable for maintenance. Please try again shortly.");
+    }
     return new MockConnection();
   }
   async query(sql: string, values?: any[]) {
+    if (isProductionEnvironment()) {
+      throw new DatabaseMaintenanceError("Database service is temporarily unavailable for maintenance. Please try again shortly.");
+    }
     return executeQuery(sql, values);
   }
 }
@@ -989,18 +1347,86 @@ class MockConnection {
   async rollback() {}
   async release() {}
   async query(sql: string, values?: any[]) {
+    if (isProductionEnvironment()) {
+      throw new DatabaseMaintenanceError("Database service is temporarily unavailable for maintenance. Please try again shortly.");
+    }
     return executeQuery(sql, values);
   }
 }
 
+function wrapPoolWithHealthTracking(rawPool: mysql.Pool): mysql.Pool {
+  const origQuery = rawPool.query.bind(rawPool);
+  const origExecute = rawPool.execute ? rawPool.execute.bind(rawPool) : origQuery;
+  const origGetConnection = rawPool.getConnection.bind(rawPool);
+
+  rawPool.query = async function(...args: any[]) {
+    const isProbe = typeof args[0] === "string" && args[0].trim().toUpperCase() === "SELECT 1";
+    if (!isProbe && isProductionEnvironment() && (!isDbHealthy && dbMaintenanceError)) {
+      throw dbMaintenanceError;
+    }
+    try {
+      const result = await (origQuery as any)(...args);
+      if (!isDbHealthy) {
+        markDatabaseHealthy();
+      }
+      return result;
+    } catch (err: any) {
+      if (isConnectionError(err)) {
+        markDatabaseUnhealthy(err);
+        writeServerErrorLog("Database Query Failure", err);
+        throw new DatabaseMaintenanceError("Database service is temporarily unavailable for maintenance. Please try again shortly.");
+      }
+      throw err;
+    }
+  } as any;
+
+  rawPool.execute = async function(...args: any[]) {
+    if (isProductionEnvironment() && (!isDbHealthy && dbMaintenanceError)) {
+      throw dbMaintenanceError;
+    }
+    try {
+      const result = await (origExecute as any)(...args);
+      if (!isDbHealthy) {
+        markDatabaseHealthy();
+      }
+      return result;
+    } catch (err: any) {
+      if (isConnectionError(err)) {
+        markDatabaseUnhealthy(err);
+        writeServerErrorLog("Database Execute Failure", err);
+        throw new DatabaseMaintenanceError("Database service is temporarily unavailable for maintenance. Please try again shortly.");
+      }
+      throw err;
+    }
+  } as any;
+
+  rawPool.getConnection = async function() {
+    if (isProductionEnvironment() && (!isDbHealthy && dbMaintenanceError)) {
+      throw dbMaintenanceError;
+    }
+    try {
+      const conn = await origGetConnection();
+      if (!isDbHealthy) {
+        markDatabaseHealthy();
+      }
+      return conn;
+    } catch (err: any) {
+      if (isConnectionError(err)) {
+        markDatabaseUnhealthy(err);
+        writeServerErrorLog("Database Connection Failure", err);
+        throw new DatabaseMaintenanceError("Database service is temporarily unavailable for maintenance. Please try again shortly.");
+      }
+      throw err;
+    }
+  };
+
+  return rawPool;
+}
+
 /**
- * Returns the MariaDB (MySQL-compatible) connection pool.
- * Initializes the pool lazily on the first request.
+ * Initializes the MariaDB connection pool if not already active.
  */
-export function getDbPool(): mysql.Pool {
-  if (isFallbackMode && mockPoolInstance) {
-    return mockPoolInstance as any;
-  }
+export function ensurePoolInitialized(): mysql.Pool {
   if (!pool) {
     const host = process.env.DB_HOST || "localhost";
     const port = Number(process.env.DB_PORT) || 3306;
@@ -1014,7 +1440,7 @@ export function getDbPool(): mysql.Pool {
 
     console.log(`[Database] Initializing MariaDB Connection Pool on ${host}:${port} (${database})...`);
     
-    pool = mysql.createPool({
+    const rawPool = mysql.createPool({
       host,
       port,
       user,
@@ -1022,13 +1448,43 @@ export function getDbPool(): mysql.Pool {
       database,
       waitForConnections: true,
       connectionLimit: 15,
-      queueLimit: 0,
+      queueLimit: 100, // Bounded queue to avoid memory exhaustion during outages
       enableKeepAlive: true,
       keepAliveInitialDelay: 10000,
-      connectTimeout: 2000,
+      connectTimeout: 5000, // Bounded 5s connect timeout
     });
+
+    (rawPool as any).on("error", (err: any) => {
+      console.error("❌ [MariaDB Pool Error]:", err?.message || err);
+      markDatabaseUnhealthy(err);
+      writeServerErrorLog("MariaDB Pool Error", err);
+    });
+
+    pool = wrapPoolWithHealthTracking(rawPool);
   }
   return pool;
+}
+
+/**
+ * Returns the MariaDB (MySQL-compatible) connection pool.
+ * Initializes the pool lazily on the first request with bounded timeouts and queue limits.
+ */
+export function getDbPool(): mysql.Pool {
+  // Requirement 1 & 4: In production, never return mock/JSON pool; throw maintenance error if DB is down
+  if (isProductionEnvironment()) {
+    if (isFallbackMode) {
+      throw new DatabaseMaintenanceError("Database service is temporarily unavailable for maintenance. Please try again shortly.");
+    }
+    if (!isDbHealthy && dbMaintenanceError) {
+      throw dbMaintenanceError;
+    }
+  } else {
+    // In development, allow local mock pool
+    if (isFallbackMode && mockPoolInstance) {
+      return mockPoolInstance as any;
+    }
+  }
+  return ensurePoolInitialized();
 }
 
 /**
@@ -1077,6 +1533,24 @@ class SafeRedisWrapper {
     } catch (err: any) {
       console.warn(`⚠️ [Redis Safe Wrapper] Error in DEL ${key}:`, err.message);
       return 0;
+    }
+  }
+
+  async incr(key: string): Promise<number> {
+    try {
+      return await this.instance.incr(key);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in INCR ${key}:`, err.message);
+      return 0;
+    }
+  }
+
+  async ttl(key: string): Promise<number> {
+    try {
+      return await this.instance.ttl(key);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in TTL ${key}:`, err.message);
+      return -2;
     }
   }
 }
@@ -1174,7 +1648,7 @@ async function ensureIndexExists(db: mysql.Pool, tableName: string, indexName: s
  */
 export async function bootstrapDatabase() {
   try {
-    const db = getDbPool();
+    const db = pool || ensurePoolInitialized();
     
     // Quick test query to verify MariaDB is up and reachable
     await db.query("SELECT 1");
@@ -1354,7 +1828,8 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "app_users", "agentCode", "VARCHAR(50) NULL");
     await ensureColumnExists(db, "app_users", "shippingCompanyId", "VARCHAR(100) NULL");
     await ensureColumnExists(db, "app_users", "isEnabled", "TINYINT(1) DEFAULT 1");
-    await ensureColumnExists(db, "app_users", "password", "VARCHAR(255) DEFAULT '123456'");
+    await ensureColumnExists(db, "app_users", "password", `VARCHAR(255) DEFAULT '${DEFAULT_PASSWORD_BCRYPT_HASH}'`);
+    await ensureColumnExists(db, "app_users", "mustChangePassword", "TINYINT(1) DEFAULT 0");
     await ensureColumnExists(db, "app_users", "lastSeenAt", "VARCHAR(50) NULL");
 
     // Agents table columns
@@ -1421,14 +1896,22 @@ export async function bootstrapDatabase() {
     await ensureIndexExists(db, "user_activity_logs", "idx_ual_created", "createdAt DESC");
     await ensureIndexExists(db, "orders", "idx_orders_created", "createdAt DESC");
     await ensureIndexExists(db, "orders", "idx_orders_priority", "priorityIndex ASC");
+    await ensureIndexExists(db, "orders", "idx_orders_agentcode", "agentCode");
+    await ensureIndexExists(db, "orders", "idx_orders_shippingcompany", "shippingCompanyId");
     await ensureIndexExists(db, "order_history", "idx_oh_orderid", "orderId");
     await ensureIndexExists(db, "app_users", "idx_users_username", "username");
     await ensureIndexExists(db, "app_users", "idx_users_phone", "phoneNumber");
 
+    isDbHealthy = true;
+    isFallbackMode = false;
+    dbMaintenanceError = null;
     console.log("✅ [Bootstrap] MariaDB tables checked and synchronized successfully!");
 
     // Seed tables if empty
     await seedDatabaseIfEmpty(db);
+
+    // Auto-migrate any unhashed passwords in MariaDB
+    await migrateDatabasePasswords(db);
 
     // Test Redis connectivity if configured
     const redisClient = getRedisClient();
@@ -1444,11 +1927,30 @@ export async function bootstrapDatabase() {
       }
     }
   } catch (error: any) {
-    console.error("⚠️ [Bootstrap] Database connectivity is not ready yet because:", error.message);
-    console.info("⚡ [Bootstrap] Automatically switching to local JSON-file fallback database mode!");
+    console.error("⚠️ [Bootstrap] MariaDB connectivity failed:", error.message);
+    writeServerErrorLog("Bootstrap MariaDB", error);
+
+    // Requirement 1 & 4: In production, NEVER silently switch to JSON storage. Return controlled maintenance state.
+    if (isProductionEnvironment()) {
+      console.error("🚨 [Bootstrap] PRODUCTION MODE DETECTED: Automatic failover to local JSON storage is STRICTLY FORBIDDEN to protect data consistency.");
+      markDatabaseUnhealthy(error);
+      isFallbackMode = false;
+      mockPoolInstance = null;
+      return;
+    }
+
+    // Requirement 2 & 5: In development mode only, allow local JSON mock database mode for developer workflow
+    console.info("⚡ [Bootstrap] [DEVELOPMENT ONLY] MariaDB is offline. Switching to local JSON mock database mode.");
+    try {
+      if (pool) {
+        await pool.end();
+      }
+    } catch {}
+    pool = null;
     isFallbackMode = true;
     mockPoolInstance = new MockPool();
     seedJsonIfEmpty();
+    await migrateDatabasePasswords(mockPoolInstance);
   }
 }
 
@@ -1482,15 +1984,16 @@ async function seedDatabaseIfEmpty(db: mysql.Pool) {
     if (userCount === 0) {
       console.log("🌱 [Seed] Seeding default app users...");
       const dummyUsers = [
-        ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, '123456'],
-        ['usr-1', 'manager', 'آقای احمدی (مدیر بازرگانی)', '09121111111', 'SALES_MANAGER', null, null, 1, '123456'],
-        ['usr-2', 'rep_tehran', 'آقای حمیدرضا احمدی', '09120000001', 'REPRESENTATIVE', 'AG-9081', null, 1, '123456'],
-        ['usr-3', 'rep_esfahan', 'آقای علیرضا رجایی', '09130000002', 'REPRESENTATIVE', 'AG-6055', null, 1, '123456'],
-        ['usr-4', 'rep_rasht', 'آقای سهراب پوربخش', '09110000003', 'REPRESENTATIVE', 'AG-2019', null, 1, '123456'],
-        ['usr-5', 'rep_shiraz', 'آقای کریم نمازی', '09170000004', 'REPRESENTATIVE', 'AG-7023', null, 1, '123456'],
-        ['usr-6', 'factory', 'مسئول اول فروش کارخانه', '09110000005', 'FACTORY_TRANSPORT', null, null, 1, '123456'],
-        ['usr-62', 'factory2', 'مسئول دوم فروش کارخانه', '09110000007', 'FACTORY_TRANSPORT', null, null, 1, '123456'],
-        ['usr-7', 'shipping_transit', 'باربری ترانزیت طبرستان', '09110000006', 'SHIPPING_COMPANY', null, 'sc-1', 1, '123456']
+        ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+        ['usr-1', 'manager', 'آقای احمدی (مدیر بازرگانی)', '09121111111', 'SALES_MANAGER', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+        ['usr-2', 'rep_tehran', 'آقای حمیدرضا احمدی', '09120000001', 'REPRESENTATIVE', 'AG-9081', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+        ['usr-3', 'rep_esfahan', 'آقای علیرضا رجایی', '09130000002', 'REPRESENTATIVE', 'AG-6055', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+        ['usr-4', 'rep_rasht', 'آقای سهراب پوربخش', '09110000003', 'REPRESENTATIVE', 'AG-2019', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+        ['usr-5', 'rep_shiraz', 'آقای کریم نمازی', '09170000004', 'REPRESENTATIVE', 'AG-7023', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+        ['usr-6', 'factory', 'مسئول اول فروش کارخانه', '09110000005', 'FACTORY_TRANSPORT', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+        ['usr-62', 'factory2', 'مسئول دوم فروش کارخانه', '09110000007', 'FACTORY_TRANSPORT', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+        ['usr-7', 'shipping_transit', 'باربری ترانزیت طبرستان', '09110000006', 'SHIPPING_COMPANY', null, 'sc-1', 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+        ['usr-72', 'shipping_zayandeh', 'باربری زاینده‌رود طبرستان', '09130000007', 'SHIPPING_COMPANY', null, 'sc-2', 1, DEFAULT_PASSWORD_BCRYPT_HASH]
       ];
       for (const u of dummyUsers) {
         await db.query(
@@ -1506,7 +2009,7 @@ async function seedDatabaseIfEmpty(db: mysql.Pool) {
         console.log("🛡️ [Seed] Auto-inserting missing SYSTEM_ADMIN (admin) user in SQL database...");
         await db.query(
           "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, '123456']
+          ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
         );
       }
     }
@@ -1598,9 +2101,15 @@ export async function getUserActivityLogs(limit = 100): Promise<any[]> {
       if (Array.isArray(rows) && rows.length > 0) {
         return rows;
       }
-    } catch {
-      // Silently fall back to in-memory logs
+    } catch (err: any) {
+      if (isProductionEnvironment()) {
+        throw new DatabaseMaintenanceError("Cannot retrieve activity logs while database is offline.");
+      }
+      // Silently fall back to in-memory logs in development only
     }
+  }
+  if (isProductionEnvironment()) {
+    return [];
   }
   return inMemoryActivityLogs.slice(0, limit);
 }

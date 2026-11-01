@@ -571,7 +571,7 @@ export default function ManagerDashboard({
         username: newUsername,
         fullName: newUserFullName,
         phoneNumber: newUserPhone,
-        role: newUserRole,
+        role: newUserRole || 'REPRESENTATIVE',
         agentCode: newUserRole === 'REPRESENTATIVE' ? newUserAgentCode : null,
         shippingCompanyId: newUserRole === 'SHIPPING_COMPANY' ? newUserSCId : null,
       };
@@ -605,7 +605,7 @@ export default function ManagerDashboard({
           const ct = res.headers.get('content-type') || '';
           if (ct.includes('application/json')) {
             const errData = await res.json();
-            errorMsg = errData.error || errorMsg;
+            errorMsg = errData.message || errData.error || errorMsg;
           }
         } catch {}
         showToast(errorMsg, 'error');

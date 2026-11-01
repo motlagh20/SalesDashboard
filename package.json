@@ -4,17 +4,18 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
+    "dev": "NODE_OPTIONS='--max-old-space-size=2048' tsx server.ts",
+    "build": "NODE_OPTIONS='--max-old-space-size=2048' vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "start": "NODE_OPTIONS='--max-old-space-size=2048' node dist/server.cjs",
     "preview": "vite preview",
-    "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "NODE_OPTIONS='--max-old-space-size=2048' tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "bcryptjs": "^3.0.3",
     "compression": "^1.8.1",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
@@ -25,10 +26,10 @@
     "mysql2": "^3.22.5",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "vite": "^6.2.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
     "@types/compression": "^1.8.1",
     "@types/express": "^4.17.21",
     "@types/leaflet": "^1.9.22",

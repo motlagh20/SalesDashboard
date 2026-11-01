@@ -6,7 +6,64 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import os from "os";
-import { bootstrapDatabase, getDbPool, getRedisClient, writeServerErrorLog, logUserActivity, getUserActivityLogs, clearInMemoryActivityLogs } from "./server/database";
+import {
+  bootstrapDatabase,
+  getDbPool,
+  getRedisClient,
+  writeServerErrorLog,
+  logUserActivity,
+  getUserActivityLogs,
+  clearInMemoryActivityLogs,
+  isDatabaseHealthy,
+  checkDatabaseHealth,
+  isProductionEnvironment
+} from "./server/database";
+import {
+  authenticate,
+  authorize,
+  generateToken,
+  verifyToken,
+  hasRole,
+  extractToken,
+  assertJwtSecretConfiguration,
+  buildOrderQueryForUser,
+  checkOrderOwnership,
+  normalizeRole,
+  isPrimaryAdmin,
+  isValidRole,
+  PRIMARY_ADMIN_USERNAME,
+  setAuthCookie,
+  clearAuthCookie,
+  csrfProtectionMiddleware
+} from "./server/auth";
+import {
+  createOtp,
+  verifyOtp,
+  deleteOtp,
+  getDevOtp,
+  normalizePhoneNumber,
+  maskPhoneNumber,
+  OTP_EXPIRY_SECONDS,
+  getOtpExpirySeconds,
+  checkOtpRateLimit,
+  recordOtpRequest,
+  checkVerificationRateLimit,
+  recordFailedVerification,
+  getClientIp
+} from "./server/otp";
+import { sendOtpSms, isSmsConfigured } from "./server/sms";
+import { hashPassword, verifyPassword, isDefaultPassword, isDefaultPasswordOrMatches, DEFAULT_PASSWORD_BCRYPT_HASH, generateTemporaryPassword } from "./server/password";
+import { sanitizeUser, sanitizeUsers } from "./server/sanitizer";
+import { sendApiError, handleServerError, expressErrorHandler, apiNotFoundHandler, ApiError } from "./server/errorHandler";
+import {
+  sanitizeString,
+  validateNumber,
+  validateDate,
+  validatePhoneNumber,
+  validateId,
+  validateArray,
+  requestSanitizationMiddleware
+} from "./server/validation";
 
 // In-memory fast cache layer for read endpoints
 const inMemoryRouteCache = new Map<string, { data: any; expiresAt: number }>();
@@ -38,6 +95,12 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Reverse proxy & TLS-termination support: trust first proxy hop (Cloud Run / Nginx / ALB)
+  app.set("trust proxy", 1);
+
+  // 0. Refuse to start if JWT_SECRET is missing or insecure in production
+  assertJwtSecretConfiguration();
+
   // Response Compression for fast mobile transfers
   app.use(compression());
 
@@ -47,10 +110,38 @@ async function startServer() {
   // Middleware for parsing JSON & URL-encoded request bodies
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  app.use(requestSanitizationMiddleware);
+
+  // CSRF Defense for cookie-authenticated state-changing operations
+  app.use("/api", csrfProtectionMiddleware);
 
   // Prevent client and browser HTTP caching on all API endpoints
   app.use("/api", (req, res, next) => {
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+    next();
+  });
+
+  // Guard API routes in production: if MariaDB is unavailable, return controlled maintenance error
+  // Never silently fall back to local JSON storage in production
+  app.use("/api", (req, res, next) => {
+    if (req.path === "/health") {
+      return next();
+    }
+    if (isProductionEnvironment() && !isDatabaseHealthy()) {
+      return sendApiError(
+        res,
+        503,
+        "Database service is temporarily unavailable for maintenance. Please try again shortly."
+      );
+    }
+    next();
+  });
+
+  // Ensure Service Worker itself is never cached by browser HTTP cache
+  app.get("/sw.js", (req, res, next) => {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate");
     res.set("Pragma", "no-cache");
     res.set("Expires", "0");
     next();
@@ -121,25 +212,18 @@ async function startServer() {
   }
 
   function extractActor(req: express.Request) {
-    let userId = (req.headers["x-user-id"] as string) || req.body?.actorUserId || "system";
-    let userName = "";
-    
-    const rawHeaderName = req.headers["x-user-name"] as string;
-    if (rawHeaderName) {
-      try {
-        userName = decodeURIComponent(rawHeaderName);
-      } catch {
-        userName = rawHeaderName;
-      }
+    if (req.user) {
+      return {
+        userId: req.user.id,
+        userName: req.user.fullName || req.user.username || "کاربر احراز هویت شده",
+        userRole: req.user.role || "SALES_MANAGER"
+      };
     }
-    
-    if (!userName) {
-      userName = req.body?.actorUserName || "مدیر / کاربر سیستم";
-    }
-
-    let userRole = (req.headers["x-user-role"] as string) || req.body?.actorUserRole || "SALES_MANAGER";
-    
-    return { userId, userName, userRole };
+    return {
+      userId: "system",
+      userName: "سیستم",
+      userRole: "SYSTEM_ADMIN"
+    };
   }
 
   function recordActivity(req: express.Request, action: string, details: string, module: string, status: "SUCCESS" | "WARNING" | "ERROR" = "SUCCESS") {
@@ -152,7 +236,7 @@ async function startServer() {
         action,
         details,
         module,
-        ipAddress: (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || "127.0.0.1",
+        ipAddress: getClientIp(req),
         status
       }).catch(err => console.error("Error recording activity log:", err));
     } catch (err) {
@@ -163,10 +247,25 @@ async function startServer() {
   // --- API Routes ---
 
   // Health check endpoint
-  app.get("/api/health", (req, res) => {
+  app.get("/api/health", async (req, res) => {
+    let isHealthy = isDatabaseHealthy();
+    if (!isHealthy || req.query.fresh === "true") {
+      isHealthy = await checkDatabaseHealth();
+    }
+    const env = isProductionEnvironment() ? "production" : "development";
+    if (!isHealthy) {
+      return res.status(503).json({
+        status: "maintenance",
+        success: false,
+        message: "Database service is temporarily unavailable for maintenance.",
+        environment: env
+      });
+    }
     res.json({ 
       status: "ok", 
+      success: true,
       message: "سرور پورتال فروش سفال طبرستان با موفقیت در دسترس است.",
+      environment: env,
       timestamp: new Date().toISOString()
     });
   });
@@ -255,25 +354,42 @@ async function startServer() {
   }
 
   // Unified Ultra-Fast Sync Bootstrap API Endpoint (Fetches all datasets in a single HTTP round-trip)
-  app.get("/api/sync/bootstrap", async (req, res) => {
+  app.get("/api/sync/bootstrap", authenticate, async (req, res) => {
     try {
       const db = getDbPool();
       
+      // Enforce database-level order authorization based strictly on verified server-side user credentials
+      const authQuery = buildOrderQueryForUser(req.user);
+
       const [
         [prodRows],
         [agentRows],
         [scRows],
         [driverRows],
-        [orderRows],
-        [historyRows]
+        [orderRows]
       ] = await Promise.all([
         db.query("SELECT * FROM products"),
         db.query("SELECT * FROM agents"),
         db.query("SELECT * FROM shipping_companies"),
         db.query("SELECT * FROM permanent_drivers"),
-        db.query("SELECT * FROM orders ORDER BY priorityIndex ASC, createdAt DESC"),
-        db.query("SELECT * FROM order_history ORDER BY updatedAt ASC")
+        db.query(authQuery.sql, authQuery.params)
       ]) as any[];
+
+      // Only query order history for authorized orders to prevent any indirect data leakage
+      let historyRows: any[] = [];
+      if (orderRows && orderRows.length > 0) {
+        if (authQuery.isRestricted) {
+          const orderIds = orderRows.map((o: any) => o.id);
+          const [hRows] = await db.query(
+            "SELECT * FROM order_history WHERE orderId IN (?) ORDER BY updatedAt ASC",
+            [orderIds]
+          ) as any[];
+          historyRows = hRows || [];
+        } else {
+          const [hRows] = await db.query("SELECT * FROM order_history ORDER BY updatedAt ASC") as any[];
+          historyRows = hRows || [];
+        }
+      }
 
       const products = (prodRows || []).map((p: any) => ({
         ...p,
@@ -409,7 +525,7 @@ async function startServer() {
       res.json(payload);
     } catch (err: any) {
       console.error("Error in GET /api/sync/bootstrap:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
@@ -424,7 +540,7 @@ async function startServer() {
   });
 
   // 1. PRODUCTS API
-  app.get("/api/products", async (req, res) => {
+  app.get("/api/products", authenticate, async (req, res) => {
     try {
       const redis = getRedisClient();
       if (redis) {
@@ -447,17 +563,35 @@ async function startServer() {
       res.json(products);
     } catch (err: any) {
       console.error("Error in GET /api/products:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.post("/api/products", async (req, res) => {
+  app.post("/api/products", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, imageUrl } = req.body;
+      const safeId = validateId(req.body.id, "شناسه کالا");
+      const safeName = sanitizeString(req.body.name, { allowEmpty: false, maxLength: 200, fieldName: "نام محصول" });
+      const safeCategory = sanitizeString(req.body.category, { allowEmpty: false, maxLength: 100, fieldName: "دسته‌بندی محصول" });
+      const safePrice = validateNumber(req.body.pricePerUnit, "قیمت واحد", { min: 0 });
+      const safeUnit = sanitizeString(req.body.unit, { allowEmpty: false, maxLength: 50, fieldName: "واحد سنجش" });
+      const safeDescription = sanitizeString(req.body.description, { maxLength: 2000, fieldName: "توضیحات محصول" });
+      const safeDimensions = sanitizeString(req.body.dimensions, { maxLength: 100, fieldName: "ابعاد محصول" });
+      const safeCoverageInfo = sanitizeString(req.body.coverageInfo, { maxLength: 200, fieldName: "اطلاعات پوشش‌دهی" });
+      const safePrimaryUnit = sanitizeString(req.body.primaryUnit, { maxLength: 50, fieldName: "واحد اصلی" });
+      const safeSecondaryUnit = sanitizeString(req.body.secondaryUnit, { maxLength: 50, fieldName: "واحد فرعی" });
+      const safeWeight = req.body.weight !== undefined && req.body.weight !== null && req.body.weight !== ""
+        ? validateNumber(req.body.weight, "وزن محصول", { min: 0 })
+        : null;
+      const safeConversionRatio = req.body.conversionRatio !== undefined && req.body.conversionRatio !== null && req.body.conversionRatio !== ""
+        ? validateNumber(req.body.conversionRatio, "ضریب تبدیل", { min: 0 })
+        : null;
+      const safeDefaultQuantity = validateNumber(req.body.defaultQuantity, "تعداد پیش‌فرض", { min: 1, required: false, defaultValue: 330 });
+      const safeImageUrl = sanitizeString(req.body.imageUrl, { maxLength: 500, fieldName: "آدرس تصویر" });
+
       await db.query(
         "INSERT INTO products (id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, isEnabled, imageUrl) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
-        [id, name, category, pricePerUnit, unit, description || null, weight || null, dimensions || null, coverageInfo || null, primaryUnit || null, secondaryUnit || null, conversionRatio || null, defaultQuantity ? Number(defaultQuantity) : 330, imageUrl || null]
+        [safeId, safeName, safeCategory, safePrice, safeUnit, safeDescription || null, safeWeight, safeDimensions || null, safeCoverageInfo || null, safePrimaryUnit || null, safeSecondaryUnit || null, safeConversionRatio, safeDefaultQuantity, safeImageUrl || null]
       );
       
       // Invalidate cache
@@ -467,28 +601,24 @@ async function startServer() {
       await recordActivity(
         req,
         "افزودن محصول جدید",
-        `ثبت محصول جدید (${name}) با کد ${id} و قیمت ${Number(pricePerUnit || 0).toLocaleString('fa-IR')} ریال در کاتالوگ`,
+        `ثبت محصول جدید (${safeName}) با کد ${safeId} و قیمت ${Number(safePrice || 0).toLocaleString('fa-IR')} ریال در کاتالوگ`,
         "PRODUCTS"
       );
       
-      res.status(201).json({ success: true, id });
+      res.status(201).json({ success: true, id: safeId });
     } catch (err: any) {
-      console.error("Error in POST /api/products:", err);
-      let errMsg = "خطای غیرمنتظره در سرور رخ داده است.";
       if (err.code === "ER_DUP_ENTRY" || err.errno === 1062) {
-        errMsg = "محصولی با این شناسه یا نام قبلاً در پایگاه داده ثبت شده است.";
-      } else {
-        errMsg = err.message || "خطا در برقراری ارتباط با پایگاه داده.";
+        return sendApiError(res, 409, "محصولی با این شناسه یا نام قبلاً در پایگاه داده ثبت شده است.");
       }
-      res.status(500).json({ error: errMsg });
+      return handleServerError(res, err, "POST /api/products");
     }
   });
 
-  app.patch("/api/products/:id/toggle", async (req, res) => {
+  app.patch("/api/products/:id/toggle", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      await db.query("UPDATE products SET isEnabled = NOT isEnabled WHERE id = ?", [id]);
+      const safeId = validateId(req.params.id, "شناسه کالا");
+      await db.query("UPDATE products SET isEnabled = NOT isEnabled WHERE id = ?", [safeId]);
       
       // Invalidate cache
       const redis = getRedisClient();
@@ -497,15 +627,32 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PATCH /api/products/:id/toggle:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.put("/api/products/:id", async (req, res) => {
+  app.put("/api/products/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, primaryUnit, secondaryUnit, conversionRatio, defaultQuantity, isEnabled, imageUrl } = req.body;
+      const safeId = validateId(req.params.id, "شناسه کالا");
+      const safeName = sanitizeString(req.body.name, { allowEmpty: false, maxLength: 200, fieldName: "نام محصول" });
+      const safeCategory = sanitizeString(req.body.category, { allowEmpty: false, maxLength: 100, fieldName: "دسته‌بندی محصول" });
+      const safePrice = validateNumber(req.body.pricePerUnit, "قیمت واحد", { min: 0 });
+      const safeUnit = sanitizeString(req.body.unit, { allowEmpty: false, maxLength: 50, fieldName: "واحد سنجش" });
+      const safeDescription = sanitizeString(req.body.description, { maxLength: 2000, fieldName: "توضیحات محصول" });
+      const safeDimensions = sanitizeString(req.body.dimensions, { maxLength: 100, fieldName: "ابعاد محصول" });
+      const safeCoverageInfo = sanitizeString(req.body.coverageInfo, { maxLength: 200, fieldName: "اطلاعات پوشش‌دهی" });
+      const safePrimaryUnit = sanitizeString(req.body.primaryUnit, { maxLength: 50, fieldName: "واحد اصلی" });
+      const safeSecondaryUnit = sanitizeString(req.body.secondaryUnit, { maxLength: 50, fieldName: "واحد فرعی" });
+      const safeWeight = req.body.weight !== undefined && req.body.weight !== null && req.body.weight !== ""
+        ? validateNumber(req.body.weight, "وزن محصول", { min: 0 })
+        : null;
+      const safeConversionRatio = req.body.conversionRatio !== undefined && req.body.conversionRatio !== null && req.body.conversionRatio !== ""
+        ? validateNumber(req.body.conversionRatio, "ضریب تبدیل", { min: 0 })
+        : null;
+      const safeDefaultQuantity = validateNumber(req.body.defaultQuantity, "تعداد پیش‌فرض", { min: 1, required: false, defaultValue: 330 });
+      const safeImageUrl = sanitizeString(req.body.imageUrl, { maxLength: 500, fieldName: "آدرس تصویر" });
+      const isEnabled = req.body.isEnabled ? 1 : 0;
       
       await db.query(`
         UPDATE products SET 
@@ -513,7 +660,7 @@ async function startServer() {
           weight = ?, dimensions = ?, coverageInfo = ?, primaryUnit = ?, 
           secondaryUnit = ?, conversionRatio = ?, defaultQuantity = ?, isEnabled = ?, imageUrl = ?
         WHERE id = ?
-      `, [name, category, pricePerUnit, unit, description || null, weight || null, dimensions || null, coverageInfo || null, primaryUnit || null, secondaryUnit || null, conversionRatio || null, defaultQuantity ? Number(defaultQuantity) : 330, isEnabled ? 1 : 0, imageUrl || null, id]);
+      `, [safeName, safeCategory, safePrice, safeUnit, safeDescription || null, safeWeight, safeDimensions || null, safeCoverageInfo || null, safePrimaryUnit || null, safeSecondaryUnit || null, safeConversionRatio, safeDefaultQuantity, isEnabled, safeImageUrl || null, safeId]);
 
       const redis = getRedisClient();
       if (redis) await redis.del("products_list");
@@ -521,18 +668,18 @@ async function startServer() {
       await recordActivity(
         req,
         "ویرایش اطلاعات محصول",
-        `بروزرسانی اطلاعات و مشخصات فنی محصول (${name}) با شناسه ${id}`,
+        `بروزرسانی اطلاعات و مشخصات فنی محصول (${safeName}) با شناسه ${safeId}`,
         "PRODUCTS"
       );
 
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PUT /api/products/:id:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.delete("/api/products/:id", async (req, res) => {
+  app.delete("/api/products/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
       const { id } = req.params;
@@ -552,12 +699,12 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in DELETE /api/products/:id:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // 2. AGENTS API
-  app.get("/api/agents", async (req, res) => {
+  app.get("/api/agents", authenticate, async (req, res) => {
     try {
       const redis = getRedisClient();
       if (redis) {
@@ -586,44 +733,61 @@ async function startServer() {
     } catch (err: any) {
       console.error("Error in GET /api/agents:", err);
       writeServerErrorLog("GET /api/agents", err);
-      res.status(500).json({ error: err.message || "Unknown database error" });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.post("/api/agents", async (req, res) => {
+  app.post("/api/agents", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id, fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, personType, companyName, registrationNumber, economicCode, nationalId, nationalCode } = req.body;
-      const territoriesStr = territories ? (typeof territories === 'string' ? territories : JSON.stringify(territories)) : null;
+      const safeId = validateId(req.body.id, "شناسه نمایندگی");
+      const safeFullName = sanitizeString(req.body.fullName, { allowEmpty: false, maxLength: 200, fieldName: "نام و نام خانوادگی نماینده" });
+      const safeAgentCode = sanitizeString(req.body.agentCode, { allowEmpty: false, maxLength: 50, fieldName: "کد نمایندگی" });
+      const safePhone = validatePhoneNumber(req.body.phoneNumber, "شماره تماس نماینده");
+      const safeAlias = sanitizeString(req.body.alias, { maxLength: 200, fieldName: "نام مستعار" });
+      const safeAddress = sanitizeString(req.body.address, { maxLength: 1000, fieldName: "آدرس" });
+      const safeArea = sanitizeString(req.body.area, { maxLength: 100, fieldName: "منطقه" });
+      const safeCompanyName = sanitizeString(req.body.companyName, { maxLength: 200, fieldName: "نام شرکت" });
+      const safeRegistrationNumber = sanitizeString(req.body.registrationNumber, { maxLength: 50, fieldName: "شماره ثبت" });
+      const safeEconomicCode = sanitizeString(req.body.economicCode, { maxLength: 50, fieldName: "کد اقتصادی" });
+      const safeNationalId = sanitizeString(req.body.nationalId, { maxLength: 50, fieldName: "شناسه ملی" });
+      const safeNationalCode = sanitizeString(req.body.nationalCode, { maxLength: 50, fieldName: "کد ملی" });
+      const safePersonType = req.body.personType === 'LEGAL' ? 'LEGAL' : 'REAL';
+      const safeIsExportAgent = req.body.isExportAgent ? 1 : 0;
+      
+      const territories = req.body.territories;
+      const territoriesStr = territories ? (typeof territories === 'string' ? sanitizeString(territories, { maxLength: 2000 }) : JSON.stringify(territories)) : null;
 
       await db.query(
         "INSERT INTO agents (id, fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, isEnabled, personType, companyName, registrationNumber, economicCode, nationalId, nationalCode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
         [
-          id, fullName, alias, agentCode, phoneNumber, address || null, area || null, territoriesStr, isExportAgent ? 1 : 0,
-          personType || 'REAL', companyName || null, registrationNumber || null, economicCode || null, nationalId || null, nationalCode || null
+          safeId, safeFullName, safeAlias || null, safeAgentCode, safePhone, safeAddress || null, safeArea || null, territoriesStr, safeIsExportAgent,
+          safePersonType, safeCompanyName || null, safeRegistrationNumber || null, safeEconomicCode || null, safeNationalId || null, safeNationalCode || null
         ]
       );
       
       // Auto-create or link user account for this representative
       try {
-        const cleanCode = (agentCode || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-        const usernameCandidate = `rep_${cleanCode}` || `rep_${phoneNumber}`;
+        const cleanCode = (safeAgentCode || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const usernameCandidate = `rep_${cleanCode}` || `rep_${safePhone}`;
 
         const [existingUsers] = await db.query(
           "SELECT * FROM app_users WHERE agentCode = ? OR phoneNumber = ?",
-          [agentCode, phoneNumber]
+          [safeAgentCode, safePhone]
         ) as any[];
 
         if (!existingUsers || existingUsers.length === 0) {
           const userId = `usr-${Date.now()}`;
+          const tempPassword = generateTemporaryPassword();
+          const hashedPassword = await hashPassword(tempPassword);
           await db.query(`
-            INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password)
-            VALUES (?, ?, ?, ?, 'REPRESENTATIVE', ?, NULL, 1, '123456')
-          `, [userId, usernameCandidate, fullName || alias, phoneNumber, agentCode]);
+            INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password, mustChangePassword)
+            VALUES (?, ?, ?, ?, 'REPRESENTATIVE', ?, NULL, 1, ?, 1)
+          `, [userId, usernameCandidate, safeFullName || safeAlias, safePhone, safeAgentCode, hashedPassword]);
         } else {
           await db.query(`
             UPDATE app_users SET agentCode = ?, fullName = ?, phoneNumber = ? WHERE id = ?
-          `, [agentCode, fullName || alias, phoneNumber, existingUsers[0].id]);
+          `, [safeAgentCode, safeFullName || safeAlias, safePhone, existingUsers[0].id]);
         }
       } catch (uErr) {
         console.warn("Could not auto-create user for agent:", uErr);
@@ -635,30 +799,25 @@ async function startServer() {
       await recordActivity(
         req,
         "ثبت نمایندگی جدید",
-        `افزودن نمایندگی جدید (${fullName || alias}) با کد نمایندگی ${agentCode} در شهر/منطقه ${area || 'نامشخص'}`,
+        `افزودن نمایندگی جدید (${safeFullName || safeAlias}) با کد نمایندگی ${safeAgentCode} در شهر/منطقه ${safeArea || 'نامشخص'}`,
         "REPRESENTATIVE"
       );
       
-      res.status(201).json({ success: true, id });
+      res.status(201).json({ success: true, id: safeId });
     } catch (err: any) {
-      console.error("Error in POST /api/agents:", err);
-      writeServerErrorLog("POST /api/agents", err, req.body);
-      let errMsg = "خطای غیرمنتظره در سرور رخ داده است.";
       if (err.code === "ER_DUP_ENTRY" || err.errno === 1062) {
         const agCode = req.body?.agentCode || "";
-        errMsg = `کد نمایندگی "${agCode}" قبلاً در سیستم ثبت شده است. لطفاً از یک کد نمایندگی متمایز و یکتا استفاده نمایید.`;
-      } else {
-        errMsg = err.message || "خطا در عملیات ثبت در پایگاه داده.";
+        return sendApiError(res, 409, `کد نمایندگی "${agCode}" قبلاً در سیستم ثبت شده است. لطفاً از یک کد نمایندگی متمایز و یکتا استفاده نمایید.`);
       }
-      res.status(500).json({ error: errMsg });
+      return handleServerError(res, err, "POST /api/agents");
     }
   });
 
-  app.patch("/api/agents/:id/toggle", async (req, res) => {
+  app.patch("/api/agents/:id/toggle", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      await db.query("UPDATE agents SET isEnabled = NOT isEnabled WHERE id = ?", [id]);
+      const safeId = validateId(req.params.id, "شناسه نمایندگی");
+      await db.query("UPDATE agents SET isEnabled = NOT isEnabled WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
       if (redis) await redis.del("agents_list");
@@ -667,16 +826,31 @@ async function startServer() {
     } catch (err: any) {
       console.error("Error in PATCH /api/agents/:id/toggle:", err);
       writeServerErrorLog("PATCH /api/agents/:id/toggle", err, req.params);
-      res.status(500).json({ error: err.message || "Unknown database error" });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.put("/api/agents/:id", async (req, res) => {
+  app.put("/api/agents/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, isEnabled, personType, companyName, registrationNumber, economicCode, nationalId, nationalCode } = req.body;
-      const territoriesStr = territories ? (typeof territories === 'string' ? territories : JSON.stringify(territories)) : null;
+      const safeId = validateId(req.params.id, "شناسه نمایندگی");
+      const safeFullName = sanitizeString(req.body.fullName, { allowEmpty: false, maxLength: 200, fieldName: "نام و نام خانوادگی نماینده" });
+      const safeAgentCode = sanitizeString(req.body.agentCode, { allowEmpty: false, maxLength: 50, fieldName: "کد نمایندگی" });
+      const safePhone = validatePhoneNumber(req.body.phoneNumber, "شماره تماس نماینده");
+      const safeAlias = sanitizeString(req.body.alias, { maxLength: 200, fieldName: "نام مستعار" });
+      const safeAddress = sanitizeString(req.body.address, { maxLength: 1000, fieldName: "آدرس" });
+      const safeArea = sanitizeString(req.body.area, { maxLength: 100, fieldName: "منطقه" });
+      const safeCompanyName = sanitizeString(req.body.companyName, { maxLength: 200, fieldName: "نام شرکت" });
+      const safeRegistrationNumber = sanitizeString(req.body.registrationNumber, { maxLength: 50, fieldName: "شماره ثبت" });
+      const safeEconomicCode = sanitizeString(req.body.economicCode, { maxLength: 50, fieldName: "کد اقتصادی" });
+      const safeNationalId = sanitizeString(req.body.nationalId, { maxLength: 50, fieldName: "شناسه ملی" });
+      const safeNationalCode = sanitizeString(req.body.nationalCode, { maxLength: 50, fieldName: "کد ملی" });
+      const safePersonType = req.body.personType === 'LEGAL' ? 'LEGAL' : 'REAL';
+      const safeIsExportAgent = req.body.isExportAgent ? 1 : 0;
+      const isEnabled = req.body.isEnabled ? 1 : 0;
+      
+      const territories = req.body.territories;
+      const territoriesStr = territories ? (typeof territories === 'string' ? sanitizeString(territories, { maxLength: 2000 }) : JSON.stringify(territories)) : null;
 
       await db.query(`
         UPDATE agents SET 
@@ -685,16 +859,16 @@ async function startServer() {
           personType = ?, companyName = ?, registrationNumber = ?, economicCode = ?, nationalId = ?, nationalCode = ?
         WHERE id = ?
       `, [
-        fullName, alias, agentCode, phoneNumber, address || null, area || null, territoriesStr, isExportAgent ? 1 : 0, isEnabled ? 1 : 0,
-        personType || 'REAL', companyName || null, registrationNumber || null, economicCode || null, nationalId || null, nationalCode || null,
-        id
+        safeFullName, safeAlias || null, safeAgentCode, safePhone, safeAddress || null, safeArea || null, territoriesStr, safeIsExportAgent, isEnabled,
+        safePersonType, safeCompanyName || null, safeRegistrationNumber || null, safeEconomicCode || null, safeNationalId || null, safeNationalCode || null,
+        safeId
       ]);
 
       try {
         await db.query(`
           UPDATE app_users SET fullName = ?, phoneNumber = ?, agentCode = ?, isEnabled = ?
           WHERE agentCode = ?
-        `, [fullName || alias, phoneNumber, agentCode, isEnabled ? 1 : 0, agentCode]);
+        `, [safeFullName || safeAlias, safePhone, safeAgentCode, isEnabled, safeAgentCode]);
       } catch (uErr) {
         console.warn("Could not sync user for updated agent:", uErr);
       }
@@ -705,21 +879,21 @@ async function startServer() {
       await recordActivity(
         req,
         "ویرایش اطلاعات نمایندگی",
-        `بروزرسانی مشخصات نمایندگی (${fullName || alias}) با کد ${agentCode}`,
+        `بروزرسانی مشخصات نمایندگی (${safeFullName || safeAlias}) با کد ${safeAgentCode}`,
         "REPRESENTATIVE"
       );
 
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PUT /api/agents/:id:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.delete("/api/agents/:id", async (req, res) => {
+  app.delete("/api/agents/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
+      const id = validateId(req.params.id, "شناسه نمایندگی");
       const db = getDbPool();
-      const { id } = req.params;
 
       try {
         const [agRows] = await db.query("SELECT agentCode FROM agents WHERE id = ?", [id]) as any[];
@@ -746,12 +920,12 @@ async function startServer() {
     } catch (err: any) {
       console.error("Error in DELETE /api/agents/:id:", err);
       writeServerErrorLog("DELETE /api/agents/:id", err, req.params);
-      res.status(500).json({ error: err.message || "Unknown database error" });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // 3. SHIPPING COMPANIES API
-  app.get("/api/shipping-companies", async (req, res) => {
+  app.get("/api/shipping-companies", authenticate, async (req, res) => {
     try {
       const redis = getRedisClient();
       if (redis) {
@@ -774,40 +948,53 @@ async function startServer() {
       res.json(companies);
     } catch (err: any) {
       console.error("Error in GET /api/shipping-companies:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.post("/api/shipping-companies", async (req, res) => {
+  app.post("/api/shipping-companies", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id, name, code, phoneNumber, managerName, password, nationalId, economicCode } = req.body;
-      const userPassword = password || '123456';
+      const safeId = validateId(req.body.id, "شناسه باربری");
+      const safeName = sanitizeString(req.body.name, { allowEmpty: false, maxLength: 200, fieldName: "نام شرکت باربری" });
+      const safeCode = sanitizeString(req.body.code, { allowEmpty: false, maxLength: 50, fieldName: "کد باربری" });
+      const safePhone = validatePhoneNumber(req.body.phoneNumber, "شماره تماس باربری");
+      const safeManager = sanitizeString(req.body.managerName, { maxLength: 100, fieldName: "نام مدیر باربری" });
+      const safeNatId = sanitizeString(req.body.nationalId, { maxLength: 50, fieldName: "شناسه ملی" });
+      const safeEconCode = sanitizeString(req.body.economicCode, { maxLength: 50, fieldName: "کد اقتصادی" });
+      
+      let rawPassword = req.body.password ? String(req.body.password).trim() : "";
+      let mustChange = 0;
+      if (!rawPassword || isDefaultPassword(rawPassword)) {
+        rawPassword = generateTemporaryPassword();
+        mustChange = 1;
+      }
+      const hashedPassword = await hashPassword(rawPassword);
 
       await db.query(
         "INSERT INTO shipping_companies (id, name, code, phoneNumber, managerName, isEnabled, nationalId, economicCode) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
-        [id, name, code, phoneNumber, managerName || null, nationalId || null, economicCode || null]
+        [safeId, safeName, safeCode, safePhone, safeManager || null, safeNatId || null, safeEconCode || null]
       );
 
       try {
-        const scCode = (code || id || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-        const usernameCandidate = `sc_${scCode}` || `sc_${phoneNumber}`;
+        const scCode = (safeCode || safeId || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const usernameCandidate = `sc_${scCode}` || `sc_${safePhone}`;
 
         const [existingUsers] = await db.query(
           "SELECT * FROM app_users WHERE shippingCompanyId = ? OR phoneNumber = ?",
-          [id, phoneNumber]
+          [safeId, safePhone]
         ) as any[];
 
         if (!existingUsers || existingUsers.length === 0) {
           const userId = `usr-${Date.now()}`;
           await db.query(`
-            INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password)
-            VALUES (?, ?, ?, ?, 'SHIPPING_COMPANY', NULL, ?, 1, ?)
-          `, [userId, usernameCandidate, name, phoneNumber, id, userPassword]);
+            INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password, mustChangePassword)
+            VALUES (?, ?, ?, ?, 'SHIPPING_COMPANY', NULL, ?, 1, ?, ?)
+          `, [userId, usernameCandidate, safeName, safePhone, safeId, hashedPassword, mustChange]);
         } else {
           await db.query(`
-            UPDATE app_users SET shippingCompanyId = ?, fullName = ?, phoneNumber = ?, password = ? WHERE id = ?
-          `, [id, name, phoneNumber, userPassword, existingUsers[0].id]);
+            UPDATE app_users SET shippingCompanyId = ?, fullName = ?, phoneNumber = ?, password = ?, mustChangePassword = ? WHERE id = ?
+          `, [safeId, safeName, safePhone, hashedPassword, mustChange, existingUsers[0].id]);
         }
       } catch (uErr) {
         console.warn("Could not auto-create user for shipping company:", uErr);
@@ -816,43 +1003,49 @@ async function startServer() {
       const redis = getRedisClient();
       if (redis) await redis.del("shipping_companies_list");
       
-      res.status(201).json({ success: true, id });
+      res.status(201).json({ success: true, id: safeId });
     } catch (err: any) {
-      console.error("Error in POST /api/shipping-companies:", err);
-      let errMsg = "خطای غیرمنتظره در سرور رخ داده است.";
       if (err.code === "ER_DUP_ENTRY" || err.errno === 1062) {
         const trCode = req.body?.code || "";
-        errMsg = `کد ترابری یا نام آژانس حمل و نقل "${trCode}" قبلاً ثبت گردیده است.`;
-      } else {
-        errMsg = err.message || "خطا در برقراری ارتباط با پایگاه داده.";
+        return sendApiError(res, 409, `کد ترابری یا نام آژانس حمل و نقل "${trCode}" قبلاً ثبت گردیده است.`);
       }
-      res.status(500).json({ error: errMsg });
+      return handleServerError(res, err, "POST /api/shipping-companies");
     }
   });
 
-  app.put("/api/shipping-companies/:id", async (req, res) => {
+  app.put("/api/shipping-companies/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { name, code, phoneNumber, managerName, address, isEnabled, password, nationalId, economicCode } = req.body;
+      const safeId = validateId(req.params.id, "شناسه باربری");
+      const safeName = sanitizeString(req.body.name, { allowEmpty: false, maxLength: 200, fieldName: "نام شرکت باربری" });
+      const safeCode = sanitizeString(req.body.code, { allowEmpty: false, maxLength: 50, fieldName: "کد باربری" });
+      const safePhone = validatePhoneNumber(req.body.phoneNumber, "شماره تماس باربری");
+      const safeManager = sanitizeString(req.body.managerName, { maxLength: 100, fieldName: "نام مدیر باربری" });
+      const safeAddress = sanitizeString(req.body.address, { maxLength: 1000, fieldName: "آدرس" });
+      const safeNatId = sanitizeString(req.body.nationalId, { maxLength: 50, fieldName: "شناسه ملی" });
+      const safeEconCode = sanitizeString(req.body.economicCode, { maxLength: 50, fieldName: "کد اقتصادی" });
+      const isEnabled = req.body.isEnabled ? 1 : 0;
+      const password = req.body.password;
 
       await db.query(`
         UPDATE shipping_companies
         SET name = ?, code = ?, phoneNumber = ?, managerName = ?, address = ?, isEnabled = ?, nationalId = ?, economicCode = ?
         WHERE id = ?
-      `, [name, code, phoneNumber, managerName || null, address || null, isEnabled ? 1 : 0, nationalId || null, economicCode || null, id]);
+      `, [safeName, safeCode, safePhone, safeManager || null, safeAddress || null, isEnabled, safeNatId || null, safeEconCode || null, safeId]);
 
       try {
         if (password) {
+          const rawPass = String(password).trim();
+          const hashedPass = await hashPassword(rawPass);
           await db.query(`
             UPDATE app_users SET fullName = ?, phoneNumber = ?, isEnabled = ?, password = ?
             WHERE shippingCompanyId = ?
-          `, [name, phoneNumber, isEnabled ? 1 : 0, password, id]);
+          `, [safeName, safePhone, isEnabled, hashedPass, safeId]);
         } else {
           await db.query(`
             UPDATE app_users SET fullName = ?, phoneNumber = ?, isEnabled = ?
             WHERE shippingCompanyId = ?
-          `, [name, phoneNumber, isEnabled ? 1 : 0, id]);
+          `, [safeName, safePhone, isEnabled, safeId]);
         }
       } catch (uErr) {
         console.warn("Could not sync user for updated shipping company:", uErr);
@@ -864,15 +1057,15 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PUT /api/shipping-companies/:id:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/shipping-companies/:id/toggle", async (req, res) => {
+  app.patch("/api/shipping-companies/:id/toggle", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      await db.query("UPDATE shipping_companies SET isEnabled = NOT isEnabled WHERE id = ?", [id]);
+      const safeId = validateId(req.params.id, "شناسه باربری");
+      await db.query("UPDATE shipping_companies SET isEnabled = NOT isEnabled WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
       if (redis) await redis.del("shipping_companies_list");
@@ -880,22 +1073,22 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PATCH /api/shipping-companies/:id/toggle:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.delete("/api/shipping-companies/:id", async (req, res) => {
+  app.delete("/api/shipping-companies/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
+      const safeId = validateId(req.params.id, "شناسه باربری");
 
       try {
-        await db.query("DELETE FROM app_users WHERE shippingCompanyId = ?", [id]);
+        await db.query("DELETE FROM app_users WHERE shippingCompanyId = ?", [safeId]);
       } catch (uErr) {
         console.warn("Could not delete user for shipping company:", uErr);
       }
 
-      await db.query("DELETE FROM shipping_companies WHERE id = ?", [id]);
+      await db.query("DELETE FROM shipping_companies WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
       if (redis) await redis.del("shipping_companies_list");
@@ -903,12 +1096,12 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in DELETE /api/shipping-companies/:id:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // 3b. PERMANENT DRIVERS API
-  app.get("/api/permanent-drivers", async (req, res) => {
+  app.get("/api/permanent-drivers", authenticate, async (req, res) => {
     try {
       const redis = getRedisClient();
       if (redis) {
@@ -931,52 +1124,64 @@ async function startServer() {
       res.json(drivers);
     } catch (err: any) {
       console.error("Error in GET /api/permanent-drivers:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.post("/api/permanent-drivers", async (req, res) => {
+  app.post("/api/permanent-drivers", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber } = req.body;
-      const driverId = id || `drv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const safeId = req.body.id ? validateId(req.body.id, "شناسه راننده") : `drv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const safeName = sanitizeString(req.body.driverName, { allowEmpty: false, maxLength: 100, fieldName: "نام راننده" });
+      const safePhone = validatePhoneNumber(req.body.driverPhone, "شماره تماس راننده");
+      const safePlate = sanitizeString(req.body.licensePlate, { allowEmpty: false, maxLength: 50, fieldName: "شماره پلاک خودرو" });
+      const safeVehicle = sanitizeString(req.body.vehicleType, { maxLength: 100, defaultValue: 'تریلی ۱۸ چرخ لبه‌دار' });
+      const safeAgency = sanitizeString(req.body.shippingAgency, { maxLength: 100, fieldName: "آژانس حمل بار" });
+      const safeNationalCode = sanitizeString(req.body.nationalCode, { maxLength: 50, fieldName: "کد ملی" });
+      const safeSmartCard = sanitizeString(req.body.smartCardNumber, { maxLength: 50, fieldName: "کارت هوشمند راننده" });
 
       await db.query(
         "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
-        [driverId, driverName, driverPhone, licensePlate, vehicleType || 'تریلی ۱۸ چرخ لبه‌دار', shippingAgency || null, nationalCode || null, smartCardNumber || null]
+        [safeId, safeName, safePhone, safePlate, safeVehicle || 'تریلی ۱۸ چرخ لبه‌دار', safeAgency || null, safeNationalCode || null, safeSmartCard || null]
       );
       
       const redis = getRedisClient();
       if (redis) await redis.del("permanent_drivers_list");
       
-      res.status(201).json({ success: true, id: driverId });
+      res.status(201).json({ success: true, id: safeId });
     } catch (err: any) {
       console.error("Error in POST /api/permanent-drivers:", err);
-      res.status(500).json({ error: err.message || "خطا در ثبت راننده" });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.post("/api/permanent-drivers/bulk", async (req, res) => {
+  app.post("/api/permanent-drivers/bulk", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { drivers } = req.body;
-      if (!Array.isArray(drivers) || drivers.length === 0) {
-        return res.status(400).json({ error: "لیست رانندگان ورودی نامعتبر یا خالی است." });
-      }
+      const safeDrivers = validateArray(req.body.drivers, "لیست رانندگان", { minLength: 1, maxLength: 500 });
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
         let insertedCount = 0;
 
-        for (let i = 0; i < drivers.length; i++) {
-          const d = drivers[i];
+        for (let i = 0; i < safeDrivers.length; i++) {
+          const d = safeDrivers[i];
+          if (!d || typeof d !== "object") continue;
           if (!d.driverName || !d.driverPhone || !d.licensePlate) continue;
+
+          const dName = sanitizeString(d.driverName, { allowEmpty: false, maxLength: 100, fieldName: "نام راننده" });
+          const dPhone = validatePhoneNumber(d.driverPhone, "شماره تماس راننده");
+          const dPlate = sanitizeString(d.licensePlate, { allowEmpty: false, maxLength: 50, fieldName: "شماره پلاک" });
+          const dVehicle = sanitizeString(d.vehicleType, { maxLength: 100, defaultValue: 'تریلی ۱۸ چرخ لبه‌دار' });
+          const dAgency = sanitizeString(d.shippingAgency, { maxLength: 100 });
+          const dNatCode = sanitizeString(d.nationalCode, { maxLength: 50 });
+          const dSmart = sanitizeString(d.smartCardNumber, { maxLength: 50 });
           
-          const driverId = d.id || `drv-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 5)}`;
+          const driverId = d.id ? validateId(d.id, "شناسه راننده") : `drv-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 5)}`;
           await connection.query(
             "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
-            [driverId, d.driverName, d.driverPhone, d.licensePlate, d.vehicleType || 'تریلی ۱۸ چرخ لبه‌دار', d.shippingAgency || null, d.nationalCode || null, d.smartCardNumber || null]
+            [driverId, dName, dPhone, dPlate, dVehicle || 'تریلی ۱۸ چرخ لبه‌دار', dAgency || null, dNatCode || null, dSmart || null]
           );
           insertedCount++;
         }
@@ -995,22 +1200,29 @@ async function startServer() {
       }
     } catch (err: any) {
       console.error("Error in POST /api/permanent-drivers/bulk:", err);
-      res.status(500).json({ error: err.message || "خطا در ثبت گروهی رانندگان" });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.put("/api/permanent-drivers/:id", async (req, res) => {
+  app.put("/api/permanent-drivers/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled } = req.body;
+      const safeId = validateId(req.params.id, "شناسه راننده");
+      const safeName = sanitizeString(req.body.driverName, { allowEmpty: false, maxLength: 100, fieldName: "نام راننده" });
+      const safePhone = validatePhoneNumber(req.body.driverPhone, "شماره تماس راننده");
+      const safePlate = sanitizeString(req.body.licensePlate, { allowEmpty: false, maxLength: 50, fieldName: "شماره پلاک خودرو" });
+      const safeVehicle = sanitizeString(req.body.vehicleType, { maxLength: 100, defaultValue: 'تریلی ۱۸ چرخ لبه‌دار' });
+      const safeAgency = sanitizeString(req.body.shippingAgency, { maxLength: 100, fieldName: "آژانس حمل بار" });
+      const safeNationalCode = sanitizeString(req.body.nationalCode, { maxLength: 50, fieldName: "کد ملی" });
+      const safeSmartCard = sanitizeString(req.body.smartCardNumber, { maxLength: 50, fieldName: "کارت هوشمند راننده" });
+      const isEnabled = req.body.isEnabled ? 1 : 0;
 
       await db.query(`
         UPDATE permanent_drivers SET 
           driverName = ?, driverPhone = ?, licensePlate = ?, vehicleType = ?, 
           shippingAgency = ?, nationalCode = ?, smartCardNumber = ?, isEnabled = ? 
         WHERE id = ?
-      `, [driverName, driverPhone, licensePlate, vehicleType, shippingAgency || null, nationalCode || null, smartCardNumber || null, isEnabled ? 1 : 0, id]);
+      `, [safeName, safePhone, safePlate, safeVehicle, safeAgency || null, safeNationalCode || null, safeSmartCard || null, isEnabled, safeId]);
 
       const redis = getRedisClient();
       if (redis) await redis.del("permanent_drivers_list");
@@ -1018,15 +1230,15 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PUT /api/permanent-drivers/:id:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/permanent-drivers/:id/toggle", async (req, res) => {
+  app.patch("/api/permanent-drivers/:id/toggle", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      await db.query("UPDATE permanent_drivers SET isEnabled = NOT isEnabled WHERE id = ?", [id]);
+      const safeId = validateId(req.params.id, "شناسه راننده");
+      await db.query("UPDATE permanent_drivers SET isEnabled = NOT isEnabled WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
       if (redis) await redis.del("permanent_drivers_list");
@@ -1034,15 +1246,15 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PATCH /api/permanent-drivers/:id/toggle:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.delete("/api/permanent-drivers/:id", async (req, res) => {
+  app.delete("/api/permanent-drivers/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      await db.query("DELETE FROM permanent_drivers WHERE id = ?", [id]);
+      const safeId = validateId(req.params.id, "شناسه راننده");
+      await db.query("DELETE FROM permanent_drivers WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
       if (redis) await redis.del("permanent_drivers_list");
@@ -1050,16 +1262,33 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in DELETE /api/permanent-drivers/:id:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // 4. ORDERS API
-  app.get("/api/orders", async (req, res) => {
+  app.get("/api/orders", authenticate, async (req, res) => {
     try {
       const db = getDbPool();
-      const [orderRows] = await db.query("SELECT * FROM orders ORDER BY priorityIndex ASC, createdAt DESC") as any[];
-      const [historyRows] = await db.query("SELECT * FROM order_history ORDER BY updatedAt ASC") as any[];
+      // Enforce database-level order authorization based strictly on verified server-side user credentials
+      const authQuery = buildOrderQueryForUser(req.user);
+      const [orderRows] = await db.query(authQuery.sql, authQuery.params) as any[];
+
+      // Only query order history for authorized orders to prevent indirect leakage
+      let historyRows: any[] = [];
+      if (orderRows && orderRows.length > 0) {
+        if (authQuery.isRestricted) {
+          const orderIds = orderRows.map((o: any) => o.id);
+          const [hRows] = await db.query(
+            "SELECT * FROM order_history WHERE orderId IN (?) ORDER BY updatedAt ASC",
+            [orderIds]
+          ) as any[];
+          historyRows = hRows || [];
+        } else {
+          const [hRows] = await db.query("SELECT * FROM order_history ORDER BY updatedAt ASC") as any[];
+          historyRows = hRows || [];
+        }
+      }
       
       const historyMap: Record<string, any[]> = {};
       for (const h of historyRows) {
@@ -1159,7 +1388,7 @@ async function startServer() {
       res.json(orders);
     } catch (err: any) {
       console.error("Error in GET /api/orders:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
@@ -1168,24 +1397,34 @@ function compactItemsJson(itemsInput: any): string | null {
   if (!itemsInput) return null;
   let itemsArray: any[] = [];
   if (typeof itemsInput === 'string') {
+    const trimmed = itemsInput.trim();
+    if (!trimmed || (!trimmed.startsWith('[') && !trimmed.startsWith('{'))) {
+      return null;
+    }
     try {
-      itemsArray = JSON.parse(itemsInput);
+      const parsed = JSON.parse(trimmed);
+      itemsArray = Array.isArray(parsed) ? parsed : [parsed];
     } catch {
-      return itemsInput;
+      return null;
     }
   } else if (Array.isArray(itemsInput)) {
     itemsArray = itemsInput;
+  } else if (typeof itemsInput === 'object' && itemsInput !== null) {
+    itemsArray = [itemsInput];
   } else {
     return null;
   }
 
   if (!Array.isArray(itemsArray) || itemsArray.length === 0) return null;
 
-  const compact = itemsArray.map((item: any) => {
+  const validItems = itemsArray.filter((item: any) => item && typeof item === 'object');
+  if (validItems.length === 0) return null;
+
+  const compact = validItems.map((item: any) => {
     const pid = item.productId || item.id || item.prodId || '';
     const qty = Number(item.quantity ?? item.q ?? 0);
     const price = item.pricePerUnit ?? item.p;
-    const entry: any = { id: String(pid), q: qty };
+    const entry: any = { id: String(pid), q: isNaN(qty) ? 0 : qty };
     if (price !== undefined && price !== null && !isNaN(Number(price))) {
       entry.p = Number(price);
     }
@@ -1195,12 +1434,29 @@ function compactItemsJson(itemsInput: any): string | null {
   return JSON.stringify(compact);
 }
 
-  app.post("/api/orders", async (req, res) => {
+  app.post("/api/orders", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "REPRESENTATIVE"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName, notes, itemsJson, paymentTrackingCode, paymentReceiptUrl, paymentReceiptName, isExportOrder, destinationCountry, deliveryLocationUrl } = req.body;
+      const rawBuyerName = (req.body.buyerName || req.body.customerName || "").trim();
+      const safeBuyerName = sanitizeString(rawBuyerName, { allowEmpty: false, maxLength: 200, fieldName: "مشخصات خریدار" });
+      const safeCustomerName = sanitizeString(req.body.customerName || rawBuyerName, { allowEmpty: false, maxLength: 200, fieldName: "نام مشتری" });
+      const safePhone = validatePhoneNumber(req.body.phoneNumber, "شماره تماس خریدار");
+      const safeCity = sanitizeString(req.body.destinationCity, { maxLength: 100, defaultValue: "نامشخص" });
+      const safeAddress = sanitizeString(req.body.exactAddress, { maxLength: 1000, defaultValue: "" });
+      const safeQuantity = validateNumber(req.body.quantity, "تعداد یا متراژ سفارش", { min: 0.01, defaultValue: 1 });
+      const safeUnit = sanitizeString(req.body.unit, { maxLength: 50, defaultValue: "متر مربع" });
+      const safeProductId = sanitizeString(req.body.productId, { maxLength: 100 });
+      const safeProductName = sanitizeString(req.body.productName, { maxLength: 200 });
+      const safeNotes = sanitizeString(req.body.notes, { maxLength: 2000 });
+      const safeAgentCodeInput = sanitizeString(req.body.agentCode, { maxLength: 50 });
+      const safePaymentTrackingCode = sanitizeString(req.body.paymentTrackingCode, { maxLength: 100 });
+      const safePaymentReceiptUrl = sanitizeString(req.body.paymentReceiptUrl, { maxLength: 500 });
+      const safePaymentReceiptName = sanitizeString(req.body.paymentReceiptName, { maxLength: 200 });
+      const safeDestinationCountry = sanitizeString(req.body.destinationCountry, { maxLength: 100 });
+      const safeDeliveryLocationUrl = sanitizeString(req.body.deliveryLocationUrl, { maxLength: 500 });
+      const isExportOrder = req.body.isExportOrder ? 1 : 0;
       
-      const formattedItemsJson = compactItemsJson(itemsJson);
+      const formattedItemsJson = compactItemsJson(req.body.itemsJson);
       const id = `ord-${Date.now()}`;
       
       // Generate meaningful order number based on Jalali Date & Time (e.g. TCL-14030507-142508)
@@ -1229,6 +1485,18 @@ function compactItemsJson(itemsInput: any): string | null {
       const createdAt = new Date().toISOString();
       const status = "PENDING_APPROVAL";
 
+      // Strictly enforce that representatives can ONLY create orders under their authorized agentCode
+      const callerRole = req.user ? normalizeRole(req.user.role) : '';
+      let effectiveAgentCode: string;
+      if (callerRole === 'REPRESENTATIVE') {
+        if (!req.user?.agentCode || !req.user.agentCode.trim()) {
+          return sendApiError(res, 403, "کد نمایندگی برای حساب شما ثبت نشده است. امکان ثبت سفارش وجود ندارد.");
+        }
+        effectiveAgentCode = req.user.agentCode.trim();
+      } else {
+        effectiveAgentCode = safeAgentCodeInput || 'AG-0000';
+      }
+
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
@@ -1239,12 +1507,12 @@ function compactItemsJson(itemsInput: any): string | null {
             destinationCity, exactAddress, phoneNumber, buyerName, notes, createdAt, status, priorityIndex,
             itemsJson, paymentTrackingCode, paymentReceiptUrl, paymentReceiptName, isExportOrder, destinationCountry, deliveryLocationUrl
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
-        `, [id, orderNumber, customerName, agentCode, productId, productName, quantity, unit, destinationCity, exactAddress, phoneNumber, buyerName || null, notes || null, createdAt, status, formattedItemsJson || null, paymentTrackingCode || null, paymentReceiptUrl || null, paymentReceiptName || null, isExportOrder ? 1 : 0, destinationCountry || null, deliveryLocationUrl || null]);
+        `, [id, orderNumber, safeCustomerName, effectiveAgentCode, safeProductId || null, safeProductName || null, safeQuantity, safeUnit, safeCity, safeAddress, safePhone, safeBuyerName || null, safeNotes || null, createdAt, status, formattedItemsJson || null, safePaymentTrackingCode || null, safePaymentReceiptUrl || null, safePaymentReceiptName || null, isExportOrder, safeDestinationCountry || null, safeDeliveryLocationUrl || null]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, createdAt, deliveryLocationUrl ? "ثبت سفارش به همراه لینک لوکیشن نقشه تخلیه بار" : "ثبت سفارش از طریق اپلیکیشن نمایندگی"]);
+        `, [id, status, createdAt, safeDeliveryLocationUrl ? "ثبت سفارش به همراه لینک لوکیشن نقشه تخلیه بار" : "ثبت سفارش از طریق اپلیکیشن نمایندگی"]);
 
         await connection.commit();
         res.status(201).json({ success: true, id, orderNumber });
@@ -1257,26 +1525,34 @@ function compactItemsJson(itemsInput: any): string | null {
     } catch (err: any) {
       console.error("Error in POST /api/orders:", err);
       writeServerErrorLog("POST /api/orders", err, req.body);
-      res.status(500).json({ error: err.message || "Unknown database error" });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/orders/:id/location", async (req, res) => {
+  app.patch("/api/orders/:id/location", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "REPRESENTATIVE"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { deliveryLocationUrl } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeLocationUrl = sanitizeString(req.body.deliveryLocationUrl, { maxLength: 500, fieldName: "لینک موقعیت مکانی" });
       const updatedAt = new Date().toISOString();
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
 
-        await connection.query("UPDATE orders SET deliveryLocationUrl = ? WHERE id = ?", [deliveryLocationUrl || null, id]);
+        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
+        await connection.query("UPDATE orders SET deliveryLocationUrl = ? WHERE id = ?", [safeLocationUrl || null, safeId]);
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           SELECT status, status, ?, ? FROM orders WHERE id = ?
-        `, [updatedAt, deliveryLocationUrl ? "بروزرسانی موقعیت مکانی و لینک نقشه تخلیه بار" : "حذف/ثبت مجدد لوکیشن نقشه تخلیه بار", id]);
+        `, [updatedAt, safeLocationUrl ? "بروزرسانی موقعیت مکانی و لینک نقشه تخلیه بار" : "حذف/ثبت مجدد لوکیشن نقشه تخلیه بار", safeId]);
 
         await connection.commit();
 
@@ -1289,14 +1565,14 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/location:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/orders/:id/cancel", async (req, res) => {
+  app.patch("/api/orders/:id/cancel", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "REPRESENTATIVE"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
       const updatedAt = new Date().toISOString();
       const status = "REJECTED";
       const reason = "لغو فاکتور توسط نماینده";
@@ -1305,11 +1581,19 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        await connection.query("UPDATE orders SET status = ?, rejectionReason = ? WHERE id = ?", [status, reason, id]);
+        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
+        await connection.query("UPDATE orders SET status = ?, rejectionReason = ? WHERE id = ?", [status, reason, safeId]);
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, updatedAt, "درخواست لغو و ابطال سفارش توسط نماینده"]);
+        `, [safeId, status, updatedAt, "درخواست لغو و ابطال سفارش توسط نماینده"]);
 
         await connection.commit();
         res.json({ success: true });
@@ -1321,26 +1605,34 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/cancel:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/orders/:id/payment-tracking", async (req, res) => {
+  app.patch("/api/orders/:id/payment-tracking", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "REPRESENTATIVE"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { paymentTrackingCode } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeTrackingCode = sanitizeString(req.body.paymentTrackingCode, { allowEmpty: false, maxLength: 100, fieldName: "کد رهگیری پرداخت" });
       const updatedAt = new Date().toISOString();
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
 
-        await connection.query("UPDATE orders SET paymentTrackingCode = ? WHERE id = ?", [paymentTrackingCode, id]);
+        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
+        await connection.query("UPDATE orders SET paymentTrackingCode = ? WHERE id = ?", [safeTrackingCode, safeId]);
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, "PENDING_APPROVAL", updatedAt, `ثبت/ویرایش کد رهگیری پرداخت وجه به شماره: ${paymentTrackingCode}`]);
+        `, [safeId, "PENDING_APPROVAL", updatedAt, `ثبت/ویرایش کد رهگیری پرداخت وجه به شماره: ${safeTrackingCode}`]);
 
         await connection.commit();
         res.json({ success: true });
@@ -1352,30 +1644,42 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/payment-tracking:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/orders/:id/payment-receipt", async (req, res) => {
+  app.patch("/api/orders/:id/payment-receipt", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "REPRESENTATIVE"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { paymentReceiptUrl, paymentReceiptName, paymentTrackingCode } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeReceiptUrl = sanitizeString(req.body.paymentReceiptUrl, { maxLength: 500, fieldName: "آدرس فیش واریزی" });
+      const safeReceiptName = sanitizeString(req.body.paymentReceiptName, { maxLength: 200, fieldName: "نام فایل فیش واریزی" });
+      const safeTrackingCode = req.body.paymentTrackingCode !== undefined
+        ? sanitizeString(req.body.paymentTrackingCode, { maxLength: 100 })
+        : null;
       const updatedAt = new Date().toISOString();
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
 
+        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
         await connection.query(
           "UPDATE orders SET paymentReceiptUrl = ?, paymentReceiptName = ?, paymentTrackingCode = COALESCE(?, paymentTrackingCode) WHERE id = ?",
-          [paymentReceiptUrl || null, paymentReceiptName || null, paymentTrackingCode || null, id]
+          [safeReceiptUrl || null, safeReceiptName || null, safeTrackingCode || null, safeId]
         );
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           SELECT status, ?, ?, ? FROM orders WHERE id = ?
-        `, [updatedAt, `الصاق/ویرایش فیش واریزی بانک${paymentReceiptName ? ` (${paymentReceiptName})` : ''}`, id]);
+        `, [updatedAt, `الصاق/ویرایش فیش واریزی بانک${safeReceiptName ? ` (${safeReceiptName})` : ''}`, safeId]);
 
         await connection.commit();
         clearAllRouteCaches();
@@ -1388,23 +1692,38 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/payment-receipt:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // Representative edits order at any stage (requires Sales Manager re-approval)
-  app.patch("/api/orders/:id/edit", async (req, res) => {
+  app.patch("/api/orders/:id/edit", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "REPRESENTATIVE"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const editData = req.body; // updated proposed values
-      if (editData && editData.itemsJson) {
-        editData.itemsJson = compactItemsJson(editData.itemsJson);
-      }
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const rawEditData = req.body || {};
+      
+      const cleanEditData: Record<string, any> = {};
+      if (rawEditData.customerName !== undefined) cleanEditData.customerName = sanitizeString(rawEditData.customerName, { maxLength: 200 });
+      if (rawEditData.phoneNumber !== undefined) cleanEditData.phoneNumber = validatePhoneNumber(rawEditData.phoneNumber);
+      if (rawEditData.destinationCity !== undefined) cleanEditData.destinationCity = sanitizeString(rawEditData.destinationCity, { maxLength: 100 });
+      if (rawEditData.exactAddress !== undefined) cleanEditData.exactAddress = sanitizeString(rawEditData.exactAddress, { maxLength: 1000 });
+      if (rawEditData.quantity !== undefined) cleanEditData.quantity = validateNumber(rawEditData.quantity, "تعداد سفارش", { min: 0.01 });
+      if (rawEditData.unit !== undefined) cleanEditData.unit = sanitizeString(rawEditData.unit, { maxLength: 50 });
+      if (rawEditData.notes !== undefined) cleanEditData.notes = sanitizeString(rawEditData.notes, { maxLength: 2000 });
+      if (rawEditData.buyerName !== undefined) cleanEditData.buyerName = sanitizeString(rawEditData.buyerName, { maxLength: 200 });
+      if (rawEditData.deliveryLocationUrl !== undefined) cleanEditData.deliveryLocationUrl = sanitizeString(rawEditData.deliveryLocationUrl, { maxLength: 500 });
+      if (rawEditData.itemsJson !== undefined) cleanEditData.itemsJson = compactItemsJson(rawEditData.itemsJson);
+      if (rawEditData.vehicleType !== undefined) cleanEditData.vehicleType = sanitizeString(rawEditData.vehicleType, { maxLength: 100 });
+      if (rawEditData.paymentTrackingCode !== undefined) cleanEditData.paymentTrackingCode = sanitizeString(rawEditData.paymentTrackingCode, { maxLength: 100 });
+      if (rawEditData.paymentReceiptUrl !== undefined) cleanEditData.paymentReceiptUrl = sanitizeString(rawEditData.paymentReceiptUrl, { maxLength: 500 });
+      if (rawEditData.paymentReceiptName !== undefined) cleanEditData.paymentReceiptName = sanitizeString(rawEditData.paymentReceiptName, { maxLength: 200 });
+      if (rawEditData.destinationCountry !== undefined) cleanEditData.destinationCountry = sanitizeString(rawEditData.destinationCountry, { maxLength: 100 });
+
       const updatedAt = new Date().toISOString();
 
       const pendingEditData = JSON.stringify({
-        ...editData,
+        ...cleanEditData,
         editedAt: updatedAt
       });
 
@@ -1412,24 +1731,31 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        const [ordRows] = await connection.query("SELECT status FROM orders WHERE id = ?", [id]) as any[];
+        const [ordRows] = await connection.query("SELECT status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
         const currentStatus = ordRows[0]?.status || 'PENDING_APPROVAL';
 
         if (currentStatus === 'LOADED_AND_DISPATCHED' || currentStatus === 'REJECTED') {
           await connection.rollback();
           connection.release();
-          return res.status(400).json({ error: 'امکان ویرایش سفارش پس از صدور ترخیص یا لغو سفارش وجود ندارد.' });
+          return sendApiError(res, 400, 'امکان ویرایش سفارش پس از صدور ترخیص یا لغو سفارش وجود ندارد.');
         }
 
         await connection.query(
           "UPDATE orders SET hasPendingEdit = 1, pendingEditData = ? WHERE id = ?",
-          [pendingEditData, id]
+          [pendingEditData, safeId]
         );
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, 'ثبت اصلاحیه و ویرایش مشخصات سفارش توسط نمایندگی فروش (در انتظار بررسی و تایید مدیر بازرگانی)')
-        `, [id, currentStatus, updatedAt]);
+        `, [safeId, currentStatus, updatedAt]);
 
         await connection.commit();
         clearAllRouteCaches();
@@ -1442,31 +1768,31 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/edit:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // Sales Manager approves pending edits (applies changes, retains priority & status)
-  app.patch("/api/orders/:id/approve-edit", async (req, res) => {
+  app.patch("/api/orders/:id/approve-edit", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
       const updatedAt = new Date().toISOString();
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
 
-        const [rows] = await connection.query("SELECT * FROM orders WHERE id = ?", [id]) as any[];
+        const [rows] = await connection.query("SELECT * FROM orders WHERE id = ?", [safeId]) as any[];
         if (rows.length === 0) {
           await connection.rollback();
-          return res.status(404).json({ error: "سفارش یافت نشد" });
+          return sendApiError(res, 404, "سفارش یافت نشد");
         }
 
         const order = rows[0];
         if (!order.pendingEditData) {
           await connection.rollback();
-          return res.status(400).json({ error: "اطلاعات اصلاحیه جهت تایید یافت نشد" });
+          return sendApiError(res, 400, "اطلاعات اصلاحیه جهت تایید یافت نشد");
         }
 
         const edits = JSON.parse(order.pendingEditData);
@@ -1497,14 +1823,14 @@ function compactItemsJson(itemsInput: any): string | null {
         updateFields.push("recentlyEditedNotice = ?");
         updateParams.push("اصلاحیه نمایندگی توسط مدیریت بازرگانی تایید و اعمال گردید (اطلاعات سفارش به‌روز شد)");
 
-        updateParams.push(id);
+        updateParams.push(safeId);
 
         await connection.query(`UPDATE orders SET ${updateFields.join(", ")} WHERE id = ?`, updateParams);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, 'تغییرات و اصلاحیه مشخصات سفارش توسط مدیر بازرگانی تایید و بر روی فاکتور اعمال گردید (نوبت سفارش ثابت ماند)')
-        `, [id, order.status, updatedAt]);
+        `, [safeId, order.status, updatedAt]);
 
         await connection.commit();
         clearAllRouteCaches();
@@ -1517,44 +1843,56 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/approve-edit:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // Dismiss recently edited banner
-  app.patch("/api/orders/:id/dismiss-edit-notice", async (req, res) => {
+  app.patch("/api/orders/:id/dismiss-edit-notice", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "REPRESENTATIVE"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      await db.query("UPDATE orders SET recentlyEditedNotice = NULL WHERE id = ?", [id]);
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const [ordRows] = await db.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+      const check = checkOrderOwnership(ordRows[0], req.user);
+      if (!check.allowed) {
+        return sendApiError(res, check.status, check.message);
+      }
+
+      await db.query("UPDATE orders SET recentlyEditedNotice = NULL WHERE id = ?", [safeId]);
       clearAllRouteCaches();
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/dismiss-edit-notice:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // Sales Manager rejects pending edits
-  app.patch("/api/orders/:id/reject-edit", async (req, res) => {
+  app.patch("/api/orders/:id/reject-edit", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
       const updatedAt = new Date().toISOString();
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
 
-        const [ordRows] = await connection.query("SELECT status FROM orders WHERE id = ?", [id]) as any[];
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
         const currentStatus = ordRows[0]?.status || 'PENDING_APPROVAL';
 
-        await connection.query("UPDATE orders SET hasPendingEdit = 0, pendingEditData = NULL WHERE id = ?", [id]);
+        await connection.query("UPDATE orders SET hasPendingEdit = 0, pendingEditData = NULL WHERE id = ?", [safeId]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, 'درخواست ویرایش سفارش توسط مدیر بازرگانی رد شد (مشخصات قبلی فاکتور حفظ گردید)')
-        `, [id, currentStatus, updatedAt]);
+        `, [safeId, currentStatus, updatedAt]);
 
         await connection.commit();
         clearAllRouteCaches();
@@ -1567,14 +1905,14 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/reject-edit:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/orders/:id/approve", async (req, res) => {
+  app.patch("/api/orders/:id/approve", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
       const updatedAt = new Date().toISOString();
       const status = "APPROVED_BY_SALES";
 
@@ -1582,11 +1920,19 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        await connection.query("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
+        await connection.query("UPDATE orders SET status = ? WHERE id = ?", [status, safeId]);
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, updatedAt, "تایید نهایی سفارش توسط دفتر مدیریت فروش فروشگاه طبرستان و ارجاع به کارخانه"]);
+        `, [safeId, status, updatedAt, "تایید نهایی سفارش توسط دفتر مدیریت فروش فروشگاه طبرستان و ارجاع به کارخانه"]);
 
         await connection.commit();
         res.json({ success: true });
@@ -1598,15 +1944,15 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/approve:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/orders/:id/reject", async (req, res) => {
+  app.patch("/api/orders/:id/reject", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { reason } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeReason = sanitizeString(req.body.reason, { allowEmpty: false, maxLength: 500, fieldName: "علت لغو سفارش" });
       const updatedAt = new Date().toISOString();
       const status = "REJECTED";
 
@@ -1614,11 +1960,19 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        await connection.query("UPDATE orders SET status = ?, rejectionReason = ? WHERE id = ?", [status, reason, id]);
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
+        await connection.query("UPDATE orders SET status = ?, rejectionReason = ? WHERE id = ?", [status, safeReason, safeId]);
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, updatedAt, `درخواست لغو شد به دلیل: ${reason}`]);
+        `, [safeId, status, updatedAt, `درخواست لغو شد به دلیل: ${safeReason}`]);
 
         await connection.commit();
         res.json({ success: true });
@@ -1630,15 +1984,15 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/reject:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/orders/:id/dispatch-factory", async (req, res) => {
+  app.patch("/api/orders/:id/dispatch-factory", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { comment } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeComment = sanitizeString(req.body.comment, { maxLength: 1000 });
       const updatedAt = new Date().toISOString();
       const status = "SENT_TO_FACTORY";
 
@@ -1646,11 +2000,19 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        await connection.query("UPDATE orders SET status = ?, sentToFactoryAt = ? WHERE id = ?", [status, updatedAt, id]);
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
+        await connection.query("UPDATE orders SET status = ?, sentToFactoryAt = ? WHERE id = ?", [status, updatedAt, safeId]);
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, updatedAt, comment || "سفارش تأیید شد، اولویت‌بندی نهایی گردید و جهت تأمین وسیله نقلیه به کارخانه ارسال شد."]);
+        `, [safeId, status, updatedAt, safeComment || "سفارش تأیید شد، اولویت‌بندی نهایی گردید و جهت تأمین وسیله نقلیه به کارخانه ارسال شد."]);
 
         await connection.commit();
         res.json({ success: true });
@@ -1662,25 +2024,25 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/dispatch-factory:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.post("/api/orders/bulk-approve", async (req, res) => {
+  app.post("/api/orders/bulk-approve", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
       const { orderIds } = req.body || {};
       let targetIds: string[] = [];
 
       if (Array.isArray(orderIds) && orderIds.length > 0) {
-        targetIds = orderIds;
+        targetIds = orderIds.map((item: any) => validateId(item, "شناسه سفارش"));
       } else {
         const [pendingRows] = await db.query("SELECT id FROM orders WHERE status = 'PENDING_APPROVAL'") as any[];
         targetIds = pendingRows.map((r: any) => r.id);
       }
 
       if (targetIds.length === 0) {
-        return res.status(400).json({ error: 'هیچ سفارشی جهت تایید انتخاب نشده است.' });
+        return sendApiError(res, 400, 'هیچ سفارشی جهت تایید انتخاب نشده است.');
       }
 
       const connection = await db.getConnection();
@@ -1707,16 +2069,16 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in POST /api/orders/bulk-approve:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.post("/api/orders/bulk-dispatch", async (req, res) => {
+  app.post("/api/orders/bulk-dispatch", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
       const [approvedRows] = await db.query("SELECT id FROM orders WHERE status = 'APPROVED_BY_SALES'") as any[];
       if (approvedRows.length === 0) {
-        return res.status(400).json({ error: 'هیچ سفارش تایید شده‌ای جهت ارسال به کارخانه یافت نشد.' });
+        return sendApiError(res, 400, 'هیچ سفارش تایید شده‌ای جهت ارسال به کارخانه یافت نشد.');
       }
 
       const connection = await db.getConnection();
@@ -1747,23 +2109,24 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in POST /api/orders/bulk-dispatch:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.put("/api/orders/reorder-priorities", async (req, res) => {
+  app.put("/api/orders/reorder-priorities", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { sortedOrders } = req.body; // array of { id, priorityIndex }
+      const sortedOrders = validateArray(req.body.sortedOrders, "لیست اولویت‌ها", { minLength: 1 });
       
-      if (!Array.isArray(sortedOrders)) {
-        return res.status(400).json({ error: 'ساختار ورودی نامعتبر است.' });
-      }
+      const sanitizedList = sortedOrders.map((item: any) => ({
+        id: validateId(item?.id, "شناسه سفارش"),
+        priorityIndex: validateNumber(item?.priorityIndex, "اولویت سفارش", { min: 0 })
+      }));
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
-        for (const item of sortedOrders) {
+        for (const item of sanitizedList) {
           await connection.query("UPDATE orders SET priorityIndex = ? WHERE id = ?", [item.priorityIndex, item.id]);
         }
         await connection.commit();
@@ -1776,21 +2139,51 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PUT /api/orders/reorder-priorities:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/orders/:id/assign-vehicle", async (req, res) => {
+  app.patch("/api/orders/:id/assign-vehicle", authenticate, authorize("FACTORY_TRANSPORT", "SHIPPING_COMPANY", "SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, billOfLadingNumber, shippingCompanyId } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeVehicleType = sanitizeString(req.body.vehicleType, { allowEmpty: false, maxLength: 100, fieldName: "نوع خودرو" });
+      const safeDriverName = sanitizeString(req.body.driverName, { allowEmpty: false, maxLength: 100, fieldName: "نام راننده" });
+      const safeDriverPhone = validatePhoneNumber(req.body.driverPhone, "شماره تماس راننده");
+      const safeLicensePlate = sanitizeString(req.body.licensePlate, { allowEmpty: false, maxLength: 50, fieldName: "شماره پلاک" });
+      const safeShippingAgency = sanitizeString(req.body.shippingAgency, { maxLength: 100, fieldName: "نام باربری" });
+      const safeArrival = req.body.estimatedArrival ? validateDate(req.body.estimatedArrival, "زمان تقریبی", { required: false }) : null;
+      const safeBillOfLading = sanitizeString(req.body.billOfLadingNumber, { maxLength: 100 });
+      const safeShippingCompanyId = req.body.shippingCompanyId ? validateId(req.body.shippingCompanyId, "شناسه باربری") : null;
+
+      // Strictly resolve shippingCompanyId: shipping company callers can NEVER override their assigned company
+      const callerRole = req.user ? normalizeRole(req.user.role) : '';
+      let effectiveShippingCompanyId: string | null = null;
+      if (callerRole === 'SHIPPING_COMPANY') {
+        if (!req.user?.shippingCompanyId) {
+          return sendApiError(res, 403, "شناسه شرکت باربری برای حساب شما تعیین نشده است.");
+        }
+        effectiveShippingCompanyId = req.user.shippingCompanyId;
+      } else {
+        effectiveShippingCompanyId = safeShippingCompanyId || null;
+      }
+      
       const updatedAt = new Date().toISOString();
       const status = "VEHICLE_ASSIGNED";
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
+
+        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
+        const finalShippingCompanyId = effectiveShippingCompanyId || ordRows[0]?.shippingCompanyId || null;
 
         await connection.query(`
           UPDATE orders SET 
@@ -1804,25 +2197,25 @@ function compactItemsJson(itemsInput: any): string | null {
             billOfLadingNumber = ?,
             shippingCompanyId = ?
           WHERE id = ?
-        `, [status, vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, billOfLadingNumber || null, shippingCompanyId || null, id]);
+        `, [status, safeVehicleType, safeDriverName, safeDriverPhone, safeLicensePlate, safeShippingAgency, safeArrival, safeBillOfLading || null, finalShippingCompanyId, safeId]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, updatedAt, `تخصیص وسیله نقلیه ${vehicleType} متعلق به باربری ${shippingAgency} به رانندگی ${driverName}${billOfLadingNumber ? ` با شماره بارنامه ${billOfLadingNumber}` : ''}`]);
+        `, [safeId, status, updatedAt, `تخصیص وسیله نقلیه ${safeVehicleType} متعلق به باربری ${safeShippingAgency} به رانندگی ${safeDriverName}${safeBillOfLading ? ` با شماره بارنامه ${safeBillOfLading}` : ''}`]);
 
         // Auto-register driver into permanent_drivers list if not already present
-        if (driverName && driverPhone) {
+        if (safeDriverName && safeDriverPhone) {
           const [existingDrivers] = await connection.query(
             "SELECT id FROM permanent_drivers WHERE driverPhone = ? OR (driverName = ? AND licensePlate = ?)",
-            [driverPhone, driverName, licensePlate]
+            [safeDriverPhone, safeDriverName, safeLicensePlate]
           ) as any[];
 
           if (!existingDrivers || existingDrivers.length === 0) {
             const newDriverId = `drv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
             await connection.query(
               "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 1)",
-              [newDriverId, driverName, driverPhone, licensePlate, vehicleType || 'تریلی ۱۸ چرخ لبه‌دار', shippingAgency || null]
+              [newDriverId, safeDriverName, safeDriverPhone, safeLicensePlate, safeVehicleType || 'تریلی ۱۸ چرخ لبه‌دار', safeShippingAgency || null]
             );
             const redis = getRedisClient();
             if (redis) await redis.del("permanent_drivers_list");
@@ -1839,32 +2232,41 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/assign-vehicle:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/orders/:id/request-transport", async (req, res) => {
+  app.patch("/api/orders/:id/request-transport", authenticate, authorize("FACTORY_TRANSPORT", "SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { shippingCompanyId, shippingAgency } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeShippingCompanyId = validateId(req.body.shippingCompanyId, "شناسه شرکت باربری");
+      const safeShippingAgency = sanitizeString(req.body.shippingAgency, { allowEmpty: false, maxLength: 100, fieldName: "نام باربری" });
       const updatedAt = new Date().toISOString();
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
 
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
         await connection.query(`
           UPDATE orders SET 
             shippingCompanyId = ?,
             shippingAgency = ?
           WHERE id = ?
-        `, [shippingCompanyId, shippingAgency, id]);
+        `, [safeShippingCompanyId, safeShippingAgency, safeId]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, "SENT_TO_FACTORY", updatedAt, `ارسال درخواست تامین وسیله نقلیه حمل به شرکت حمل و نقل «${shippingAgency}»`]);
+        `, [safeId, "SENT_TO_FACTORY", updatedAt, `ارسال درخواست تامین وسیله نقلیه حمل به شرکت حمل و نقل «${safeShippingAgency}»`]);
 
         await connection.commit();
         res.json({ success: true });
@@ -1876,23 +2278,31 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/request-transport:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/orders/:id/return-to-sales", async (req, res) => {
+  app.patch("/api/orders/:id/return-to-sales", authenticate, authorize("FACTORY_TRANSPORT", "SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { reason } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeReason = sanitizeString(req.body.reason, { maxLength: 500 });
       const updatedAt = new Date().toISOString();
       const status = "APPROVED_BY_SALES";
 
-      const returnReasonText = reason ? `استرداد توسط باربری همکار: ${reason}` : "استرداد و انصراف باربری از تامین وسیله نقلیه";
+      const returnReasonText = safeReason ? `استرداد توسط باربری همکار: ${safeReason}` : "استرداد و انصراف باربری از تامین وسیله نقلیه";
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
+
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
 
         await connection.query(`
           UPDATE orders SET 
@@ -1906,12 +2316,12 @@ function compactItemsJson(itemsInput: any): string | null {
             billOfLadingNumber = NULL,
             rejectionReason = ?
           WHERE id = ?
-        `, [status, returnReasonText, id]);
+        `, [status, returnReasonText, safeId]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, updatedAt, `⚠️ ${returnReasonText} (بازگشت به کارتابل مدیر فروش کارخانه)`]);
+        `, [safeId, status, updatedAt, `⚠️ ${returnReasonText} (بازگشت به کارتابل مدیر فروش کارخانه)`]);
 
         await connection.commit();
         res.json({ success: true });
@@ -1923,16 +2333,16 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/return-to-sales:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // SYSTEM SETTINGS API (Security Gate Module Toggle, etc.)
-  app.get("/api/system-settings", (req, res) => {
+  app.get("/api/system-settings", authenticate, (req, res) => {
     res.json(getSystemSettings());
   });
 
-  app.patch("/api/system-settings", (req, res) => {
+  app.patch("/api/system-settings", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), (req, res) => {
     try {
       const current = getSystemSettings();
       const updated = {
@@ -1942,21 +2352,35 @@ function compactItemsJson(itemsInput: any): string | null {
       saveSystemSettings(updated);
       res.json({ success: true, settings: updated });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // FLEET / VEHICLE EDITING BY SHIPPING COMPANY OR FACTORY TRANSPORT
-  app.patch("/api/orders/:id/update-vehicle", async (req, res) => {
+  app.patch("/api/orders/:id/update-vehicle", authenticate, authorize("SHIPPING_COMPANY", "FACTORY_TRANSPORT", "SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival, billOfLadingNumber } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeVehicleType = sanitizeString(req.body.vehicleType, { allowEmpty: false, maxLength: 100, fieldName: "نوع وسیله نقلیه" });
+      const safeDriverName = sanitizeString(req.body.driverName, { allowEmpty: false, maxLength: 100, fieldName: "نام راننده" });
+      const safeDriverPhone = validatePhoneNumber(req.body.driverPhone, "شماره تماس راننده");
+      const safeLicensePlate = sanitizeString(req.body.licensePlate, { allowEmpty: false, maxLength: 50, fieldName: "شماره پلاک" });
+      const safeShippingAgency = sanitizeString(req.body.shippingAgency, { maxLength: 100 });
+      const safeArrival = req.body.estimatedArrival ? validateDate(req.body.estimatedArrival, "زمان تقریبی", { required: false }) : null;
+      const safeBillOfLading = sanitizeString(req.body.billOfLadingNumber, { maxLength: 100 });
       const updatedAt = new Date().toISOString();
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
+
+        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
 
         await connection.query(`
           UPDATE orders SET 
@@ -1968,25 +2392,25 @@ function compactItemsJson(itemsInput: any): string | null {
             estimatedArrival = ?,
             billOfLadingNumber = ?
           WHERE id = ?
-        `, [vehicleType, driverName, driverPhone, licensePlate, shippingAgency, estimatedArrival || null, billOfLadingNumber || null, id]);
+        `, [safeVehicleType, safeDriverName, safeDriverPhone, safeLicensePlate, safeShippingAgency, safeArrival || null, safeBillOfLading || null, safeId]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, "VEHICLE_ASSIGNED", updatedAt, `ویرایش مشخصات ناوگان حمل و راننده توسط باربری: ${vehicleType} به رانندگی ${driverName} (پلاک: ${licensePlate})${billOfLadingNumber ? ` - شماره بارنامه: ${billOfLadingNumber}` : ''}`]);
+        `, [safeId, "VEHICLE_ASSIGNED", updatedAt, `ویرایش مشخصات ناوگان حمل و راننده توسط باربری: ${safeVehicleType} به رانندگی ${safeDriverName} (پلاک: ${safeLicensePlate})${safeBillOfLading ? ` - شماره بارنامه: ${safeBillOfLading}` : ''}`]);
 
         // Auto-register driver into permanent_drivers list if not already present
-        if (driverName && driverPhone) {
+        if (safeDriverName && safeDriverPhone) {
           const [existingDrivers] = await connection.query(
             "SELECT id FROM permanent_drivers WHERE driverPhone = ? OR (driverName = ? AND licensePlate = ?)",
-            [driverPhone, driverName, licensePlate]
+            [safeDriverPhone, safeDriverName, safeLicensePlate]
           ) as any[];
 
           if (!existingDrivers || existingDrivers.length === 0) {
             const newDriverId = `drv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
             await connection.query(
               "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 1)",
-              [newDriverId, driverName, driverPhone, licensePlate, vehicleType || 'تریلی ۱۸ چرخ لبه‌دار', shippingAgency || null]
+              [newDriverId, safeDriverName, safeDriverPhone, safeLicensePlate, safeVehicleType || 'تریلی ۱۸ چرخ لبه‌دار', safeShippingAgency || null]
             );
             const redis = getRedisClient();
             if (redis) await redis.del("permanent_drivers_list");
@@ -2004,22 +2428,26 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/update-vehicle:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // WAREHOUSE DISCREPANCY REPORT & RETURN TO SALES
-  app.patch("/api/orders/:id/warehouse-discrepancy", async (req, res) => {
+  app.patch("/api/orders/:id/warehouse-discrepancy", authenticate, authorize("PRODUCT_WAREHOUSE", "SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { reason, requestedQuantity, reporterName } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeReason = sanitizeString(req.body.reason, { maxLength: 500, defaultValue: "مغایرت متراژ یا تعداد بار با گنجایش ناوگان یا خط تولید" });
+      const safeRequestedQty = (req.body.requestedQuantity !== undefined && req.body.requestedQuantity !== null && req.body.requestedQuantity !== "")
+        ? validateNumber(req.body.requestedQuantity, "مقدار درخواستی", { min: 0 })
+        : undefined;
+      const safeReporter = sanitizeString(req.body.reporterName, { maxLength: 100, defaultValue: "مسئول انبار محصول" });
       const updatedAt = new Date().toISOString();
 
       const discrepancyObj = {
-        reason: reason || 'مغایرت متراژ یا تعداد بار با گنجایش ناوگان یا خط تولید',
-        requestedQuantity: requestedQuantity ? Number(requestedQuantity) : undefined,
-        reporterName: reporterName || 'مسئول انبار محصول',
+        reason: safeReason,
+        requestedQuantity: safeRequestedQty,
+        reporterName: safeReporter,
         reportedAt: updatedAt
       };
 
@@ -2027,16 +2455,24 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
         await connection.query(`
           UPDATE orders SET 
             warehouseDiscrepancy = ?
           WHERE id = ?
-        `, [JSON.stringify(discrepancyObj), id]);
+        `, [JSON.stringify(discrepancyObj), safeId]);
 
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, "VEHICLE_ASSIGNED", updatedAt, `⚠️ اعلام مغایرت بار توسط انبار (${discrepancyObj.reporterName}): ${discrepancyObj.reason}${discrepancyObj.requestedQuantity ? ` (مقدار پیشنهادی بارگیری: ${discrepancyObj.requestedQuantity})` : ''} - ارجاع به مدیریت فروش جهت تصمیم‌گیری`]);
+        `, [safeId, "VEHICLE_ASSIGNED", updatedAt, `⚠️ اعلام مغایرت بار توسط انبار (${discrepancyObj.reporterName}): ${discrepancyObj.reason}${discrepancyObj.requestedQuantity ? ` (مقدار پیشنهادی بارگیری: ${discrepancyObj.requestedQuantity})` : ''} - ارجاع به مدیریت فروش جهت تصمیم‌گیری`]);
 
         await connection.commit();
         clearAllRouteCaches();
@@ -2049,28 +2485,26 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/warehouse-discrepancy:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // 1. WAREHOUSE LOADING & EXIT PERMIT ISSUANCE
-  app.patch("/api/orders/:id/warehouse-load", async (req, res) => {
+  app.patch("/api/orders/:id/warehouse-load", authenticate, authorize("PRODUCT_WAREHOUSE", "SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { 
-        loadedPalletsCount, 
-        actualQuantity, 
-        packagingType,
-        exitPermitNumber, 
-        weighbridgeGross, 
-        weighbridgeTare, 
-        weighbridgeNet, 
-        warehouseKeeperName, 
-        warehouseNotes, 
-        productionBatch, 
-        packageQualityConfirmed 
-      } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const loadedPalletsCount = validateNumber(req.body.loadedPalletsCount, "تعداد پالت", { min: 0, required: false, defaultValue: 0 });
+      const actualQuantity = validateNumber(req.body.actualQuantity, "مقدار واقعی", { min: 0, required: false, defaultValue: 0 });
+      const packagingType = sanitizeString(req.body.packagingType, { maxLength: 50, defaultValue: "BULK" });
+      const exitPermitNumber = sanitizeString(req.body.exitPermitNumber, { maxLength: 100, defaultValue: `WH-${Date.now().toString().slice(-6)}` });
+      const weighbridgeGross = validateNumber(req.body.weighbridgeGross, "وزن ناخالص", { min: 0, required: false, defaultValue: 0 });
+      const weighbridgeTare = validateNumber(req.body.weighbridgeTare, "وزن خالی", { min: 0, required: false, defaultValue: 0 });
+      const weighbridgeNet = validateNumber(req.body.weighbridgeNet, "وزن خالص", { min: 0, required: false, defaultValue: 0 });
+      const warehouseKeeperName = sanitizeString(req.body.warehouseKeeperName, { maxLength: 100, defaultValue: "مسئول انبار محصول" });
+      const warehouseNotes = sanitizeString(req.body.warehouseNotes, { maxLength: 1000 });
+      const productionBatch = sanitizeString(req.body.productionBatch, { maxLength: 100 });
+      const packageQualityConfirmed = !!req.body.packageQualityConfirmed;
       
       const loadedAt = new Date().toISOString();
       const settings = getSystemSettings();
@@ -2078,18 +2512,18 @@ function compactItemsJson(itemsInput: any): string | null {
       const status = settings.securityGateEnabled ? "WAREHOUSE_LOADED" : "LOADED_AND_DISPATCHED";
 
       const warehouseDetailsObj = {
-        loadedPalletsCount: Number(loadedPalletsCount) || 0,
-        actualQuantity: Number(actualQuantity) || 0,
-        packagingType: packagingType || 'BULK',
-        exitPermitNumber: exitPermitNumber || `WH-${Date.now().toString().slice(-6)}`,
-        weighbridgeGross: Number(weighbridgeGross) || 0,
-        weighbridgeTare: Number(weighbridgeTare) || 0,
-        weighbridgeNet: Number(weighbridgeNet) || 0,
-        warehouseKeeperName: warehouseKeeperName || 'مسئول انبار محصول',
+        loadedPalletsCount,
+        actualQuantity,
+        packagingType,
+        exitPermitNumber,
+        weighbridgeGross,
+        weighbridgeTare,
+        weighbridgeNet,
+        warehouseKeeperName,
         loadedAt,
         warehouseNotes: warehouseNotes || null,
         productionBatch: productionBatch || null,
-        packageQualityConfirmed: !!packageQualityConfirmed
+        packageQualityConfirmed
       };
 
       const warehouseDetailsJson = JSON.stringify(warehouseDetailsObj);
@@ -2097,6 +2531,14 @@ function compactItemsJson(itemsInput: any): string | null {
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
+
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
 
         await connection.query(`
           UPDATE orders SET 
@@ -2115,7 +2557,7 @@ function compactItemsJson(itemsInput: any): string | null {
           warehouseDetailsObj.loadedPalletsCount, 
           warehouseDetailsObj.weighbridgeNet, 
           warehouseDetailsObj.packagingType,
-          id
+          safeId
         ]);
 
         const packagingLabel = warehouseDetailsObj.packagingType === 'PALLET' 
@@ -2129,7 +2571,7 @@ function compactItemsJson(itemsInput: any): string | null {
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, loadedAt, historyComment]);
+        `, [safeId, status, loadedAt, historyComment]);
 
         await connection.commit();
         clearAllRouteCaches();
@@ -2137,7 +2579,7 @@ function compactItemsJson(itemsInput: any): string | null {
         await recordActivity(
           req,
           "ثبت بارگیری و صدور حواله خروج انبار",
-          `ثبت بارگیری سفارش کد ${id} با شماره حواله ${warehouseDetailsObj.exitPermitNumber} (${packagingLabel}) توسط ${warehouseDetailsObj.warehouseKeeperName}`,
+          `ثبت بارگیری سفارش کد ${safeId} با شماره حواله ${warehouseDetailsObj.exitPermitNumber} (${packagingLabel}) توسط ${warehouseDetailsObj.warehouseKeeperName}`,
           "ORDERS"
         );
 
@@ -2150,30 +2592,40 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/warehouse-load:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // SECURITY GATE DETAIN & INTERCEPT ORDER
-  app.patch("/api/orders/:id/security-detain", async (req, res) => {
+  app.patch("/api/orders/:id/security-detain", authenticate, authorize("SECURITY_GATE", "SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { reason, officerName, action } = req.body; // action: 'RETURNED_TO_WAREHOUSE' | 'RETURNED_TO_SHIPPING'
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeReason = sanitizeString(req.body.reason, { maxLength: 500, defaultValue: "ممانعت از خروج به دلیل عدم تطابق مدارک، پلاک یا نقص فیزیکی بار" });
+      const safeOfficerName = sanitizeString(req.body.officerName, { maxLength: 100, defaultValue: "افسر انتظامات و حراست کارخانه" });
+      const action = req.body.action === 'RETURNED_TO_SHIPPING' ? 'RETURNED_TO_SHIPPING' : 'RETURNED_TO_WAREHOUSE';
       const updatedAt = new Date().toISOString();
 
       const targetStatus = action === 'RETURNED_TO_SHIPPING' ? 'VEHICLE_ASSIGNED' : 'WAREHOUSE_LOADED';
 
       const detainedObj = {
-        reason: reason || 'ممانعت از خروج به دلیل عدم تطابق مدارک، پلاک یا نقص فیزیکی بار',
-        officerName: officerName || 'افسر انتظامات و حراست کارخانه',
+        reason: safeReason,
+        officerName: safeOfficerName,
         detainedAt: updatedAt,
-        action: action || 'RETURNED_TO_WAREHOUSE'
+        action
       };
 
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
+
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
 
         await connection.query(`
           UPDATE orders SET 
@@ -2181,7 +2633,7 @@ function compactItemsJson(itemsInput: any): string | null {
             securityDetained = ?,
             securityGateDetails = NULL
           WHERE id = ?
-        `, [targetStatus, JSON.stringify(detainedObj), id]);
+        `, [targetStatus, JSON.stringify(detainedObj), safeId]);
 
         const actionLabel = action === 'RETURNED_TO_SHIPPING' 
           ? 'عودت به شرکت باربری و ترابری جهت اصلاح ناوگان' 
@@ -2190,7 +2642,7 @@ function compactItemsJson(itemsInput: any): string | null {
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, targetStatus, updatedAt, `🛑 توقیف و ممانعت از خروج در گیت حراست توسط ${detainedObj.officerName} به دلیل: ${detainedObj.reason} (${actionLabel})`]);
+        `, [safeId, targetStatus, updatedAt, `🛑 توقیف و ممانعت از خروج در گیت حراست توسط ${detainedObj.officerName} به دلیل: ${detainedObj.reason} (${actionLabel})`]);
 
         await connection.commit();
         clearAllRouteCaches();
@@ -2203,41 +2655,34 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/security-detain:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // 2. SECURITY GATE FINAL CLEARANCE & DISPATCH
-  app.patch("/api/orders/:id/security-clearance", async (req, res) => {
+  app.patch("/api/orders/:id/security-clearance", authenticate, authorize("SECURITY_GATE", "SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
-      const { 
-        officerName, 
-        gatePassNumber,
-        plateMatchConfirmed, 
-        driverIdConfirmed, 
-        permitMatchConfirmed, 
-        billOfLadingChecked,
-        warehouseSlipChecked,
-        sealNumber, 
-        securityNotes 
-      } = req.body;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const safeOfficerName = sanitizeString(req.body.officerName, { maxLength: 100, defaultValue: "افسر انتظامات و حراست کارخانه" });
+      const safeGatePass = sanitizeString(req.body.gatePassNumber, { maxLength: 100, defaultValue: `GATE-PASS-${Date.now().toString().slice(-6)}` });
+      const safeSeal = sanitizeString(req.body.sealNumber, { maxLength: 100 });
+      const safeNotes = sanitizeString(req.body.securityNotes, { maxLength: 1000 });
 
       const gateExitAt = new Date().toISOString();
       const status = "LOADED_AND_DISPATCHED";
 
       const securityGateDetailsObj = {
-        gatePassNumber: gatePassNumber || `GATE-PASS-${Date.now().toString().slice(-6)}`,
-        officerName: officerName || 'افسر انتظامات و حراست کارخانه',
+        gatePassNumber: safeGatePass,
+        officerName: safeOfficerName,
         gateExitAt,
-        plateMatchConfirmed: plateMatchConfirmed !== false,
-        driverIdConfirmed: driverIdConfirmed !== false,
-        permitMatchConfirmed: permitMatchConfirmed !== false,
-        billOfLadingChecked: billOfLadingChecked !== false,
-        warehouseSlipChecked: warehouseSlipChecked !== false,
-        sealNumber: sealNumber || null,
-        securityNotes: securityNotes || null
+        plateMatchConfirmed: req.body.plateMatchConfirmed !== false,
+        driverIdConfirmed: req.body.driverIdConfirmed !== false,
+        permitMatchConfirmed: req.body.permitMatchConfirmed !== false,
+        billOfLadingChecked: req.body.billOfLadingChecked !== false,
+        warehouseSlipChecked: req.body.warehouseSlipChecked !== false,
+        sealNumber: safeSeal || null,
+        securityNotes: safeNotes || null
       };
 
       const securityGateDetailsJson = JSON.stringify(securityGateDetailsObj);
@@ -2245,6 +2690,14 @@ function compactItemsJson(itemsInput: any): string | null {
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
+
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
 
         await connection.query(`
           UPDATE orders SET 
@@ -2257,7 +2710,7 @@ function compactItemsJson(itemsInput: any): string | null {
           status, 
           securityGateDetailsJson, 
           securityGateDetailsObj.sealNumber, 
-          id
+          safeId
         ]);
 
         const historyComment = `تایید نهایی حراست و صدور پروانه الکترونیکی خروج شماره ${securityGateDetailsObj.gatePassNumber}: دریافت و کنترل بارنامه رسمی باربری، تطبیق برگ خروج انبار و پلاک فیزیکی توسط ${securityGateDetailsObj.officerName}${securityGateDetailsObj.sealNumber ? ` (شماره پلمپ: ${securityGateDetailsObj.sealNumber})` : ''} - خودرو با موفقیت ترخیص و عازم مقصد گردید.`;
@@ -2265,7 +2718,7 @@ function compactItemsJson(itemsInput: any): string | null {
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, gateExitAt, historyComment]);
+        `, [safeId, status, gateExitAt, historyComment]);
 
         await connection.commit();
         clearAllRouteCaches();
@@ -2273,7 +2726,7 @@ function compactItemsJson(itemsInput: any): string | null {
         await recordActivity(
           req,
           "تایید خروج و صدور مجوز از گیت حراست",
-          `ترخیص و صدور پروانه خروج ${securityGateDetailsObj.gatePassNumber} برای سفارش ${id} توسط افسر حراست (${securityGateDetailsObj.officerName})`,
+          `ترخیص و صدور پروانه خروج ${securityGateDetailsObj.gatePassNumber} برای سفارش ${safeId} توسط افسر حراست (${securityGateDetailsObj.officerName})`,
           "ORDERS"
         );
 
@@ -2286,14 +2739,14 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/security-clearance:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.patch("/api/orders/:id/dispatch", async (req, res) => {
+  app.patch("/api/orders/:id/dispatch", authenticate, authorize("FACTORY_TRANSPORT", "SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
-      const { id } = req.params;
+      const safeId = validateId(req.params.id, "شناسه سفارش");
       const updatedAt = new Date().toISOString();
       const status = "LOADED_AND_DISPATCHED";
 
@@ -2301,11 +2754,19 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        await connection.query("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const check = checkOrderOwnership(ordRows[0], req.user);
+        if (!check.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, check.status, check.message);
+        }
+
+        await connection.query("UPDATE orders SET status = ? WHERE id = ?", [status, safeId]);
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [id, status, updatedAt, 'محصول با موفقیت بارگیری شد و خودرو از درب حراست کارخانه ترخیص و به سمت مقصد حرکت کرد.']);
+        `, [safeId, status, updatedAt, 'محصول با موفقیت بارگیری شد و خودرو از درب حراست کارخانه ترخیص و به سمت مقصد حرکت کرد.']);
 
         await connection.commit();
         res.json({ success: true });
@@ -2317,22 +2778,27 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/dispatch:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // --- USER ACCOUNTS AND OTP AUTHENTICATION ---
-  const activeOtps = new Map<string, string>();
 
-  // OTP Request API
+  // OTP Request API (Login)
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
-      const { phoneNumber } = req.body;
-      if (!phoneNumber) {
-        return res.status(400).json({ error: "شماره تلفن الزامی است." });
+      const cleanPhone = validatePhoneNumber(req.body.phoneNumber);
+      const clientIp = getClientIp(req);
+
+      // Requirement 3: Enforce rate limits and resend cooldowns
+      const rateCheck = checkOtpRateLimit(cleanPhone, clientIp, "LOGIN");
+      if (!rateCheck.allowed) {
+        if (rateCheck.retryAfter) {
+          res.setHeader("Retry-After", String(rateCheck.retryAfter));
+        }
+        return sendApiError(res, 429, rateCheck.error || "تعداد درخواست‌های کد تایید بیش از حد مجاز است.");
       }
 
-      const cleanPhone = String(phoneNumber).trim();
       const db = getDbPool();
       const [rows] = await db.query(
         "SELECT * FROM app_users WHERE phoneNumber = ? OR username = ? OR agentCode = ?",
@@ -2340,50 +2806,68 @@ function compactItemsJson(itemsInput: any): string | null {
       );
       const matched = rows as any[];
 
+      // Requirement 4: Prevent account enumeration with consistent generic response
       if (matched.length === 0) {
-        return res.status(404).json({ error: "کاربری با این شماره تلفن یا نام کاربری در سامانه یافت نشد." });
+        recordOtpRequest(cleanPhone, clientIp, "LOGIN");
+        return res.json({
+          success: true,
+          message: "در صورت ثبت بودن اطلاعات در سامانه، کد تایید پیامکی ارسال گردید.",
+          expiresIn: getOtpExpirySeconds()
+        });
       }
 
       const user = matched[0];
       if (!user.isEnabled) {
-        return res.status(403).json({ error: "حساب کاربری شما غیرفعال شده است. با مدیریت تماس بگیرید." });
+        return sendApiError(res, 403, "حساب کاربری شما غیرفعال شده است. با مدیریت تماس بگیرید.");
       }
 
-      // Generate a 4-digit code
-      const otpCode = Math.floor(1000 + Math.random() * 9000).toString();
-      activeOtps.set(user.phoneNumber, otpCode);
-      activeOtps.set(cleanPhone, otpCode);
+      const targetPhone = user.phoneNumber || cleanPhone;
+      recordOtpRequest(targetPhone, clientIp, "LOGIN");
 
-      console.log(`🔑 [SMS Simulation] OTP code for ${cleanPhone} (${user.fullName}): ${otpCode}`);
+      // Generate cryptographically secure OTP with expiration
+      const { code: otpCode, expiresIn } = createOtp(targetPhone, "LOGIN");
 
-      res.json({ 
-        success: true, 
-        message: "کد تایید پیامکی شبیه‌سازی شد.", 
-        otp: otpCode // return code for seamless debugging
-      });
+      // Requirement 5: Dispatch via SMS gateway and strictly check provider result
+      const smsResult = await sendOtpSms(targetPhone, otpCode, "LOGIN");
+      if (!smsResult.success) {
+        deleteOtp(targetPhone, "LOGIN");
+        console.error(`[Auth] SMS dispatch failed for ${maskPhoneNumber(targetPhone)}:`, smsResult.error);
+        return sendApiError(res, 502, smsResult.error || "خطا در ارسال پیامک از طریق سامانه پیامکی. لطفاً دقایقی دیگر تلاش نمایید.");
+      }
+
+      const isProd = isProductionEnvironment();
+      const responsePayload: any = {
+        success: true,
+        message: "کد تایید پیامکی با موفقیت صادر و ارسال شد.",
+        expiresIn
+      };
+
+      // Requirement 6: In production, NEVER return OTP codes to clients
+      if (!isProd && !isSmsConfigured()) {
+        responsePayload.devOtp = otpCode;
+        responsePayload.otp = otpCode; // backward-compatible with dev UI
+      }
+
+      res.json(responsePayload);
     } catch (err: any) {
       console.error("Error in /api/auth/send-otp:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // OTP Verification API
   app.post("/api/auth/verify-otp", async (req, res) => {
     try {
-      const { phoneNumber, code } = req.body;
-      if (!phoneNumber || !code) {
-        return res.status(400).json({ error: "شماره تلفن و کد تایید الزامی هستند." });
+      const cleanPhone = validatePhoneNumber(req.body.phoneNumber);
+      const cleanCode = sanitizeString(req.body.code, { allowEmpty: false, maxLength: 20, fieldName: "کد تایید" });
+      const clientIp = getClientIp(req);
+
+      // Requirement 3: Enforce verification rate limit per source IP
+      const ipVerifyCheck = checkVerificationRateLimit(clientIp);
+      if (!ipVerifyCheck.allowed) {
+        return sendApiError(res, 429, ipVerifyCheck.error || "تعداد دفعات تلاش اشتباه بیش از حد مجاز است.");
       }
 
-      const cleanPhone = String(phoneNumber).trim();
-      const cleanCode = String(code).trim();
-      const expectedCode = activeOtps.get(cleanPhone);
-      // Let's accept both the real code OR a universal master code "1234" for easy grading/testing.
-      if (cleanCode !== expectedCode && cleanCode !== "1234" && cleanCode !== "1111") {
-        return res.status(400).json({ error: "کد تایید نادرست است." });
-      }
-
-      // If matches, retrieve user details
       const db = getDbPool();
       const [rows] = await db.query(
         "SELECT * FROM app_users WHERE phoneNumber = ? OR username = ? OR agentCode = ?",
@@ -2391,48 +2875,45 @@ function compactItemsJson(itemsInput: any): string | null {
       );
       const matched = rows as any[];
 
+      // Requirement 4: Prevent account enumeration with generic error
       if (matched.length === 0) {
-        return res.status(404).json({ error: "کاربر یافت نشد." });
+        recordFailedVerification(clientIp);
+        return sendApiError(res, 400, "کد تایید وارد شده نادرست است یا منقضی شده است.");
       }
 
       const user = matched[0];
       if (!user.isEnabled) {
-        return res.status(403).json({ error: "حساب کاربری غیرفعال است." });
+        return sendApiError(res, 403, "حساب کاربری غیرفعال است.");
       }
 
-      // Remove code from memory
-      activeOtps.delete(cleanPhone);
-      activeOtps.delete(user.phoneNumber);
+      const targetPhone = user.phoneNumber || cleanPhone;
+      // Requirement 2 & 7: Strict verification (purpose='LOGIN', expiry, single-use, max attempts, safe concurrency)
+      const verifyResult = await verifyOtp(targetPhone, cleanCode, "LOGIN");
+      if (!verifyResult.success) {
+        recordFailedVerification(clientIp);
+        return sendApiError(res, 400, verifyResult.error);
+      }
+
+      const token = generateToken({ id: user.id, username: user.username, role: user.role });
+      setAuthCookie(res, token, req);
 
       res.json({
         success: true,
-        user: {
-          id: user.id,
-          username: user.username,
-          fullName: user.fullName,
-          phoneNumber: user.phoneNumber,
-          role: user.role,
-          agentCode: user.agentCode,
-          shippingCompanyId: user.shippingCompanyId,
-          isEnabled: !!user.isEnabled
-        }
+        token,
+        user: sanitizeUser(user)
       });
     } catch (err: any) {
       console.error("Error in /api/auth/verify-otp:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // --- PASSWORD LOGIN ---
   app.post("/api/auth/login-password", async (req, res) => {
     try {
-      const { loginKey, password } = req.body;
-      if (!loginKey || !password) {
-        return res.status(400).json({ error: "وارد کردن نام کاربری/شماره همراه و رمز عبور الزامی است." });
-      }
+      const cleanKey = sanitizeString(req.body.loginKey, { allowEmpty: false, maxLength: 100, fieldName: "نام کاربری یا شماره همراه" });
+      const cleanPass = sanitizeString(req.body.password, { allowEmpty: false, maxLength: 200, fieldName: "رمز عبور" });
 
-      const cleanKey = String(loginKey).trim();
-      const cleanPass = String(password).trim();
       const db = getDbPool();
       // Look up by username, phone, or agent code
       const [rows] = await db.query(
@@ -2442,49 +2923,68 @@ function compactItemsJson(itemsInput: any): string | null {
       const matched = rows as any[];
 
       if (matched.length === 0) {
-        return res.status(404).json({ error: "کاربری با این نام کاربری یا شماره همراه یافت نشد." });
+        return sendApiError(res, 404, "کاربری با این نام کاربری یا شماره همراه یافت نشد.");
       }
 
       const user = matched[0];
       if (!user.isEnabled) {
-        return res.status(403).json({ error: "حساب کاربری شما غیرفعال شده است. با مدیریت تماس بگیرید." });
+        return sendApiError(res, 403, "حساب کاربری شما غیرفعال شده است. با مدیریت تماس بگیرید.");
       }
 
-      const dbPassword = user.password || "123456";
-      if (cleanPass !== dbPassword) {
-        return res.status(400).json({ error: "رمز عبور نادرست است." });
+      const dbPassword = user.password || DEFAULT_PASSWORD_BCRYPT_HASH;
+      const verifyResult = await verifyPassword(cleanPass, dbPassword);
+      if (!verifyResult.valid) {
+        return sendApiError(res, 400, "رمز عبور نادرست است.");
       }
+
+      // Safe migration: if user had plain-text password, immediately upgrade to bcrypt
+      if (verifyResult.needsMigration) {
+        const upgradedHash = await hashPassword(cleanPass);
+        await db.query("UPDATE app_users SET password = ? WHERE id = ?", [upgradedHash, user.id]);
+        user.password = upgradedHash;
+      }
+
+      // Check if user is using a default password like "123456"
+      const isDefault = isDefaultPassword(cleanPass) || isDefaultPasswordOrMatches(user.password) || Boolean(user.mustChangePassword);
+
+      const token = generateToken({ id: user.id, username: user.username, role: user.role });
+      setAuthCookie(res, token, req);
 
       res.json({
         success: true,
-        user: {
-          id: user.id,
-          username: user.username,
-          fullName: user.fullName,
-          phoneNumber: user.phoneNumber,
-          role: user.role,
-          agentCode: user.agentCode,
-          shippingCompanyId: user.shippingCompanyId,
-          isEnabled: !!user.isEnabled
-        }
+        token,
+        mustChangePassword: isDefault,
+        user: sanitizeUser(user)
       });
     } catch (err: any) {
       console.error("Error in /api/auth/login-password:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  const activeForgotOtps = new Map<string, string>();
+  // CURRENT AUTHENTICATED USER SESSION INFO
+  app.get("/api/auth/me", authenticate, (req, res) => {
+    res.json({
+      success: true,
+      user: sanitizeUser(req.user)
+    });
+  });
 
   // SEND RECOVERY CODE
   app.post("/api/auth/forgot-password-send", async (req, res) => {
     try {
-      const { phoneNumber } = req.body;
-      if (!phoneNumber) {
-        return res.status(400).json({ error: "شماره تلفن همراه الزامی است." });
+      const cleanPhone = validatePhoneNumber(req.body.phoneNumber);
+      const clientIp = getClientIp(req);
+
+      // Requirement 3: Enforce rate limits and resend cooldowns
+      const rateCheck = checkOtpRateLimit(cleanPhone, clientIp, "PASSWORD_RESET");
+      if (!rateCheck.allowed) {
+        if (rateCheck.retryAfter) {
+          res.setHeader("Retry-After", String(rateCheck.retryAfter));
+        }
+        return sendApiError(res, 429, rateCheck.error || "تعداد درخواست‌های کد تایید بیش از حد مجاز است.");
       }
 
-      const cleanPhone = String(phoneNumber).trim();
       const db = getDbPool();
       const [rows] = await db.query(
         "SELECT * FROM app_users WHERE phoneNumber = ? OR username = ? OR agentCode = ?",
@@ -2492,119 +2992,283 @@ function compactItemsJson(itemsInput: any): string | null {
       );
       const matched = rows as any[];
 
+      // Requirement 4: Prevent account enumeration with consistent generic response
       if (matched.length === 0) {
-        return res.status(404).json({ error: "کاربری با این شماره همراه در سیستم یافت نشد." });
+        recordOtpRequest(cleanPhone, clientIp, "PASSWORD_RESET");
+        return res.json({
+          success: true,
+          message: "در صورت ثبت بودن شماره همراه در سیستم، کد تایید بازیابی ارسال گردید.",
+          expiresIn: getOtpExpirySeconds()
+        });
       }
 
       const user = matched[0];
       if (!user.isEnabled) {
-        return res.status(403).json({ error: "حساب غیرفعال است و امکان بازیابی رمز وجود ندارد." });
+        return sendApiError(res, 403, "حساب غیرفعال است و امکان بازیابی رمز وجود ندارد.");
       }
 
-      const otp = Math.floor(1000 + Math.random() * 9000).toString();
-      activeForgotOtps.set(phoneNumber, otp);
+      const targetPhone = user.phoneNumber || cleanPhone;
+      recordOtpRequest(targetPhone, clientIp, "PASSWORD_RESET");
 
-      console.log(`🔑 [SMS Simulation] Password recovery OTP for ${phoneNumber} (${user.fullName}): ${otp}`);
+      // Generate cryptographically secure OTP with expiration
+      const { code: otpCode, expiresIn } = createOtp(targetPhone, "PASSWORD_RESET");
 
-      res.json({
+      // Requirement 5: Dispatch via SMS gateway and strictly check provider result
+      const smsResult = await sendOtpSms(targetPhone, otpCode, "PASSWORD_RESET");
+      if (!smsResult.success) {
+        deleteOtp(targetPhone, "PASSWORD_RESET");
+        console.error(`[Auth] Recovery SMS dispatch failed for ${maskPhoneNumber(targetPhone)}:`, smsResult.error);
+        return sendApiError(res, 502, smsResult.error || "خطا در ارسال پیامک بازیابی رمز عبور.");
+      }
+
+      const isProd = isProductionEnvironment();
+      const responsePayload: any = {
         success: true,
-        otp, // returned for simple debugging
-        message: "کد تایید بازیابی رمز عبور شبیه‌سازی و پیامک شد."
-      });
+        message: "کد تایید بازیابی رمز عبور با موفقیت ارسال شد.",
+        expiresIn
+      };
+
+      // Requirement 6: In production, NEVER return OTP codes to clients
+      if (!isProd && !isSmsConfigured()) {
+        responsePayload.devOtp = otpCode;
+        responsePayload.otp = otpCode; // backward-compatible with dev UI
+      }
+
+      res.json(responsePayload);
     } catch (err: any) {
       console.error("Error in /api/auth/forgot-password-send:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // VERIFY AND RESET PASSWORD
   app.post("/api/auth/forgot-password-reset", async (req, res) => {
     try {
-      const { phoneNumber, code, newPassword } = req.body;
-      if (!phoneNumber || !code || !newPassword) {
-        return res.status(400).json({ error: "وارد کردن تمامی مقادیر الزامی است." });
-      }
+      const cleanPhone = validatePhoneNumber(req.body.phoneNumber);
+      const cleanCode = sanitizeString(req.body.code, { allowEmpty: false, maxLength: 20, fieldName: "کد تایید" });
+      const safeNewPassword = sanitizeString(req.body.newPassword, { allowEmpty: false, maxLength: 200, fieldName: "رمز عبور جدید" });
+      const clientIp = getClientIp(req);
 
-      const expectedCode = activeForgotOtps.get(phoneNumber);
-      if (code !== expectedCode && code !== "1234" && code !== "1111") {
-        return res.status(400).json({ error: "کد تایید پیامکی نادرست است." });
+      // Requirement 3: Enforce verification rate limit per source IP
+      const ipVerifyCheck = checkVerificationRateLimit(clientIp);
+      if (!ipVerifyCheck.allowed) {
+        return sendApiError(res, 429, ipVerifyCheck.error || "تعداد دفعات تلاش اشتباه بیش از حد مجاز است.");
       }
 
       const db = getDbPool();
-      await db.query("UPDATE app_users SET password = ? WHERE phoneNumber = ?", [newPassword, phoneNumber]);
-      
-      activeForgotOtps.delete(phoneNumber);
+      const [rows] = await db.query(
+        "SELECT * FROM app_users WHERE phoneNumber = ? OR username = ? OR agentCode = ?",
+        [cleanPhone, cleanPhone, cleanPhone]
+      );
+      const matched = rows as any[];
 
-      res.json({ success: true, message: "رمز عبور با موفقیت بازنشانی شد. اکنون می‌توانید وارد شوید." });
+      // Requirement 4: Prevent account enumeration
+      if (matched.length === 0) {
+        recordFailedVerification(clientIp);
+        return sendApiError(res, 400, "کد تایید وارد شده نادرست است یا منقضی شده است.");
+      }
+
+      const user = matched[0];
+      if (!user.isEnabled) {
+        return sendApiError(res, 403, "حساب کاربری غیرفعال است.");
+      }
+
+      const targetPhone = user.phoneNumber || cleanPhone;
+      // Requirement 2 & 7: Strict verification (purpose='PASSWORD_RESET')
+      const verifyResult = await verifyOtp(targetPhone, cleanCode, "PASSWORD_RESET");
+      if (!verifyResult.success) {
+        recordFailedVerification(clientIp);
+        return sendApiError(res, 400, verifyResult.error);
+      }
+
+      const trimmedPass = safeNewPassword.trim();
+      if (trimmedPass.length < 6) {
+        return sendApiError(res, 400, "رمز عبور جدید باید حداقل ۶ کاراکتر باشد.");
+      }
+
+      if (isDefaultPassword(trimmedPass)) {
+        return sendApiError(res, 400, "استفاده از کلمه عبور پیش‌فرض (مانند 123456) مجاز نیست. لطفاً یک رمز عبور امن و اختصاصی انتخاب فرمایید.");
+      }
+
+      const hashedPassword = await hashPassword(trimmedPass);
+      await db.query("UPDATE app_users SET password = ?, mustChangePassword = 0 WHERE id = ?", [hashedPassword, user.id]);
+
+      await logUserActivity({
+        userId: user.id,
+        userName: user.fullName || user.username,
+        userRole: user.role,
+        action: "بازیابی کلمه عبور",
+        details: "رمز عبور کاربر از طریق کد یکبار مصرف پیامکی با موفقیت بازنشانی شد و با bcrypt ذخیره شد.",
+        module: "AUTH",
+        ipAddress: req.ip || "127.0.0.1",
+        status: "SUCCESS"
+      }).catch(() => {});
+
+      res.json({ success: true, message: "رمز عبور با موفقیت بازنشانی شد. اکنون می‌توانید با رمز عبور جدید وارد شوید." });
     } catch (err: any) {
       console.error("Error in /api/auth/forgot-password-reset:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
+  });
+
+  // LOGOUT ENDPOINT
+  app.post("/api/auth/logout", (req, res) => {
+    clearAuthCookie(res, req);
+    res.json({ success: true, message: "با موفقیت خارج شدید." });
   });
 
   // CHANGE PASSWORD INSIDE APP
   app.post("/api/users/:id/change-password", async (req, res) => {
     try {
-      const { id } = req.params;
-      const { currentPassword, newPassword } = req.body;
-      if (!currentPassword || !newPassword) {
-        return res.status(400).json({ error: "وارد کردن رمز فعلی و جدید الزامی است." });
-      }
+      const safeId = validateId(req.params.id, "شناسه کاربر");
+      const safeCurrent = sanitizeString(req.body.currentPassword, { allowEmpty: false, maxLength: 200, fieldName: "رمز عبور فعلی" });
+      const safeNew = sanitizeString(req.body.newPassword, { allowEmpty: false, maxLength: 200, fieldName: "رمز عبور جدید" });
 
       const db = getDbPool();
-      const [rows] = await db.query("SELECT * FROM app_users WHERE id = ?", [id]);
+      const [rows] = await db.query("SELECT * FROM app_users WHERE id = ?", [safeId]);
       const matched = rows as any[];
 
       if (matched.length === 0) {
-        return res.status(404).json({ error: "کاربر یافت نشد." });
+        return sendApiError(res, 404, "کاربر یافت نشد.");
       }
 
       const user = matched[0];
-      const dbPassword = user.password || "123456";
+      const targetRole = normalizeRole(user.role);
 
-      if (currentPassword !== dbPassword) {
-        return res.status(400).json({ error: "رمز عبور فعلی نادرست است." });
+      // Check caller's token if provided
+      const token = extractToken(req);
+      let callerUser: any = null;
+      if (token) {
+        const payload = verifyToken(token);
+        if (payload && payload.userId) {
+          const [uRows] = await db.query("SELECT * FROM app_users WHERE id = ?", [payload.userId]);
+          const uMatched = uRows as any[];
+          if (uMatched.length > 0 && uMatched[0].isEnabled) {
+            callerUser = uMatched[0];
+            req.user = {
+              id: callerUser.id,
+              username: callerUser.username,
+              role: normalizeRole(callerUser.role),
+              fullName: callerUser.fullName,
+              agentCode: callerUser.agentCode,
+              shippingCompanyId: callerUser.shippingCompanyId,
+              isEnabled: !!callerUser.isEnabled
+            };
+          }
+        }
       }
 
-      await db.query("UPDATE app_users SET password = ? WHERE id = ?", [newPassword, id]);
-      res.json({ success: true, message: "رمز عبور شما با موفقیت تغییر یافت." });
+      // If token was provided and callerUser resolved:
+      if (callerUser) {
+        const callerRole = normalizeRole(callerUser.role);
+
+        // Requirement 3: A SALES_MANAGER must not change the password of a SYSTEM_ADMIN account
+        if (targetRole === "SYSTEM_ADMIN" && callerUser.id !== user.id && callerRole !== "SYSTEM_ADMIN") {
+          return sendApiError(res, 403, "مدیر بازرگانی مجاز به تغییر رمز عبور حساب مدیر ارشد سیستم نمی‌باشد.");
+        }
+
+        // Authorize: Only account owner or SYSTEM_ADMIN/SALES_MANAGER (for non-admin accounts) can change password
+        if (callerUser.id !== safeId && !hasRole(callerUser.role, ["SYSTEM_ADMIN", "SALES_MANAGER"])) {
+          return sendApiError(res, 403, "دسترسی غیرمجاز. شما مجوز تغییر رمز عبور این کاربر را ندارید.");
+        }
+      } else {
+        // If unauthenticated (no valid token/cookie):
+        // Primary root admin and SYSTEM_ADMIN accounts strictly require authenticated session
+        if (isPrimaryAdmin(user) || targetRole === "SYSTEM_ADMIN") {
+          return sendApiError(res, 401, "احراز هویت الزامی است. لطفاً ابتدا وارد شوید.");
+        }
+      }
+
+      const dbPassword = user.password || DEFAULT_PASSWORD_BCRYPT_HASH;
+
+      // Verify current password (unless caller is an authenticated SYSTEM_ADMIN changing another user's password)
+      const isSystemAdminCaller = callerUser && hasRole(callerUser.role, ["SYSTEM_ADMIN"]) && callerUser.id !== user.id;
+      if (!isSystemAdminCaller) {
+        const verifyCurrent = await verifyPassword(safeCurrent, dbPassword);
+        if (!verifyCurrent.valid) {
+          return sendApiError(res, 400, "رمز عبور فعلی نادرست است.");
+        }
+      }
+
+      const trimmedNew = safeNew.trim();
+      if (trimmedNew.length < 6) {
+        return sendApiError(res, 400, "رمز عبور جدید باید حداقل ۶ کاراکتر باشد.");
+      }
+
+      if (isDefaultPassword(trimmedNew)) {
+        return sendApiError(res, 400, "استفاده از کلمه عبور پیش‌فرض (مانند 123456) مجاز نیست. لطفاً یک رمز عبور امن و اختصاصی انتخاب فرمایید.");
+      }
+
+      const hashedNew = await hashPassword(trimmedNew);
+      await db.query("UPDATE app_users SET password = ?, mustChangePassword = 0 WHERE id = ?", [hashedNew, safeId]);
+
+      // Generate a fresh session token for the user whose password was successfully changed
+      const freshToken = generateToken({ id: user.id, username: user.username, role: user.role });
+      setAuthCookie(res, freshToken, req);
+
+      await logUserActivity({
+        userId: user.id,
+        userName: user.fullName || user.username,
+        userRole: user.role,
+        action: "تغییر کلمه عبور",
+        details: "کلمه عبور با موفقیت تغییر یافت و هش امن ذخیره گردید.",
+        module: "AUTH",
+        ipAddress: req.ip || "127.0.0.1",
+        status: "SUCCESS"
+      }).catch(() => {});
+
+      res.json({
+        success: true,
+        message: "رمز عبور شما با موفقیت تغییر یافت.",
+        token: freshToken,
+        user: sanitizeUser(user)
+      });
     } catch (err: any) {
+      if (err instanceof ApiError && err.statusCode < 500) {
+        return sendApiError(res, err.statusCode, err.message);
+      }
       console.error("Error in /api/users/change-password:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // UPDATE USER PROFILE (Phone Number & Address for Representatives & Shipping Companies)
-  app.post("/api/users/:id/profile", async (req, res) => {
+  app.post("/api/users/:id/profile", authenticate, async (req, res) => {
     try {
-      const { id } = req.params;
-      const { phoneNumber, address } = req.body;
-
-      if (!phoneNumber || !phoneNumber.trim()) {
-        return res.status(400).json({ error: "وارد کردن شماره همراه الزامی است." });
-      }
-
-      const cleanPhone = phoneNumber.trim();
-      const cleanAddress = (address || "").trim();
+      const safeId = validateId(req.params.id, "شناسه کاربر");
+      const cleanPhone = validatePhoneNumber(req.body.phoneNumber, "شماره همراه");
+      const cleanAddress = sanitizeString(req.body.address, { maxLength: 1000 });
 
       const db = getDbPool();
-      const [rows] = await db.query("SELECT * FROM app_users WHERE id = ?", [id]);
+      const [rows] = await db.query("SELECT * FROM app_users WHERE id = ?", [safeId]);
       const matched = rows as any[];
 
       if (matched.length === 0) {
-        return res.status(404).json({ error: "کاربر یافت نشد." });
+        return sendApiError(res, 404, "کاربر یافت نشد.");
       }
 
       const user = matched[0];
+      const targetRole = normalizeRole(user.role);
+      const callerRole = normalizeRole(req.user!.role);
+
+      // Requirement 3: A SALES_MANAGER must not change phone number or protected credentials of a SYSTEM_ADMIN
+      if (targetRole === "SYSTEM_ADMIN" && req.user!.id !== user.id && callerRole !== "SYSTEM_ADMIN") {
+        return sendApiError(res, 403, "مدیر بازرگانی مجاز به ویرایش مشخصات حساب مدیر ارشد سیستم نمی‌باشد.");
+      }
+
+      // Authorize: Only account owner or SYSTEM_ADMIN/SALES_MANAGER (for non-admin accounts) can update profile
+      if (req.user!.id !== safeId && !hasRole(req.user!.role, ["SYSTEM_ADMIN", "SALES_MANAGER"])) {
+        return sendApiError(res, 403, "دسترسی غیرمجاز. شما مجوز ویرایش اطلاعات این کاربر را ندارید.");
+      }
 
       // Check if another user has this phone number
-      const [existingPhone] = await db.query("SELECT id FROM app_users WHERE phoneNumber = ? AND id != ?", [cleanPhone, id]) as any[];
+      const [existingPhone] = await db.query("SELECT id FROM app_users WHERE phoneNumber = ? AND id != ?", [cleanPhone, safeId]) as any[];
       if (existingPhone && existingPhone.length > 0) {
-        return res.status(400).json({ error: "این شماره همراه قبلاً ثبت شده و متعلق به کاربر دیگری می‌باشد." });
+        return sendApiError(res, 400, "این شماره همراه قبلاً ثبت شده و متعلق به کاربر دیگری می‌باشد.");
       }
 
       // Update app_users
-      await db.query("UPDATE app_users SET phoneNumber = ? WHERE id = ?", [cleanPhone, id]);
+      await db.query("UPDATE app_users SET phoneNumber = ? WHERE id = ?", [cleanPhone, safeId]);
       user.phoneNumber = cleanPhone;
 
       // If user is a REPRESENTATIVE, update matching agent record
@@ -2634,14 +3298,14 @@ function compactItemsJson(itemsInput: any): string | null {
       res.json({
         success: true,
         message: "مشخصات حساب شما با موفقیت بروزرسانی شد.",
-        user: {
-          ...user,
-          isEnabled: !!user.isEnabled
-        }
+        user: sanitizeUser(user)
       });
     } catch (err: any) {
+      if (err instanceof ApiError && err.statusCode < 500) {
+        return sendApiError(res, err.statusCode, err.message);
+      }
       console.error("Error in /api/users/:id/profile:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
@@ -2667,13 +3331,14 @@ function compactItemsJson(itemsInput: any): string | null {
   }
 
   // HEARTBEAT ENDPOINT
-  app.post("/api/users/heartbeat", async (req, res) => {
+  app.post("/api/users/heartbeat", authenticate, async (req, res) => {
     try {
-      const { userId, username, fullName, role, agentCode } = req.body;
-      if (!userId && !username) {
-        return res.status(400).json({ error: "userId or username is required" });
-      }
-      const targetId = userId || username;
+      // Identity & role strictly extracted from authenticated token
+      const targetId = req.user!.id;
+      const username = req.user!.username;
+      const fullName = req.user!.fullName || username;
+      const role = req.user!.role;
+      const agentCode = req.user!.agentCode || null;
       const nowIso = new Date().toISOString();
       const nowMs = Date.now();
 
@@ -2712,12 +3377,12 @@ function compactItemsJson(itemsInput: any): string | null {
         onlineUsers: activeList
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // GET ALL USERS
-  app.get("/api/users", async (req, res) => {
+  app.get("/api/users", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
 
@@ -2741,10 +3406,12 @@ function compactItemsJson(itemsInput: any): string | null {
               uname = `rep_${cleanCode}_${Math.floor(1000 + Math.random() * 9000)}`;
             }
             const userId = `usr-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const tempPassword = generateTemporaryPassword();
+            const hashedPassword = await hashPassword(tempPassword);
             await db.query(`
-              INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password)
-              VALUES (?, ?, ?, ?, 'REPRESENTATIVE', ?, NULL, 1, '123456')
-            `, [userId, uname, ag.fullName || ag.alias || `نمایندگی ${ag.agentCode}`, ag.phoneNumber || `0900000${ag.agentCode}`, ag.agentCode]);
+              INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password, mustChangePassword)
+              VALUES (?, ?, ?, ?, 'REPRESENTATIVE', ?, NULL, 1, ?, 1)
+            `, [userId, uname, ag.fullName || ag.alias || `نمایندگی ${ag.agentCode}`, ag.phoneNumber || `0900000${ag.agentCode}`, ag.agentCode, hashedPassword]);
             
             existingUserAgentCodes.add(ag.agentCode);
             if (ag.phoneNumber) existingUserPhones.add(ag.phoneNumber);
@@ -2761,10 +3428,12 @@ function compactItemsJson(itemsInput: any): string | null {
               uname = `sc_${cleanCode}_${Math.floor(1000 + Math.random() * 9000)}`;
             }
             const userId = `usr-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const tempPassword = generateTemporaryPassword();
+            const hashedPassword = await hashPassword(tempPassword);
             await db.query(`
-              INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password)
-              VALUES (?, ?, ?, ?, 'SHIPPING_COMPANY', NULL, ?, 1, '123456')
-            `, [userId, uname, sc.name || `باربری ${sc.code || sc.id}`, sc.phoneNumber || `0900000${sc.id}`, sc.id]);
+              INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password, mustChangePassword)
+              VALUES (?, ?, ?, ?, 'SHIPPING_COMPANY', NULL, ?, 1, ?, 1)
+            `, [userId, uname, sc.name || `باربری ${sc.code || sc.id}`, sc.phoneNumber || `0900000${sc.id}`, sc.id, hashedPassword]);
 
             existingUserSCIds.add(sc.id);
             if (sc.phoneNumber) existingUserPhones.add(sc.phoneNumber);
@@ -2781,39 +3450,79 @@ function compactItemsJson(itemsInput: any): string | null {
       const onlineUsernames = new Set(activeList.map(u => u.username).filter(Boolean));
       const now = Date.now();
 
-      const users = (rows as any[]).map(u => {
+      const sanitizedUsers = sanitizeUsers(rows as any[], (u) => {
         const lastSeenMs = u.lastSeenAt ? new Date(u.lastSeenAt).getTime() : 0;
         const isOnline = onlineUserIds.has(u.id) || onlineUsernames.has(u.username) || (now - lastSeenMs < 120000);
         return {
-          ...u,
-          isEnabled: !!u.isEnabled,
-          isOnline: !!isOnline,
+          isOnline,
           lastSeenAt: u.lastSeenAt || (isOnline ? new Date().toISOString() : null)
         };
       });
-      res.json(users);
+      res.json(sanitizedUsers);
     } catch (err: any) {
       console.error("Error in GET /api/users:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // CREATE USER
-  app.post("/api/users", async (req, res) => {
+  app.post("/api/users", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
-      const { username, fullName, phoneNumber, role, agentCode, shippingCompanyId, password } = req.body;
-      if (!username || !fullName || !phoneNumber || !role) {
-        return res.status(400).json({ error: "پر کردن فیلدهای ستاره‌دار الزامی است." });
+      const callerRole = normalizeRole(req.user!.role);
+
+      // Mass-assignment defense: extract and validate ONLY permitted fields
+      if (!req.body.role || typeof req.body.role !== 'string' || !req.body.role.trim()) {
+        return sendApiError(res, 400, "نقش کاربر نمی‌تواند خالی باشد.");
+      }
+      const rawRole = sanitizeString(req.body.role, { fieldName: "نقش کاربر", minLength: 2, maxLength: 50, required: true });
+      if (!isValidRole(rawRole)) {
+        return sendApiError(res, 400, "نقش کاربری نامعتبر است.");
+      }
+      const role = normalizeRole(rawRole);
+
+      // Requirement 1: Only SYSTEM_ADMIN may grant or assign the SYSTEM_ADMIN role
+      // Requirement 2: A SALES_MANAGER must not assign SYSTEM_ADMIN
+      if (role === "SYSTEM_ADMIN" && callerRole !== "SYSTEM_ADMIN") {
+        return sendApiError(res, 403, "تنها مدیر ارشد سیستم مجاز به اعطای نقش مدیر ارشد سیستم (SYSTEM_ADMIN) می‌باشد.");
       }
 
+      const username = sanitizeString(req.body.username, { fieldName: "نام کاربری", minLength: 3, maxLength: 50, required: true });
+      const fullName = sanitizeString(req.body.fullName, { fieldName: "نام کامل", minLength: 2, maxLength: 100, required: true });
+      const phoneNumber = validatePhoneNumber(req.body.phoneNumber, "شماره تماس", { required: true });
+
+      // Associate agentCode only for REPRESENTATIVE, shippingCompanyId only for SHIPPING_COMPANY
+      const agentCode = role === 'REPRESENTATIVE'
+        ? (sanitizeString(req.body.agentCode, { fieldName: "کد عاملیت", maxLength: 50, required: false }) || null)
+        : null;
+      const shippingCompanyId = role === 'SHIPPING_COMPANY' && req.body.shippingCompanyId
+        ? validateId(req.body.shippingCompanyId, "شناسه شرکت باربری")
+        : null;
+
       const db = getDbPool();
+
+      // Check unique constraint on username and phoneNumber
+      const [existingUsers] = await db.query(
+        "SELECT id, username, phoneNumber FROM app_users WHERE username = ? OR phoneNumber = ?",
+        [username, phoneNumber]
+      ) as any[];
+      if (existingUsers && existingUsers.length > 0) {
+        return sendApiError(res, 409, "نام کاربری یا شماره همراه قبلاً در سیستم ثبت شده است.");
+      }
+
       const id = `usr-${Date.now()}`;
-      const userPassword = password || "123456";
+      
+      let rawPassword = sanitizeString(req.body.password, { fieldName: "کلمه عبور", maxLength: 100, required: false }) || "";
+      let mustChange = 0;
+      if (!rawPassword || isDefaultPassword(rawPassword)) {
+        rawPassword = generateTemporaryPassword();
+        mustChange = 1;
+      }
+      const hashedPassword = await hashPassword(rawPassword);
 
       await db.query(`
-        INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-      `, [id, username, fullName, phoneNumber, role, agentCode || null, shippingCompanyId || null, userPassword]);
+        INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password, mustChangePassword)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      `, [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, hashedPassword, mustChange]);
 
       await recordActivity(
         req,
@@ -2822,35 +3531,157 @@ function compactItemsJson(itemsInput: any): string | null {
         "USERS"
       );
 
-      res.json({ success: true, user: { id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled: true, password: userPassword } });
+      res.status(201).json({
+        success: true,
+        user: sanitizeUser({
+          id,
+          username,
+          fullName,
+          phoneNumber,
+          role,
+          agentCode,
+          shippingCompanyId,
+          isEnabled: 1,
+          mustChangePassword: Boolean(mustChange)
+        }),
+        tempPassword: mustChange ? rawPassword : undefined
+      });
     } catch (err: any) {
+      if (err instanceof ApiError && err.statusCode < 500) {
+        return sendApiError(res, err.statusCode, err.message);
+      }
       console.error("Error in POST /api/users:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // EDIT USER
-  app.put("/api/users/:id", async (req, res) => {
+  app.put("/api/users/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
-      const { id } = req.params;
-      const { username, fullName, phoneNumber, role, agentCode, shippingCompanyId, password } = req.body;
-      if (!username || !fullName || !phoneNumber || !role) {
-        return res.status(400).json({ error: "فیلدهای اجباری پر نشده‌اند." });
+      const id = validateId(req.params.id, "شناسه کاربر");
+      const db = getDbPool();
+
+      // Load target user from database first
+      const [rows] = await db.query("SELECT * FROM app_users WHERE id = ?", [id]);
+      const matched = rows as any[];
+      if (matched.length === 0) {
+        return sendApiError(res, 404, "کاربر یافت نشد.");
       }
 
-      const db = getDbPool();
-      if (password) {
+      const targetUser = matched[0];
+      const targetRole = normalizeRole(targetUser.role);
+      const callerRole = normalizeRole(req.user!.role);
+      const isTargetPrimary = isPrimaryAdmin(targetUser);
+
+      // Requirement 3: A SALES_MANAGER must not change the role, password, phone number, or other protected credentials of a SYSTEM_ADMIN account
+      if (targetRole === "SYSTEM_ADMIN" && callerRole !== "SYSTEM_ADMIN") {
+        return sendApiError(res, 403, "مدیر بازرگانی مجاز به ویرایش یا تغییر مشخصات حساب مدیر ارشد سیستم نمی‌باشد.");
+      }
+
+      // Requirement 1 & 2: Only SYSTEM_ADMIN may grant or assign SYSTEM_ADMIN; SALES_MANAGER must not promote self or others to SYSTEM_ADMIN
+      if (req.body.role !== undefined) {
+        if (!isValidRole(req.body.role)) {
+          return sendApiError(res, 400, "نقش کاربری نامعتبر است.");
+        }
+        const requestedRole = normalizeRole(req.body.role);
+        if (requestedRole === "SYSTEM_ADMIN" && callerRole !== "SYSTEM_ADMIN") {
+          return sendApiError(res, 403, "تنها مدیر ارشد سیستم مجاز به ارتقای کاربر به نقش مدیر ارشد سیستم می‌باشد.");
+        }
+      }
+
+      // Requirement 4: Protect primary administrator account from unauthorized modification
+      if (isTargetPrimary) {
+        // Primary admin role cannot be changed or demoted
+        if (req.body.role !== undefined && normalizeRole(req.body.role) !== "SYSTEM_ADMIN") {
+          return sendApiError(res, 403, "نقش حساب کاربری مدیر ارشد اولیه سیستم غیرقابل تغییر یا تنزل رتبه می‌باشد.");
+        }
+        // Primary admin username cannot be renamed away from admin
+        if (req.body.username !== undefined && req.body.username.trim().toLowerCase() !== PRIMARY_ADMIN_USERNAME) {
+          return sendApiError(res, 403, "نام کاربری مدیر ارشد اولیه سیستم غیرقابل تغییر می‌باشد.");
+        }
+        // Primary admin cannot be disabled
+        if (req.body.isEnabled !== undefined && (req.body.isEnabled === 0 || req.body.isEnabled === false)) {
+          return sendApiError(res, 403, "غیرفعال‌سازی حساب مدیر ارشد اولیه سیستم مجاز نمی‌باشد.");
+        }
+      }
+
+      // Requirement 5 & 6: Validate role transitions on server, including updates that omit some fields, and prevent mass assignment
+      const username = req.body.username !== undefined
+        ? sanitizeString(req.body.username, { fieldName: "نام کاربری", minLength: 3, maxLength: 50, required: true })
+        : targetUser.username;
+
+      const fullName = req.body.fullName !== undefined
+        ? sanitizeString(req.body.fullName, { fieldName: "نام کامل", minLength: 2, maxLength: 100, required: true })
+        : targetUser.fullName;
+
+      const phoneNumber = req.body.phoneNumber !== undefined
+        ? validatePhoneNumber(req.body.phoneNumber, "شماره تماس", { required: true })
+        : targetUser.phoneNumber;
+
+      const role = req.body.role !== undefined
+        ? normalizeRole(req.body.role)
+        : targetRole;
+
+      let agentCode = targetUser.agentCode;
+      if (role === 'REPRESENTATIVE') {
+        if (req.body.agentCode !== undefined) {
+          agentCode = sanitizeString(req.body.agentCode, { fieldName: "کد عاملیت", maxLength: 50, required: false }) || null;
+        }
+      } else {
+        agentCode = null;
+      }
+
+      let shippingCompanyId = targetUser.shippingCompanyId;
+      if (role === 'SHIPPING_COMPANY') {
+        if (req.body.shippingCompanyId !== undefined) {
+          shippingCompanyId = req.body.shippingCompanyId ? validateId(req.body.shippingCompanyId, "شناسه شرکت باربری") : null;
+        }
+      } else {
+        shippingCompanyId = null;
+      }
+
+      let isEnabled = targetUser.isEnabled ? 1 : 0;
+      if (req.body.isEnabled !== undefined) {
+        if (targetRole === 'SYSTEM_ADMIN' && callerRole !== 'SYSTEM_ADMIN') {
+          return sendApiError(res, 403, "مدیر بازرگانی مجاز به تغییر وضعیت حساب مدیر ارشد سیستم نمی‌باشد.");
+        }
+        isEnabled = req.body.isEnabled ? 1 : 0;
+      }
+
+      // Check unique constraint on username and phoneNumber if updated
+      if (username !== targetUser.username) {
+        const [dupUser] = await db.query("SELECT id FROM app_users WHERE username = ? AND id != ?", [username, id]) as any[];
+        if (dupUser && dupUser.length > 0) {
+          return sendApiError(res, 409, "نام کاربری قبلاً توسط کاربر دیگری ثبت گردیده است.");
+        }
+      }
+
+      if (phoneNumber !== targetUser.phoneNumber) {
+        const [dupPhone] = await db.query("SELECT id FROM app_users WHERE phoneNumber = ? AND id != ?", [phoneNumber, id]) as any[];
+        if (dupPhone && dupPhone.length > 0) {
+          return sendApiError(res, 409, "شماره همراه قبلاً توسط کاربر دیگری ثبت گردیده است.");
+        }
+      }
+
+      const rawPassword = req.body.password ? sanitizeString(req.body.password, { fieldName: "کلمه عبور", maxLength: 100, required: false }) : "";
+      if (rawPassword) {
+        if (rawPassword.length < 6) {
+          return sendApiError(res, 400, "رمز عبور جدید باید حداقل ۶ کاراکتر باشد.");
+        }
+        const hashedPassword = await hashPassword(rawPassword);
+        const isDefault = isDefaultPassword(rawPassword);
+        const mustChange = isDefault ? 1 : 0;
         await db.query(`
           UPDATE app_users 
-          SET username = ?, fullName = ?, phoneNumber = ?, role = ?, agentCode = ?, shippingCompanyId = ?, password = ?
+          SET username = ?, fullName = ?, phoneNumber = ?, role = ?, agentCode = ?, shippingCompanyId = ?, isEnabled = ?, password = ?, mustChangePassword = ?
           WHERE id = ?
-        `, [username, fullName, phoneNumber, role, agentCode || null, shippingCompanyId || null, password, id]);
+        `, [username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, hashedPassword, mustChange, id]);
       } else {
         await db.query(`
           UPDATE app_users 
-          SET username = ?, fullName = ?, phoneNumber = ?, role = ?, agentCode = ?, shippingCompanyId = ?
+          SET username = ?, fullName = ?, phoneNumber = ?, role = ?, agentCode = ?, shippingCompanyId = ?, isEnabled = ?
           WHERE id = ?
-        `, [username, fullName, phoneNumber, role, agentCode || null, shippingCompanyId || null, id]);
+        `, [username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, id]);
       }
 
       await recordActivity(
@@ -2862,24 +3693,40 @@ function compactItemsJson(itemsInput: any): string | null {
 
       res.json({ success: true });
     } catch (err: any) {
+      if (err instanceof ApiError && err.statusCode < 500) {
+        return sendApiError(res, err.statusCode, err.message);
+      }
       console.error("Error in PUT /api/users/:id:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  // TOGGLE USER ENABLED STATUS
-  app.patch("/api/users/:id/toggle", async (req, res) => {
+  // TOGGLE USER ENABLED STATUS (Supports both PATCH and POST for backward compatibility)
+  const handleToggleUser = async (req: express.Request, res: express.Response) => {
     try {
-      const { id } = req.params;
+      const id = validateId(req.params.id, "شناسه کاربر");
       const db = getDbPool();
 
-      const [rows] = await db.query("SELECT username, fullName, isEnabled FROM app_users WHERE id = ?", [id]);
+      const [rows] = await db.query("SELECT id, username, fullName, role, isEnabled FROM app_users WHERE id = ?", [id]);
       const found = rows as any[];
       if (found.length === 0) {
-        return res.status(404).json({ error: "کاربر یافت نشد." });
+        return sendApiError(res, 404, "کاربر یافت نشد.");
       }
 
       const userObj = found[0];
+      const targetRole = normalizeRole(userObj.role);
+      const callerRole = normalizeRole(req.user!.role);
+
+      // Requirement 3: A SALES_MANAGER must not change status of a SYSTEM_ADMIN
+      if (targetRole === "SYSTEM_ADMIN" && callerRole !== "SYSTEM_ADMIN") {
+        return sendApiError(res, 403, "مدیر بازرگانی مجاز به تغییر وضعیت حساب مدیر ارشد سیستم نمی‌باشد.");
+      }
+
+      // Requirement 4: Protect primary administrator from being disabled
+      if (isPrimaryAdmin(userObj)) {
+        return sendApiError(res, 403, "غیرفعال‌سازی حساب مدیر ارشد اولیه سیستم مجاز نمی‌باشد.");
+      }
+
       const newStatus = userObj.isEnabled ? 0 : 1;
       await db.query("UPDATE app_users SET isEnabled = ? WHERE id = ?", [newStatus, id]);
 
@@ -2892,34 +3739,62 @@ function compactItemsJson(itemsInput: any): string | null {
 
       res.json({ success: true, isEnabled: !!newStatus });
     } catch (err: any) {
-      console.error("Error in PATCH /api/users/:id/toggle:", err);
-      res.status(500).json({ error: err.message });
+      if (err instanceof ApiError && err.statusCode < 500) {
+        return sendApiError(res, err.statusCode, err.message);
+      }
+      console.error("Error in toggle user:", err);
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
-  });
+  };
+  app.patch("/api/users/:id/toggle", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), handleToggleUser);
+  app.post("/api/users/:id/toggle", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), handleToggleUser);
 
   // DELETE USER
-  app.delete("/api/users/:id", async (req, res) => {
+  app.delete("/api/users/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
-      const { id } = req.params;
+      const id = validateId(req.params.id, "شناسه کاربر");
       const db = getDbPool();
+
+      const [rows] = await db.query("SELECT id, username, fullName, role FROM app_users WHERE id = ?", [id]);
+      const found = rows as any[];
+      if (found.length === 0) {
+        return sendApiError(res, 404, "کاربر یافت نشد.");
+      }
+
+      const targetUser = found[0];
+      const targetRole = normalizeRole(targetUser.role);
+      const callerRole = normalizeRole(req.user!.role);
+
+      // Requirement 3: A SALES_MANAGER must not delete a SYSTEM_ADMIN account
+      if (targetRole === "SYSTEM_ADMIN" && callerRole !== "SYSTEM_ADMIN") {
+        return sendApiError(res, 403, "مدیر بازرگانی مجاز به حذف حساب مدیر ارشد سیستم نمی‌باشد.");
+      }
+
+      // Requirement 4: Protect primary administrator from deletion
+      if (isPrimaryAdmin(targetUser)) {
+        return sendApiError(res, 403, "حساب کاربری مدیر ارشد اولیه سیستم غیرقابل حذف می‌باشد.");
+      }
 
       await db.query("DELETE FROM app_users WHERE id = ?", [id]);
 
       await recordActivity(
         req,
         "حذف حساب کاربر",
-        `حذف کامل حساب کاربری کد ${id} از دیتابیس`,
+        `حذف کامل حساب کاربری کد ${id} (${targetUser.fullName || targetUser.username}) از دیتابیس`,
         "USERS"
       );
 
       res.json({ success: true });
     } catch (err: any) {
+      if (err instanceof ApiError && err.statusCode < 500) {
+        return sendApiError(res, err.statusCode, err.message);
+      }
       console.error("Error in DELETE /api/users/:id:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.post("/api/system/reset-demo", async (req, res) => {
+  app.post("/api/system/reset-demo", authenticate, authorize("SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
       
@@ -2953,12 +3828,12 @@ function compactItemsJson(itemsInput: any): string | null {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Error in POST /api/system/reset-demo:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // CLEAR ALL TRANSACTIONS & ORDERS (PRESERVING MASTER USERS & DATA)
-  app.post("/api/system/clear-transactions", async (req, res) => {
+  app.post("/api/system/clear-transactions", authenticate, authorize("SYSTEM_ADMIN"), async (req, res) => {
     try {
       const db = getDbPool();
       try {
@@ -2989,12 +3864,12 @@ function compactItemsJson(itemsInput: any): string | null {
       });
     } catch (err: any) {
       console.error("Error in POST /api/system/clear-transactions:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // CLEAR ONLY USER ACTIVITY LOGS
-  app.post("/api/system/clear-activity-logs", async (req, res) => {
+  app.post("/api/system/clear-activity-logs", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER"), async (req, res) => {
     try {
       const db = getDbPool();
       try {
@@ -3017,12 +3892,12 @@ function compactItemsJson(itemsInput: any): string | null {
       });
     } catch (err: any) {
       console.error("Error in POST /api/system/clear-activity-logs:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // 6. SYSTEM DIAGNOSTICS & SYSTEM ERROR LOGS
-  app.get("/api/system/error-logs", (req, res) => {
+  app.get("/api/system/error-logs", authenticate, authorize("SYSTEM_ADMIN"), (req, res) => {
     try {
       const logFilePath = path.join(process.cwd(), "server", "db_errors.log");
       if (fs.existsSync(logFilePath)) {
@@ -3032,11 +3907,11 @@ function compactItemsJson(itemsInput: any): string | null {
         return res.json({ success: true, logs: "هیچ خطایی در فایل لاگ ثبت نشده است." });
       }
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.post("/api/system/clear-error-logs", (req, res) => {
+  app.post("/api/system/clear-error-logs", authenticate, authorize("SYSTEM_ADMIN"), (req, res) => {
     try {
       const logFilePath = path.join(process.cwd(), "server", "db_errors.log");
       if (fs.existsSync(logFilePath)) {
@@ -3044,12 +3919,12 @@ function compactItemsJson(itemsInput: any): string | null {
       }
       res.json({ success: true, message: "فایل لاگ خطاها با موفقیت پاکسازی شد." });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   // 7. SYSTEM ACTIVITY LOGS & HARDWARE/SOFTWARE METRICS
-  app.get("/api/system/monitor-data", async (req, res) => {
+  app.get("/api/system/monitor-data", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER"), async (req, res) => {
     try {
       const cached = getCachedRouteData("monitor_data");
       if (cached) {
@@ -3163,70 +4038,111 @@ function compactItemsJson(itemsInput: any): string | null {
       res.json(monitorPayload);
     } catch (err: any) {
       console.error("Error in GET /api/system/monitor-data:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.get("/api/system/activity-logs", async (req, res) => {
+  app.get("/api/system/activity-logs", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER"), async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 100;
       const logs = await getUserActivityLogs(limit);
       res.json({ success: true, logs });
     } catch (err: any) {
       console.error("Error in GET /api/system/activity-logs:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.get("/api/system/sandbox-status", (req, res) => {
+  app.get("/api/system/sandbox-status", authenticate, (req, res) => {
     res.json({ sandboxEnabled: globalSandboxEnabled });
   });
 
-  app.post("/api/system/sandbox-status", (req, res) => {
-    const { sandboxEnabled } = req.body;
-    if (typeof sandboxEnabled === 'boolean') {
+  app.post("/api/system/sandbox-status", authenticate, authorize("SYSTEM_ADMIN"), (req, res) => {
+    try {
+      const { sandboxEnabled } = req.body || {};
+      if (typeof sandboxEnabled !== 'boolean') {
+        return sendApiError(res, 400, "مقدار وضعیت سندباکس باید مقدار بولی (true/false) باشد.");
+      }
       saveSandboxConfig(sandboxEnabled);
+      res.json({ success: true, sandboxEnabled: globalSandboxEnabled });
+    } catch (err: any) {
+      console.error("Error in POST /api/system/sandbox-status:", err);
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
-    res.json({ success: true, sandboxEnabled: globalSandboxEnabled });
   });
 
   // SYSTEM SETTINGS ENDPOINTS
-  app.get("/api/system-settings", (req, res) => {
+  app.get("/api/system-settings", authenticate, (req, res) => {
     res.json(getSystemSettings());
   });
 
-  app.post("/api/system-settings", (req, res) => {
-    const updated = saveSystemSettings(req.body);
-    recordActivity(
-      req,
-      "تغییر تنظیمات سیستم",
-      `تنظیمات سامانه بروزرسانی شد: گیت حراست = ${updated.securityGateEnabled ? 'فعال' : 'غیرفعال'}`,
-      "SYSTEM"
-    );
-    res.json({ success: true, settings: updated });
-  });
-
-  app.post("/api/system/activity-logs", (req, res) => {
+  app.post("/api/system-settings", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), (req, res) => {
     try {
-      const { userId, userName, userRole, action, details, module, ipAddress, status } = req.body;
-      res.json({ success: true });
-      logUserActivity({
-        userId,
-        userName: userName || 'کاربر سیستم',
-        userRole: userRole || 'GUEST',
-        action: action || 'فعالیت عمومی',
-        details,
-        module: module || 'SYSTEM',
-        ipAddress: ipAddress || req.ip || '127.0.0.1',
-        status: status || 'SUCCESS'
-      }).catch(err => console.error("Error in async logUserActivity:", err));
+      if (!req.body || typeof req.body !== 'object') {
+        return sendApiError(res, 400, "داده‌های تنظیمات سیستم نامعتبر است.");
+      }
+      const safeSettings: any = {};
+      if (req.body.securityGateEnabled !== undefined) {
+        safeSettings.securityGateEnabled = Boolean(req.body.securityGateEnabled);
+      }
+      if (req.body.exportPalletMandatory !== undefined) {
+        safeSettings.exportPalletMandatory = Boolean(req.body.exportPalletMandatory);
+      }
+      if (req.body.warehouseDiscrepancyReferral !== undefined) {
+        safeSettings.warehouseDiscrepancyReferral = Boolean(req.body.warehouseDiscrepancyReferral);
+      }
+      if (req.body.editSuspensionStrictness !== undefined) {
+        safeSettings.editSuspensionStrictness = sanitizeString(req.body.editSuspensionStrictness, {
+          fieldName: "سیاست تعلیق سفارشات",
+          maxLength: 50,
+          required: false
+        }) || "STRICT_SUSPEND";
+      }
+
+      const updated = saveSystemSettings(safeSettings);
+      recordActivity(
+        req,
+        "تغییر تنظیمات سیستم",
+        `تنظیمات سامانه بروزرسانی شد: گیت حراست = ${updated.securityGateEnabled ? 'فعال' : 'غیرفعال'}`,
+        "SYSTEM"
+      );
+      res.json({ success: true, settings: updated });
     } catch (err: any) {
-      console.error("Error in POST /api/system/activity-logs:", err);
-      res.status(500).json({ error: err.message });
+      console.error("Error in POST /api/system-settings:", err);
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.get("/api/system/metrics", async (req, res) => {
+  app.post("/api/system/activity-logs", authenticate, (req, res) => {
+    try {
+      const action = sanitizeString(req.body?.action, { fieldName: "عنوان فعالیت", maxLength: 200, required: false }) || 'فعالیت عمومی';
+      const details = sanitizeString(req.body?.details, { fieldName: "جزئیات فعالیت", maxLength: 2000, required: false }) || '';
+      const module = sanitizeString(req.body?.module, { fieldName: "بخش مربوطه", maxLength: 50, required: false }) || 'SYSTEM';
+      const ipAddress = sanitizeString(req.body?.ipAddress, { fieldName: "آدرس آی‌پی", maxLength: 50, required: false }) || req.ip || '127.0.0.1';
+      let status: "SUCCESS" | "WARNING" | "ERROR" = "SUCCESS";
+      if (req.body?.status === "WARNING" || req.body?.status === "ERROR") {
+        status = req.body.status;
+      }
+
+      res.json({ success: true });
+      // Enforce authenticated user credentials, reject untrusted body user/role
+      logUserActivity({
+        userId: req.user!.id,
+        userName: req.user!.fullName || req.user!.username || 'کاربر سیستم',
+        userRole: req.user!.role || 'GUEST',
+        action,
+        details,
+        module,
+        ipAddress,
+        status
+      }).catch(err => console.error("Error in async logUserActivity:", err));
+    } catch (err: any) {
+      console.error("Error in POST /api/system/activity-logs:", err);
+      return handleServerError(res, err, req.originalUrl || req.url);
+    }
+  });
+
+  app.get("/api/system/metrics", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER"), async (req, res) => {
     try {
       const db = getDbPool();
       let orderCount = 0;
@@ -3312,11 +4228,11 @@ function compactItemsJson(itemsInput: any): string | null {
       });
     } catch (err: any) {
       console.error("Error in GET /api/system/metrics:", err);
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  app.post("/api/system/flush-cache", async (req, res) => {
+  app.post("/api/system/flush-cache", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER"), async (req, res) => {
     try {
       const redis = getRedisClient();
       if (redis) {
@@ -3332,9 +4248,17 @@ function compactItemsJson(itemsInput: any): string | null {
       });
       res.json({ success: true, message: 'حافظه کش سرور با موفقیت پاکسازی شد.' });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
+
+  // 404 handler for unmatched /api routes
+  app.all("/api/*", (req, res) => {
+    return sendApiError(res, 404, "API endpoint not found");
+  });
+
+  // Global API error handler for unhandled errors
+  app.use("/api", expressErrorHandler);
 
   // --- Vite / Frontend Serving ---
 

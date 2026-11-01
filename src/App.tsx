@@ -157,41 +157,89 @@ export default function App() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [isPasswordSubmitting, setIsPasswordSubmitting] = useState(false);
+
+  const normalizePersianDigits = (str: string): string => {
+    if (!str) return '';
+    return str
+      .replace(/[۰-۹]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1776 + 48))
+      .replace(/[٠-٩]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1632 + 48));
+  };
 
   const handleChangePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) {
-      showToast('لطفا تمامی فیلدها را پر کنید.', 'error');
+    setPasswordError(null);
+
+    const cleanCurrent = normalizePersianDigits(currentPassword.trim());
+    const cleanNew = normalizePersianDigits(newPassword.trim());
+    const cleanConfirm = normalizePersianDigits(confirmPassword.trim());
+
+    if (!cleanCurrent || !cleanNew || !cleanConfirm) {
+      const err = 'لطفاً تمامی فیلدها را تکمیل فرمایید.';
+      setPasswordError(err);
+      showToast(err, 'error');
       return;
     }
-    if (newPassword !== confirmPassword) {
-      showToast('رمز عبور جدید و تکرار آن همخوانی ندارند.', 'error');
+    if (cleanNew !== cleanConfirm) {
+      const err = 'رمز عبور جدید و تکرار آن با یکدیگر مطابقت ندارند.';
+      setPasswordError(err);
+      showToast(err, 'error');
+      return;
+    }
+    if (cleanNew.length < 6) {
+      const err = 'کلمه عبور جدید باید حداقل ۶ کاراکتر باشد.';
+      setPasswordError(err);
+      showToast(err, 'error');
+      return;
+    }
+    if (cleanNew === '123456') {
+      const err = 'استفاده از کلمه عبور پیش‌فرض (۱۲۳۴۵۶) مجاز نیست. لطفاً یک رمز عبور جدید و اختصاصی وارد کنید.';
+      setPasswordError(err);
+      showToast(err, 'error');
       return;
     }
     if (!currentUser) return;
 
     setIsPasswordSubmitting(true);
     try {
+      const token = localStorage.getItem('tabarestan_token');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch(`/api/users/${currentUser.id}/change-password`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword, newPassword })
+        headers,
+        body: JSON.stringify({ currentPassword: cleanCurrent, newPassword: cleanNew })
       });
 
       if (res.ok) {
+        const data = await res.json();
+        if (data.token) {
+          localStorage.setItem('tabarestan_token', data.token);
+        }
         showToast('🔒 کلمه عبور شما با موفقیت تغییر یافت.', 'success');
+        setPasswordError(null);
         setIsChangePasswordModalOpen(false);
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
+        const updatedUser = { ...currentUser, mustChangePassword: false };
+        setCurrentUser(updatedUser);
+        localStorage.setItem('tabarestan_user', JSON.stringify(updatedUser));
+        await refreshAllData(true);
       } else {
-        const data = await res.json();
-        showToast(data.error || 'خطا در تغییر کلمه عبور.', 'error');
+        const errorMsg = await getErrorMessage(res, 'خطا در تغییر کلمه عبور.');
+        setPasswordError(errorMsg);
+        showToast(errorMsg, 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      showToast('ارتباط با سرور برقرار نشد.', 'error');
+      const networkErr = 'ارتباط با سرور برقرار نشد. لطفاً مجدداً تلاش فرمایید.';
+      setPasswordError(networkErr);
+      showToast(networkErr, 'error');
     } finally {
       setIsPasswordSubmitting(false);
     }
@@ -378,6 +426,9 @@ export default function App() {
         const parsed = JSON.parse(savedUser);
         setCurrentUser(parsed);
         setActiveRole(parsed.role);
+        if (parsed.mustChangePassword) {
+          setIsChangePasswordModalOpen(true);
+        }
       } catch (e) {
         console.error('Failed parsing tabarestan_user:', e);
       }
@@ -476,11 +527,27 @@ export default function App() {
     }
   };
 
+  // Helper to attach stored JWT token to API requests for robust authentication
+  const getAuthHeaders = (extraHeaders: Record<string, string> = {}): Record<string, string> => {
+    const token = localStorage.getItem('tabarestan_token');
+    const headers: Record<string, string> = { ...extraHeaders };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  };
+
   // Load data from production Express API with high-speed unified bootstrap & fallback
   const refreshAllData = async (bypassCache: boolean = true) => {
+    // Only query protected data if a user session exists
+    const token = localStorage.getItem('tabarestan_token');
+    if (!currentUser && !token) {
+      return;
+    }
+
     try {
       const bootstrapUrl = bypassCache ? `/api/sync/bootstrap?_t=${Date.now()}` : '/api/sync/bootstrap';
-      const res = await fetch(bootstrapUrl);
+      const res = await fetch(bootstrapUrl, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         if (data && Array.isArray(data.products)) {
@@ -502,11 +569,11 @@ export default function App() {
     const fetchWithFallback = async (url: string, setter: (data: any) => void) => {
       try {
         const fetchUrl = bypassCache ? `${url}?_t=${Date.now()}` : url;
-        const res = await fetch(fetchUrl);
+        const res = await fetch(fetchUrl, { headers: getAuthHeaders() });
         if (res.ok) {
           const parsed = await safeParseResponse(res, []);
           setter(parsed);
-        } else {
+        } else if (res.status !== 401) {
           console.warn(`[API] Fetch failed for ${url} with status: ${res.status}`);
         }
       } catch (err) {
@@ -524,9 +591,9 @@ export default function App() {
   };
 
   useEffect(() => {
-    refreshAllData();
-    // Periodic background sync only when a user is actively logged in
+    // Only synchronize dashboard data when a user is actively logged in
     if (!currentUser) return;
+    refreshAllData();
     const interval = setInterval(() => refreshAllData(false), 10000);
     return () => clearInterval(interval);
   }, [currentUser]);
@@ -638,9 +705,9 @@ export default function App() {
     try {
       const response = await fetch('/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
-          customerName: orderData.customerName || selectedAgent,
+          customerName: orderData.customerName || orderData.buyerName || selectedAgent,
           agentCode: orderData.agentCode || 'AG-0000',
           productId: orderData.productId || 'prod-1',
           productName: orderData.productName || '',
@@ -649,7 +716,7 @@ export default function App() {
           destinationCity: orderData.destinationCity || 'نامشخص',
           exactAddress: orderData.exactAddress || '',
           phoneNumber: orderData.phoneNumber || '',
-          buyerName: orderData.buyerName || '',
+          buyerName: orderData.buyerName || orderData.customerName || '',
           notes: orderData.notes || '',
           itemsJson: orderData.itemsJson || null,
           paymentTrackingCode: orderData.paymentTrackingCode || null,
@@ -1384,8 +1451,10 @@ export default function App() {
   const handleLogout = () => {
     // Immediately clear user session & state for 0ms instant UI reaction
     localStorage.removeItem('tabarestan_user');
+    localStorage.removeItem('tabarestan_token');
     setCurrentUser(null);
     setIsLocked(false);
+    fetch('/api/auth/logout', { method: 'POST', headers: getAuthHeaders() }).catch(() => {});
     showToast('🔒 با موفقیت از حساب کاربری خود خارج شدید.', 'info');
   };
 
@@ -1397,6 +1466,10 @@ export default function App() {
             localStorage.setItem('tabarestan_user', JSON.stringify(user));
             setCurrentUser(user);
             setActiveRole(user.role);
+            if (user.mustChangePassword) {
+              setIsChangePasswordModalOpen(true);
+              showToast('⚠️ جهت امنیت حساب کاربری، لطفاً کلمه عبور پیش‌فرض را به رمز اختصاصی تغییر دهید.', 'info');
+            }
             if (user.role === 'REPRESENTATIVE') {
               const allAgents = agents.length > 0 ? agents : PRESET_AGENTS;
               const matchedAgent = allAgents.find(a => 
@@ -1420,7 +1493,7 @@ export default function App() {
               initial={{ opacity: 0, y: -50, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95, y: -20 }}
-              className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 max-w-sm w-[90%] md:w-full bg-white rounded-xl shadow-2xl border p-4 font-sans text-right dir-rtl flex items-start gap-3 ${
+              className={`fixed top-6 left-1/2 -translate-x-1/2 z-[9999] max-w-sm w-[90%] md:w-full bg-white rounded-xl shadow-2xl border p-4 font-sans text-right dir-rtl flex items-start gap-3 ${
                 toast.type === 'success' ? 'border-emerald-250 shadow-emerald-100/40' :
                 toast.type === 'error' ? 'border-rose-250 shadow-rose-100/40' : 'border-indigo-250 shadow-indigo-100/40'
               }`}
@@ -1843,7 +1916,7 @@ export default function App() {
             initial={{ opacity: 0, y: -50, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 max-w-sm w-[90%] md:w-full bg-white rounded-xl shadow-2xl border p-4 font-sans text-right dir-rtl flex items-start gap-3 ${
+            className={`fixed top-6 left-1/2 -translate-x-1/2 z-[9999] max-w-sm w-[90%] md:w-full bg-white rounded-xl shadow-2xl border p-4 font-sans text-right dir-rtl flex items-start gap-3 ${
               toast.type === 'success' ? 'border-emerald-250 shadow-emerald-100/40' :
               toast.type === 'error' ? 'border-rose-250 shadow-rose-100/40' : 'border-indigo-250 shadow-indigo-100/40'
             }`}
@@ -1861,7 +1934,7 @@ export default function App() {
             </div>
             <button
               onClick={() => setToast(null)}
-              className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-50 transition-colors"
+              className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -1872,7 +1945,7 @@ export default function App() {
       {/* Change Password Modal */}
       <AnimatePresence>
         {isChangePasswordModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm" id="change-password-modal-overlay">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm" id="change-password-modal-overlay">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -1884,6 +1957,29 @@ export default function App() {
                 <h3 className="text-xs sm:text-sm font-black text-amber-500">تغییر کلمه عبور حساب کاربری</h3>
                 <Lock className="w-5 h-5 text-amber-500" />
               </div>
+
+              {currentUser?.mustChangePassword && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-[11px] text-amber-300 leading-relaxed text-right">
+                  ⚠️ جهت امنیت حساب کاربری، کلمه عبور پیش‌فرض (۱۲۳۴۵۶) غیرفعال خواهد شد و تعیین کلمه عبور اختصاصی الزامی است.
+                </div>
+              )}
+
+              {/* Prominent Inline Error Banner - always legible inside the modal */}
+              {passwordError && (
+                <div className="bg-rose-500/20 border border-rose-500/50 rounded-xl p-3 text-xs text-rose-300 flex flex-col gap-2 text-right animate-shake" id="modal-password-error">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldAlert className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                    <span className="leading-relaxed font-bold">{passwordError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="self-end text-[11px] font-bold text-amber-300 hover:text-amber-200 underline cursor-pointer transition-colors"
+                  >
+                    خروج و ورود مجدد به حساب کاربری ←
+                  </button>
+                </div>
+              )}
 
               <form onSubmit={handleChangePasswordSubmit} className="space-y-3.5 text-right font-sans">
                 <div>
@@ -1902,7 +1998,7 @@ export default function App() {
                     type="password"
                     placeholder="******"
                     value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    onChange={(e) => { setCurrentPassword(e.target.value); setPasswordError(null); }}
                     disabled={isPasswordSubmitting}
                     className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
                     required
@@ -1910,12 +2006,12 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 text-[10px] mb-1 font-bold">کلمه عبور جدید: <span className="text-rose-500">*</span></label>
+                  <label className="block text-slate-300 text-[10px] mb-1 font-bold">کلمه عبور جدید (حداقل ۶ کاراکتر): <span className="text-rose-500">*</span></label>
                   <input
                     type="password"
                     placeholder="******"
                     value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
+                    onChange={(e) => { setNewPassword(e.target.value); setPasswordError(null); }}
                     disabled={isPasswordSubmitting}
                     className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
                     required
@@ -1928,7 +2024,7 @@ export default function App() {
                     type="password"
                     placeholder="******"
                     value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    onChange={(e) => { setConfirmPassword(e.target.value); setPasswordError(null); }}
                     disabled={isPasswordSubmitting}
                     className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
                     required
@@ -1943,19 +2039,32 @@ export default function App() {
                   >
                     <span>{isPasswordSubmitting ? 'در حال ثبت...' : 'بروزرسانی کلمه عبور'}</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsChangePasswordModalOpen(false);
-                      setCurrentPassword('');
-                      setNewPassword('');
-                      setConfirmPassword('');
-                    }}
-                    disabled={isPasswordSubmitting}
-                    className="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-3 rounded text-xs transition-colors cursor-pointer"
-                  >
-                    انصراف
-                  </button>
+                  {currentUser?.mustChangePassword ? (
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      disabled={isPasswordSubmitting}
+                      className="bg-slate-700 hover:bg-rose-900/60 text-slate-300 hover:text-rose-200 font-bold py-2 px-3 rounded text-xs transition-colors cursor-pointer"
+                      title="خروج از حساب فعلی و بازگشت به صفحه ورود"
+                    >
+                      خروج
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsChangePasswordModalOpen(false);
+                        setCurrentPassword('');
+                        setNewPassword('');
+                        setConfirmPassword('');
+                        setPasswordError(null);
+                      }}
+                      disabled={isPasswordSubmitting}
+                      className="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-3 rounded text-xs transition-colors cursor-pointer"
+                    >
+                      انصراف
+                    </button>
+                  )}
                 </div>
               </form>
             </motion.div>

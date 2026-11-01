@@ -53,44 +53,73 @@ export function serializeItemsJson(items: any[]): string {
 
 /**
  * Parses and hydrates itemsJson (whether compact or full format) using the products list.
+ * Gracefully handles null, undefined, already parsed arrays/objects, or invalid non-JSON strings.
  */
 export function parseAndHydrateItemsJson(
-  itemsJsonStr?: string | null,
+  itemsJsonInput?: any,
   productsList: any[] = []
 ): HydratedOrderItem[] {
-  if (!itemsJsonStr || typeof itemsJsonStr !== 'string' || !itemsJsonStr.trim()) {
+  if (!itemsJsonInput) {
     return [];
   }
 
-  try {
-    const parsed = JSON.parse(itemsJsonStr);
-    if (!Array.isArray(parsed) || parsed.length === 0) {
+  let parsed: any = null;
+
+  if (Array.isArray(itemsJsonInput)) {
+    parsed = itemsJsonInput;
+  } else if (typeof itemsJsonInput === 'object') {
+    parsed = [itemsJsonInput];
+  } else if (typeof itemsJsonInput === 'string') {
+    const trimmed = itemsJsonInput.trim();
+    // Valid JSON items string must start with '[' (array) or '{' (single item)
+    if (!trimmed || (!trimmed.startsWith('[') && !trimmed.startsWith('{'))) {
       return [];
     }
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return [];
+    }
+  } else {
+    return [];
+  }
 
-    return parsed.map((item: any) => {
+  if (!Array.isArray(parsed)) {
+    if (parsed && typeof parsed === 'object') {
+      parsed = [parsed];
+    } else {
+      return [];
+    }
+  }
+
+  if (parsed.length === 0) {
+    return [];
+  }
+
+  const safeProductsList = Array.isArray(productsList) ? productsList : [];
+
+  return parsed
+    .filter((item: any) => item && typeof item === 'object')
+    .map((item: any) => {
       const pid = String(item.productId || item.id || item.prodId || '');
       const qty = Number(item.quantity ?? item.q ?? 0);
 
       // Find matching product in catalog
-      const prodInCatalog = productsList.find((p) => String(p.id) === pid);
+      const prodInCatalog = safeProductsList.find((p) => String(p?.id) === pid);
 
       const productName = item.productName || prodInCatalog?.name || pid || 'محصول';
       const unit = item.unit || prodInCatalog?.unit || 'قالب';
-      const pricePerUnit = Number(item.pricePerUnit ?? item.p ?? prodInCatalog?.pricePerUnit ?? 0);
+      const rawPrice = item.pricePerUnit ?? item.p ?? prodInCatalog?.pricePerUnit ?? 0;
+      const pricePerUnit = Number(rawPrice);
       const imageUrl = item.imageUrl || prodInCatalog?.imageUrl;
 
       return {
         productId: pid,
         productName,
-        quantity: qty,
+        quantity: isNaN(qty) ? 0 : qty,
         unit,
-        pricePerUnit,
+        pricePerUnit: isNaN(pricePerUnit) ? 0 : pricePerUnit,
         imageUrl
       };
     });
-  } catch (e) {
-    console.error('Error parsing itemsJson:', e);
-    return [];
-  }
 }

@@ -199,4 +199,6 @@ export interface AppUser {
   isEnabled: boolean;
   isOnline?: boolean;
   lastSeenAt?: string | null;
+  mustChangePassword?: boolean;
+  token?: string;
 }

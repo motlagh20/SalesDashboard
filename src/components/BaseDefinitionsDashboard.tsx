@@ -274,8 +274,8 @@ export function BaseDefinitionsDashboard({
 
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUsername.trim() || !newUserFullName.trim() || !newUserPhone.trim()) {
-      showToast('نام کاربری، نام کامل و شماره تماس الزامی هستند.', 'error');
+    if (!newUsername.trim() || !newUserFullName.trim() || !newUserPhone.trim() || !newUserRole) {
+      showToast('نام کاربری، نام کامل، شماره تماس و نقش کاربر الزامی هستند.', 'error');
       return;
     }
 
@@ -289,7 +289,7 @@ export function BaseDefinitionsDashboard({
         username: newUsername.trim(),
         fullName: newUserFullName.trim(),
         phoneNumber: newUserPhone.trim(),
-        role: newUserRole,
+        role: newUserRole || 'REPRESENTATIVE',
         agentCode: newUserRole === 'REPRESENTATIVE' ? newUserAgentCode : undefined,
         shippingCompanyId: newUserRole === 'SHIPPING_COMPANY' ? newUserSCId : undefined,
       };
@@ -323,7 +323,7 @@ export function BaseDefinitionsDashboard({
           cancelEditingUser();
         } else {
           const err = await res.json().catch(() => ({}));
-          showToast(err.error || 'خطا در تعریف کاربر جدید.', 'error');
+          showToast(err.message || err.error || 'خطا در تعریف کاربر جدید.', 'error');
         }
       }
     } catch {

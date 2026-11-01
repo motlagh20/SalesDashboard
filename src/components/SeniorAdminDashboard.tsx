@@ -157,7 +157,7 @@ export default function SeniorAdminDashboard({
             if (d.success) {
               showToast('کلیه تراکنش‌ها و سفارشات با موفقیت پاکسازی شدند.', 'success');
             } else {
-              showToast(d.error || 'خطا در پاکسازی تراکنش‌ها', 'error');
+              showToast(d.message || d.error || 'خطا در پاکسازی تراکنش‌ها', 'error');
             }
           }
           setActivityLogs([]);
@@ -187,7 +187,7 @@ export default function SeniorAdminDashboard({
             showToast('لاگ‌های فعالیت سیستم با موفقیت پاکسازی شدند.', 'success');
             fetchSystemLogsAndStats();
           } else {
-            showToast(data.error || 'خطا در پاکسازی لاگ‌ها', 'error');
+            showToast(data.message || data.error || 'خطا در پاکسازی لاگ‌ها', 'error');
           }
         } catch (err) {
           showToast('خطای شبکه در پاکسازی لاگ‌ها', 'error');

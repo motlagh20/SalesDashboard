@@ -810,11 +810,6 @@ export default function RepresentativeDashboard({
 
   // Step 2 Validation before moving to Step 3
   const handleGoToStep3 = () => {
-    if (!exactAddress.trim()) {
-      showToast('لطفاً آدرس دقیق تخلیه بار را وارد نمایید.', 'error');
-      return;
-    }
-
     if (!isExportOrder && agentTerritories.length > 0) {
       const tCheck = checkCityInTerritory(selectedCity, selectedProvince, agentTerritories);
       if (!tCheck.isAllowed) {
@@ -825,10 +820,41 @@ export default function RepresentativeDashboard({
     setFormStep(3);
   };
 
+  // Helper to normalize digits for phone numbers
+  const normalizeDigits = (val: string): string => {
+    return val
+      .replace(/[۰-۹]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1776 + 48))
+      .replace(/[٠-٩]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1632 + 48))
+      .replace(/[\s\-_]/g, '');
+  };
+
   // Open Proforma Invoice Preview Modal
   const handleOpenProformaPreview = () => {
     if (!currentAgentObj.isEnabled) {
       showToast('این نمایندگی در حال حاضر غیرفعال است و امکان ثبت سفارش روی آن وجود ندارد.', 'error');
+      return;
+    }
+
+    const cleanBuyer = buyerName.trim();
+    if (!cleanBuyer) {
+      showToast('تکمیل مشخصات خریدار الزامی است. لطفاً نام و مشخصات خریدار را وارد فرمایید.', 'error');
+      setFormStep(3);
+      setTimeout(() => document.getElementById('modal-step3-buyer-input')?.focus(), 100);
+      return;
+    }
+
+    const cleanPhone = normalizeDigits(phoneNumber.trim());
+    if (!cleanPhone) {
+      showToast('تکمیل شماره تماس خریدار الزامی است. لطفاً شماره تماس همراه را وارد فرمایید.', 'error');
+      setFormStep(3);
+      setTimeout(() => document.getElementById('modal-step3-phone-input')?.focus(), 100);
+      return;
+    }
+
+    if (cleanPhone.length < 10 || cleanPhone.length > 13) {
+      showToast('لطفاً یک شماره تماس معتبر (مانند ۰۹۱۲۳۴۵۶۷۸۹) وارد فرمایید.', 'error');
+      setFormStep(3);
+      setTimeout(() => document.getElementById('modal-step3-phone-input')?.focus(), 100);
       return;
     }
 
@@ -849,11 +875,6 @@ export default function RepresentativeDashboard({
       return;
     }
 
-    if (!exactAddress.trim()) {
-      showToast('لطفاً آدرس دقیق تخلیه را وارد نمایید.', 'error');
-      return;
-    }
-
     if (!isExportOrder && agentTerritories.length > 0) {
       const tCheck = checkCityInTerritory(selectedCity, selectedProvince, agentTerritories);
       if (!tCheck.isAllowed) {
@@ -870,8 +891,8 @@ export default function RepresentativeDashboard({
       date: new Date().toLocaleDateString('fa-IR'),
       agentName: currentAgentObj.alias,
       agentCode: currentAgentObj.agentCode,
-      buyerName: buyerName.trim() || currentAgentObj.alias,
-      phoneNumber: phoneNumber.trim() || 'ثبت نشده',
+      buyerName: cleanBuyer,
+      phoneNumber: cleanPhone,
       destinationCity,
       exactAddress,
       deliveryLocationUrl: deliveryLocationUrl.trim() || undefined,
@@ -889,11 +910,50 @@ export default function RepresentativeDashboard({
   // Final Submit Handler triggers Proforma Preview first
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    const cleanBuyer = buyerName.trim();
+    if (!cleanBuyer) {
+      showToast('تکمیل مشخصات خریدار الزامی است. لطفاً نام و مشخصات خریدار را وارد فرمایید.', 'error');
+      setFormStep(3);
+      setTimeout(() => document.getElementById('modal-step3-buyer-input')?.focus(), 100);
+      return;
+    }
+
+    const cleanPhone = normalizeDigits(phoneNumber.trim());
+    if (!cleanPhone) {
+      showToast('تکمیل شماره تماس خریدار الزامی است. لطفاً شماره تماس همراه را وارد فرمایید.', 'error');
+      setFormStep(3);
+      setTimeout(() => document.getElementById('modal-step3-phone-input')?.focus(), 100);
+      return;
+    }
+
+    if (cleanPhone.length < 10 || cleanPhone.length > 13) {
+      showToast('لطفاً یک شماره تماس معتبر (مانند ۰۹۱۲۳۴۵۶۷۸۹) وارد فرمایید.', 'error');
+      setFormStep(3);
+      setTimeout(() => document.getElementById('modal-step3-phone-input')?.focus(), 100);
+      return;
+    }
+
     handleOpenProformaPreview();
   };
 
   // Execute Final Order Submission after Proforma Confirmation
   const executeFinalSubmission = () => {
+    const cleanBuyer = buyerName.trim();
+    const cleanPhone = normalizeDigits(phoneNumber.trim());
+
+    if (!cleanBuyer) {
+      showToast('مشخصات خریدار الزامی است.', 'error');
+      setFormStep(3);
+      return;
+    }
+
+    if (!cleanPhone) {
+      showToast('شماره تماس خریدار الزامی است.', 'error');
+      setFormStep(3);
+      return;
+    }
+
     const activeProdId = productId || selectedProduct.id;
     const finalItems = invoiceItems.length > 0 
       ? invoiceItems 
@@ -925,10 +985,10 @@ export default function RepresentativeDashboard({
         quantity: rootQuantity,
         unit: rootUnit,
         destinationCity,
-        exactAddress,
-        phoneNumber,
-        buyerName,
-        notes,
+        exactAddress: exactAddress.trim() || undefined,
+        phoneNumber: cleanPhone,
+        buyerName: cleanBuyer,
+        notes: notes.trim() || undefined,
         itemsJson: serializeItemsJson(finalItems),
         paymentTrackingCode: paymentTrackingCode.trim() || undefined,
         paymentReceiptUrl: paymentReceiptUrl.trim() || undefined,
@@ -1653,11 +1713,11 @@ export default function RepresentativeDashboard({
                       )}
                     </div>
 
-                    {/* Exact Address Textarea */}
+                    {/* Exact Address Textarea (Optional) */}
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="block text-xs font-bold text-slate-800">
-                          آدرس دقیق متنی جهت تخلیه بار: <span className="text-rose-500">*</span>
+                          آدرس دقیق متنی جهت تخلیه بار (اختیاری):
                         </label>
                         {deliveryLocationUrl && (
                           <button
@@ -1671,9 +1731,8 @@ export default function RepresentativeDashboard({
                       </div>
                       <textarea
                         id="modal-step2-address-textarea"
-                        required
                         rows={2}
-                        placeholder="مثال: کیلومتر ۵ جاده بابل، انبار مرکزی مصالح..."
+                        placeholder="مثال: کیلومتر ۵ جاده بابل، انبار مرکزی مصالح... (اختیاری)"
                         value={exactAddress}
                         onChange={(e) => setExactAddress(e.target.value)}
                         className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 font-sans shadow-2xs font-bold transition-all"
@@ -1697,8 +1756,12 @@ export default function RepresentativeDashboard({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs font-bold text-slate-800 mb-1">
-                          مشخصات خریدار / خریدار پروژه:
+                        <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center justify-between">
+                          <span className="flex items-center gap-1">
+                            <span>مشخصات خریدار / خریدار پروژه:</span>
+                            <span className="text-rose-500 font-black text-sm">*</span>
+                          </span>
+                          <span className="text-[10px] text-rose-500 font-bold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">الزامی</span>
                         </label>
                         <input
                           id="modal-step3-buyer-input"
@@ -1706,20 +1769,31 @@ export default function RepresentativeDashboard({
                           placeholder="مثال: جناب آقای مهندس احمدی"
                           value={buyerName}
                           onChange={(e) => setBuyerName(e.target.value)}
-                          className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 font-sans shadow-2xs font-bold transition-all"
+                          className={`w-full bg-emerald-50/30 border-2 rounded-xl py-2 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:ring-2 font-sans shadow-2xs font-bold transition-all ${
+                            !buyerName.trim() ? 'border-amber-400 focus:border-emerald-600 focus:ring-emerald-500/20' : 'border-slate-300/90 focus:border-emerald-600 focus:ring-emerald-500/20'
+                          }`}
+                          required
                         />
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold text-slate-800 mb-1">
-                          شماره تماس همراه تحویل‌گیرنده:
+                        <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center justify-between">
+                          <span className="flex items-center gap-1">
+                            <span>شماره تماس همراه تحویل‌گیرنده:</span>
+                            <span className="text-rose-500 font-black text-sm">*</span>
+                          </span>
+                          <span className="text-[10px] text-rose-500 font-bold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">الزامی</span>
                         </label>
                         <input
+                          id="modal-step3-phone-input"
                           type="tel"
-                          placeholder="0912..."
+                          placeholder="۰۹۱۲۳۴۵۶۷۸۹"
                           value={phoneNumber}
                           onChange={(e) => setPhoneNumber(e.target.value)}
-                          className="w-full bg-emerald-50/30 border-2 border-slate-300/90 rounded-xl py-2 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 font-mono text-left dir-ltr shadow-2xs font-bold transition-all"
+                          className={`w-full bg-emerald-50/30 border-2 rounded-xl py-2 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:ring-2 font-mono text-left dir-ltr shadow-2xs font-bold transition-all ${
+                            !phoneNumber.trim() ? 'border-amber-400 focus:border-emerald-600 focus:ring-emerald-500/20' : 'border-slate-300/90 focus:border-emerald-600 focus:ring-emerald-500/20'
+                          }`}
+                          required
                         />
                       </div>
                     </div>
