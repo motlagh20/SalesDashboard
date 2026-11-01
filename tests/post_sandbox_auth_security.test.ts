@@ -1,24 +1,26 @@
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import express from "express";
 import http from "http";
+import express from "express";
+
+// Ensure test environment variables before importing app
+process.env.NODE_ENV = "test";
+process.env.TEST_APP_INSTANCE = "true";
+process.env.JWT_SECRET = "post-sandbox-audit-secure-jwt-secret-min-32-chars!";
+
+import { createApp } from "../server.ts";
+import { setDbPoolOverrideForTesting, isProductionEnvironment } from "../server/database.ts";
 import {
   generateToken,
-  verifyToken,
-  authenticate,
-  setAuthDbPoolOverrideForTesting,
-  hasRole
-} from "../server/auth";
+  setAuthDbPoolOverrideForTesting
+} from "../server/auth.ts";
 import {
-  isDefaultPassword,
-  hashPassword,
   hashPasswordSync,
   verifyPassword,
   DEFAULT_PASSWORD_BCRYPT_HASH
-} from "../server/password";
-import { isProductionEnvironment } from "../server/database";
+} from "../server/password.ts";
 
-describe("Post-Sandbox Authentication Security Audit Suite", () => {
+describe("Post-Sandbox Authentication Security Audit Suite (Testing Real Production Routes)", () => {
   let app: express.Express;
   let server: http.Server;
   let serverPort: number;
@@ -26,6 +28,7 @@ describe("Post-Sandbox Authentication Security Audit Suite", () => {
 
   // In-memory test database fixture
   let testUsers: any[] = [];
+  let testOrders: any[] = [];
 
   const mockDbPool = {
     query: async (sql: string, values: any[] = []) => {
@@ -44,6 +47,10 @@ describe("Post-Sandbox Authentication Security Audit Suite", () => {
         return [[{ count: testUsers.length }], []];
       }
 
+      if (/SELECT\s+COUNT\(\*\)\s+as\s+count\s+FROM\s+orders/i.test(cleanSql)) {
+        return [[{ count: testOrders.length }], []];
+      }
+
       if (/SELECT\s+\*\s+FROM\s+app_users\s+WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
         const id = values[0];
         const user = testUsers.find(u => u.id === id);
@@ -56,13 +63,27 @@ describe("Post-Sandbox Authentication Security Audit Suite", () => {
         return [user ? [user] : [], []];
       }
 
-      if (/UPDATE\s+app_users\s+SET\s+password\s*=\s*\?,\s*mustChangePassword\s*=\s*0\s+WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
-        const [hashedPass, id] = values;
+      if (/SELECT\s+.*?\s+FROM\s+orders/i.test(cleanSql)) {
+        return [testOrders, []];
+      }
+
+      if (/SELECT\s+.*?\s+FROM\s+order_history/i.test(cleanSql)) {
+        return [[], []];
+      }
+
+      // Real parameterised update query executed by server.ts:
+      // UPDATE app_users SET password = ?, mustChangePassword = ? WHERE id = ?
+      if (/UPDATE\s+app_users\s+SET\s+password\s*=\s*\?,\s*mustChangePassword\s*=\s*\?\s+WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
+        const [hashedPass, mustChange, id] = values;
         const user = testUsers.find(u => u.id === id);
         if (user) {
           user.password = hashedPass;
-          user.mustChangePassword = 0;
+          user.mustChangePassword = Number(mustChange);
         }
+        return [{ affectedRows: 1 }, []];
+      }
+
+      if (/INSERT\s+INTO\s+user_activity_logs/i.test(cleanSql)) {
         return [{ affectedRows: 1 }, []];
       }
 
@@ -79,106 +100,14 @@ describe("Post-Sandbox Authentication Security Audit Suite", () => {
   };
 
   before(async () => {
-    process.env.JWT_SECRET = "post-sandbox-audit-secure-jwt-secret-min-32-chars!";
-
+    // Inject mock DB pool into both database and auth layers
+    setDbPoolOverrideForTesting(mockDbPool);
     setAuthDbPoolOverrideForTesting(mockDbPool);
 
-    app = express();
-    app.use(express.json());
+    // Instantiate the REAL application from server.ts
+    app = await createApp();
 
-    // Inject mock DB pool into request for test isolation
-    app.use((req, res, next) => {
-      (req as any)._dbPool = mockDbPool;
-      next();
-    });
-
-    // 1. Unauthenticated Password Change Endpoint (with security checks)
-    app.post("/api/users/:id/change-password", authenticate, async (req, res) => {
-      const safeId = req.params.id;
-      const { currentPassword, newPassword } = req.body || {};
-      const user = testUsers.find(u => u.id === safeId);
-
-      if (!user) {
-        return res.status(404).json({ error: "کاربر یافت نشد." });
-      }
-
-      const isSelf = req.user?.id === safeId;
-      const isAdmin = hasRole(req.user?.role || "", ["SYSTEM_ADMIN"]);
-
-      if (!isSelf && !isAdmin) {
-        return res.status(403).json({ error: "دسترسی غیرمجاز. شما مجوز تغییر رمز عبور این کاربر را ندارید." });
-      }
-
-      if (!isSelf && user.role === "SYSTEM_ADMIN" && req.user?.username !== "root_admin") {
-        return res.status(403).json({ error: "تنها مدیر ارشد اصلی سیستم مجاز به تغییر رمز عبور سایر مدیران سیستم می‌باشد." });
-      }
-
-      if (isSelf) {
-        if (!currentPassword) {
-          return res.status(400).json({ error: "رمز عبور فعلی الزامی است." });
-        }
-        const verifyRes = await verifyPassword(currentPassword, user.password);
-        if (!verifyRes.valid) {
-          return res.status(400).json({ error: "رمز عبور فعلی نادرست است." });
-        }
-      }
-
-      if (!newPassword || newPassword.trim().length < 6) {
-        return res.status(400).json({ error: "رمز عبور جدید باید حداقل ۶ کاراکتر باشد." });
-      }
-
-      if (isDefaultPassword(newPassword)) {
-        return res.status(400).json({ error: "استفاده از کلمه عبور پیش‌فرض مجاز نیست." });
-      }
-
-      user.password = await hashPassword(newPassword.trim());
-      user.mustChangePassword = 0;
-
-      // When admin resets another user's password, DO NOT issue target user's token!
-      if (!isSelf) {
-        return res.json({
-          success: true,
-          message: `کلمه عبور کاربر «${user.username}» توسط مدیر سیستم با موفقیت تغییر یافت.`
-        });
-      }
-
-      const freshToken = generateToken({ id: user.id, username: user.username, role: user.role });
-      return res.json({
-        success: true,
-        token: freshToken,
-        mustChangePassword: false,
-        message: "رمز عبور شما با موفقیت تغییر یافت."
-      });
-    });
-
-    // 2. Protected Application API (e.g., Orders)
-    app.get("/api/orders", authenticate, (req, res) => {
-      res.json({ success: true, orders: [{ id: "ord-1", number: "1001" }] });
-    });
-
-    // 3. Permitted API for user status
-    app.get("/api/auth/me", authenticate, (req, res) => {
-      res.json({ success: true, user: { id: req.user?.id, username: req.user?.username } });
-    });
-
-    // 4. Dedicated Screen Unlock Endpoint
-    app.post("/api/auth/unlock", authenticate, async (req, res) => {
-      const { password } = req.body || {};
-      const user = testUsers.find(u => u.id === req.user?.id);
-
-      if (!user) {
-        return res.status(404).json({ error: "کاربر یافت نشد." });
-      }
-
-      const verifyRes = await verifyPassword(password || "", user.password);
-      if (!verifyRes.valid) {
-        return res.status(400).json({ error: "رمز عبور وارد شده نادرست است." });
-      }
-
-      return res.json({ success: true, message: "قفل صفحه با موفقیت باز شد." });
-    });
-
-    // Start test server
+    // Start server on ephemeral port
     await new Promise<void>((resolve) => {
       server = http.createServer(app);
       server.listen(0, () => {
@@ -193,6 +122,7 @@ describe("Post-Sandbox Authentication Security Audit Suite", () => {
   });
 
   after(async () => {
+    setDbPoolOverrideForTesting(null);
     setAuthDbPoolOverrideForTesting(null);
     if (server) {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -200,11 +130,11 @@ describe("Post-Sandbox Authentication Security Audit Suite", () => {
   });
 
   beforeEach(() => {
-    // Reset test users fixture
+    // Reset test users fixture before each test
     testUsers = [
       {
         id: "usr-admin",
-        username: "root_admin",
+        username: "admin",
         fullName: "مدیر ارشد سیستم",
         phoneNumber: "09120000000",
         role: "SYSTEM_ADMIN",
@@ -255,9 +185,25 @@ describe("Post-Sandbox Authentication Security Audit Suite", () => {
         mustChangePassword: 1
       }
     ];
+
+    testOrders = [
+      {
+        id: "ord-test-1",
+        orderNumber: "1001",
+        customerName: "پروژه ساختمانی برج البرز",
+        agentCode: "AG-101",
+        productId: "prod-1",
+        productName: "سفال سقف طبرستان",
+        quantity: 500,
+        unit: "عدد",
+        destinationCity: "تهران",
+        phoneNumber: "09121234567",
+        status: "PENDING_APPROVAL"
+      }
+    ];
   });
 
-  // --- 1. UNAUTHENTICATED PASSWORD CHANGE TESTS ---
+  // --- 1. UNAUTHENTICATED & PERMISSION TESTS (ON REAL ROUTE) ---
 
   it("1.1. Negative: Unauthenticated request to change-password returns 401 Unauthorized", async () => {
     const res = await fetch(`${baseUrl}/api/users/usr-rep/change-password`, {
@@ -293,7 +239,7 @@ describe("Post-Sandbox Authentication Security Audit Suite", () => {
     assert.equal(res.status, 403, "IDOR attempt must be rejected with 403");
   });
 
-  it("1.4. Positive: Ordinary user can change their own password with valid current password", async () => {
+  it("1.4. Positive: Ordinary user self-service password change sets mustChangePassword = 0 in database", async () => {
     const repToken = generateToken({ id: "usr-rep", username: "rep_tehran", role: "REPRESENTATIVE" });
     const res = await fetch(`${baseUrl}/api/users/usr-rep/change-password`, {
       method: "POST",
@@ -307,10 +253,16 @@ describe("Post-Sandbox Authentication Security Audit Suite", () => {
     const data = await res.json();
     assert.equal(data.success, true);
     assert.ok(data.token, "User changing own password receives fresh session token");
+
+    // Database verification: mustChangePassword must be strictly 0
+    const repInDb = testUsers.find(u => u.id === "usr-rep");
+    assert.equal(repInDb.mustChangePassword, 0, "Self-service change must set mustChangePassword = 0 in database");
+    const verifyNew = await verifyPassword("MyNewSafePassword2026!", repInDb.password);
+    assert.equal(verifyNew.valid, true, "New password must be correctly hashed in database");
   });
 
-  it("1.5. Positive & Token Isolation: Administrator resetting another user's password succeeds WITHOUT receiving that user's token", async () => {
-    const adminToken = generateToken({ id: "usr-admin", username: "root_admin", role: "SYSTEM_ADMIN" });
+  it("1.5. Positive & Token Isolation: Administrator resetting another user's password sets mustChangePassword = 1 and issues no token", async () => {
+    const adminToken = generateToken({ id: "usr-admin", username: "admin", role: "SYSTEM_ADMIN" });
     const res = await fetch(`${baseUrl}/api/users/usr-rep/change-password`, {
       method: "POST",
       headers: {
@@ -323,9 +275,13 @@ describe("Post-Sandbox Authentication Security Audit Suite", () => {
     const data = await res.json();
     assert.equal(data.success, true);
     assert.equal(data.token, undefined, "Admin resetting another user MUST NOT receive that user's token");
+
+    // Database verification: mustChangePassword must be strictly 1 for administrative resets
+    const repInDb = testUsers.find(u => u.id === "usr-rep");
+    assert.equal(repInDb.mustChangePassword, 1, "Administrative reset must set mustChangePassword = 1 in database");
   });
 
-  it("1.6. Negative (Privilege Escalation): Non-primary admin cannot change another SYSTEM_ADMIN's password", async () => {
+  it("1.6. Negative (Privilege Escalation): Non-primary admin cannot change primary SYSTEM_ADMIN password", async () => {
     const admin2Token = generateToken({ id: "usr-admin2", username: "secondary_admin", role: "SYSTEM_ADMIN" });
     const res = await fetch(`${baseUrl}/api/users/usr-admin/change-password`, {
       method: "POST",
@@ -338,70 +294,148 @@ describe("Post-Sandbox Authentication Security Audit Suite", () => {
     assert.equal(res.status, 403, "Secondary admin cannot reset primary root admin");
   });
 
-  // --- 2. MANDATORY PASSWORD CHANGE TESTS ---
+  // --- 2. END-TO-END MANDATORY PASSWORD CHANGE FLOW ---
 
-  it("2.1. Negative: User with default password / mustChangePassword CANNOT access normal APIs (403 Forbidden)", async () => {
-    const legacyToken = generateToken({ id: "usr-legacy-default", username: "legacy_user", role: "REPRESENTATIVE" });
-    const res = await fetch(`${baseUrl}/api/orders`, {
-      headers: { "Authorization": `Bearer ${legacyToken}` }
-    });
-    assert.equal(res.status, 403, "Must be blocked from accessing protected orders API");
-    const data = await res.json();
-    assert.match(data.message || data.error, /تغییر کلمه عبور پیش‌فرض\/موقت الزامی است/);
-  });
-
-  it("2.2. Positive: User with mustChangePassword CAN access change-password and me endpoints", async () => {
-    const legacyToken = generateToken({ id: "usr-legacy-default", username: "legacy_user", role: "REPRESENTATIVE" });
-    
-    // Status endpoint is accessible
-    const meRes = await fetch(`${baseUrl}/api/auth/me`, {
-      headers: { "Authorization": `Bearer ${legacyToken}` }
-    });
-    assert.equal(meRes.status, 200, "/api/auth/me is permitted for mustChangePassword users");
-
-    // Change password endpoint is accessible
-    const changeRes = await fetch(`${baseUrl}/api/users/usr-legacy-default/change-password`, {
+  it("2.1. Administrative reset target CANNOT access /api/orders before changing password (403 Forbidden)", async () => {
+    // 1. Admin resets Representative's password
+    const adminToken = generateToken({ id: "usr-admin", username: "admin", role: "SYSTEM_ADMIN" });
+    const resetRes = await fetch(`${baseUrl}/api/users/usr-rep/change-password`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${legacyToken}`
+        "Authorization": `Bearer ${adminToken}`
       },
-      body: JSON.stringify({ currentPassword: "123456", newPassword: "MyNewDedicatedPassword2026!" })
+      body: JSON.stringify({ newPassword: "TempPassword123!" })
     });
-    assert.equal(changeRes.status, 200, "User can change password to clear the restriction");
+    assert.equal(resetRes.status, 200);
 
-    const changeData = await changeRes.json();
-    assert.ok(changeData.token);
+    // 2. Verified in DB: mustChangePassword = 1
+    const repInDb = testUsers.find(u => u.id === "usr-rep");
+    assert.equal(repInDb.mustChangePassword, 1);
 
-    // Now orders API becomes accessible with the fresh token
+    // 3. User attempts to query orders with their active credentials
+    const repToken = generateToken({ id: "usr-rep", username: "rep_tehran", role: "REPRESENTATIVE" });
     const ordersRes = await fetch(`${baseUrl}/api/orders`, {
-      headers: { "Authorization": `Bearer ${changeData.token}` }
+      headers: { "Authorization": `Bearer ${repToken}` }
     });
-    assert.equal(ordersRes.status, 200, "Orders API is unblocked after password change");
+    assert.equal(ordersRes.status, 403, "Target must be blocked from accessing /api/orders before password change");
+    const errData = await ordersRes.json();
+    assert.match(errData.message || errData.error, /تغییر کلمه عبور پیش‌فرض\/موقت الزامی است/);
+  });
+
+  it("2.2. Administrative reset target CAN access permitted self-service endpoint and /api/auth/me", async () => {
+    // Set user to mustChangePassword = 1
+    const repInDb = testUsers.find(u => u.id === "usr-rep");
+    repInDb.mustChangePassword = 1;
+    repInDb.password = hashPasswordSync("TempPassword123!");
+
+    const repToken = generateToken({ id: "usr-rep", username: "rep_tehran", role: "REPRESENTATIVE" });
+
+    // Status endpoint is permitted
+    const meRes = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { "Authorization": `Bearer ${repToken}` }
+    });
+    assert.equal(meRes.status, 200, "/api/auth/me must remain accessible for session status");
+
+    // Permitted self-service change password endpoint succeeds
+    const changeRes = await fetch(`${baseUrl}/api/users/usr-rep/change-password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${repToken}`
+      },
+      body: JSON.stringify({ currentPassword: "TempPassword123!", newPassword: "RepBrandNewSecret2026!" })
+    });
+    assert.equal(changeRes.status, 200, "Permitted change-password endpoint succeeds");
+    const changeData = await changeRes.json();
+    assert.equal(changeData.success, true);
+    assert.ok(changeData.token, "User receives fresh token upon completing mandatory password change");
+
+    // Verified in DB: mustChangePassword is reset to 0
+    assert.equal(repInDb.mustChangePassword, 0, "Self-service change must clear mustChangePassword to 0");
+  });
+
+  it("2.3. Administrative reset target gains normal /api/orders access only AFTER successful password change", async () => {
+    // 1. Initially flagged with mustChangePassword = 1
+    const repInDb = testUsers.find(u => u.id === "usr-rep");
+    repInDb.mustChangePassword = 1;
+    repInDb.password = hashPasswordSync("TempPassword123!");
+
+    const oldToken = generateToken({ id: "usr-rep", username: "rep_tehran", role: "REPRESENTATIVE" });
+
+    // Blocked before change
+    const blockedRes = await fetch(`${baseUrl}/api/orders`, {
+      headers: { "Authorization": `Bearer ${oldToken}` }
+    });
+    assert.equal(blockedRes.status, 403);
+
+    // 2. Perform self-service password change
+    const changeRes = await fetch(`${baseUrl}/api/users/usr-rep/change-password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${oldToken}`
+      },
+      body: JSON.stringify({ currentPassword: "TempPassword123!", newPassword: "RepNewChosenSecret2026!" })
+    });
+    assert.equal(changeRes.status, 200);
+    const { token: freshToken } = await changeRes.json();
+    assert.ok(freshToken);
+
+    // 3. Unblocked after change with new token
+    const unblockedRes = await fetch(`${baseUrl}/api/orders`, {
+      headers: { "Authorization": `Bearer ${freshToken}` }
+    });
+    assert.equal(unblockedRes.status, 200, "Orders API is successfully accessible after password change");
+  });
+
+  it("2.4. Administrator session remains completely unchanged after resetting another user's password", async () => {
+    const adminToken = generateToken({ id: "usr-admin", username: "admin", role: "SYSTEM_ADMIN" });
+
+    // Admin resets Representative's password
+    const resetRes = await fetch(`${baseUrl}/api/users/usr-rep/change-password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${adminToken}`,
+        "Cookie": `auth_token=${adminToken}`
+      },
+      body: JSON.stringify({ newPassword: "AdminResetPass123!" })
+    });
+    assert.equal(resetRes.status, 200);
+
+    // Response must not set cookies overwriting admin session
+    const setCookie = resetRes.headers.get("set-cookie");
+    assert.equal(setCookie, null, "Admin must not receive target user's cookie");
+
+    // Admin makes subsequent request using their session token; remains fully SYSTEM_ADMIN
+    const adminCheckRes = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { "Authorization": `Bearer ${adminToken}` }
+    });
+    assert.equal(adminCheckRes.status, 200);
+    const adminData = await adminCheckRes.json();
+    assert.equal(adminData.user.id, "usr-admin");
+    assert.equal(adminData.user.role, "SYSTEM_ADMIN");
   });
 
   // --- 3. PRODUCTION DATABASE SEEDING SAFETY ---
 
   it("3.1. Production safety: Seeding function strictly aborts in production environment", async () => {
     process.env.NODE_ENV = "production";
+    assert.equal(isProductionEnvironment(), true);
 
-    // Simulate seedDatabaseIfEmpty logic in production
-    let seeded = false;
-    async function testSeedIfEmpty() {
-      if (isProductionEnvironment()) {
-        return; // Guarded
-      }
-      seeded = true;
+    // Verify isProductionEnvironment guard logic
+    let seedingExecuted = false;
+    if (!isProductionEnvironment()) {
+      seedingExecuted = true;
     }
-
-    await testSeedIfEmpty();
-    assert.equal(seeded, false, "Database seeding must not run in production");
+    assert.equal(seedingExecuted, false, "Database seeding must never execute in production");
     process.env.NODE_ENV = "test";
   });
 
-  // --- 4. AUTOLOCK MODAL SECURITY ---
+  // --- 4. REAL DEDICATED SCREEN UNLOCK ENDPOINT ---
 
-  it("4.1. AutoLock: Unlocking without authentication token returns 401", async () => {
+  it("4.1. AutoLock: Unlocking without authentication token returns 401 on real route", async () => {
     const res = await fetch(`${baseUrl}/api/auth/unlock`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

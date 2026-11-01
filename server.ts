@@ -91,7 +91,7 @@ function clearAllRouteCaches() {
 // Load environment variables
 dotenv.config();
 
-async function startServer() {
+export async function createApp(): Promise<express.Express> {
   const app = express();
   const PORT = 3000;
 
@@ -3195,7 +3195,8 @@ function compactItemsJson(itemsInput: any): string | null {
       }
 
       const hashedNew = await hashPassword(trimmedNew);
-      await db.query("UPDATE app_users SET password = ?, mustChangePassword = 0 WHERE id = ?", [hashedNew, safeId]);
+      const newMustChangePassword = isSelf ? 0 : 1;
+      await db.query("UPDATE app_users SET password = ?, mustChangePassword = ? WHERE id = ?", [hashedNew, newMustChangePassword, safeId]);
 
       await logUserActivity({
         userId: req.user.id,
@@ -3267,7 +3268,7 @@ function compactItemsJson(itemsInput: any): string | null {
           details: "رمز عبور وارد شده برای بازگشایی قفل خودکار نامعتبر بود.",
           module: "AUTH",
           ipAddress: clientIp,
-          status: "FAILED"
+          status: "ERROR"
         }).catch(() => {});
         return sendApiError(res, 400, "رمز عبور وارد شده نادرست است.");
       }
@@ -4329,6 +4330,13 @@ function compactItemsJson(itemsInput: any): string | null {
   // Global API error handler for unhandled errors
   app.use("/api", expressErrorHandler);
 
+  return app;
+}
+
+export async function startServer() {
+  const app = await createApp();
+  const PORT = Number(process.env.PORT) || 3000;
+
   // --- Vite / Frontend Serving ---
 
   const httpServer = http.createServer(app);
@@ -4357,4 +4365,14 @@ function compactItemsJson(itemsInput: any): string | null {
   });
 }
 
-startServer();
+const isMainScript = Boolean(
+  process.argv[1] &&
+  (process.argv[1].endsWith("server.ts") || process.argv[1].endsWith("server.cjs")) &&
+  !process.argv.includes("--test") &&
+  process.env.NODE_ENV !== "test" &&
+  !process.env.TEST_APP_INSTANCE
+);
+
+if (isMainScript) {
+  startServer();
+}

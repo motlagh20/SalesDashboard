@@ -151,6 +151,11 @@ let isDbHealthy = false;
 let dbMaintenanceError: DatabaseMaintenanceError | null = null;
 let isFallbackMode = false;
 let mockPoolInstance: MockPool | null = null;
+let dbPoolOverrideForTesting: any = null;
+
+export function setDbPoolOverrideForTesting(override: any | null): void {
+  dbPoolOverrideForTesting = override;
+}
 let recoveryProbeTimer: NodeJS.Timeout | null = null;
 let isProbing = false;
 const JSON_FILE_PATH = path.join(process.cwd(), "server", "salesdashboard.json");
@@ -1470,6 +1475,9 @@ export function ensurePoolInitialized(): mysql.Pool {
  * Initializes the pool lazily on the first request with bounded timeouts and queue limits.
  */
 export function getDbPool(): mysql.Pool {
+  if (dbPoolOverrideForTesting) {
+    return dbPoolOverrideForTesting as any;
+  }
   // Requirement 1 & 4: In production, never return mock/JSON pool; throw maintenance error if DB is down
   if (isProductionEnvironment()) {
     if (isFallbackMode) {
@@ -1647,6 +1655,9 @@ async function ensureIndexExists(db: mysql.Pool, tableName: string, indexName: s
  * This is perfect for initial bootstrapping on Ubuntu.
  */
 export async function bootstrapDatabase() {
+  if (dbPoolOverrideForTesting) {
+    return;
+  }
   try {
     const db = pool || ensurePoolInitialized();
     
