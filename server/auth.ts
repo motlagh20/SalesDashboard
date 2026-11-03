@@ -153,6 +153,7 @@ export function getJwtSecret(): string {
 export function assertJwtSecretConfiguration(): void {
   const isProduction = isProductionEnvironment();
   const rawSecret = process.env.JWT_SECRET;
+
   const validation = validateJwtSecret(rawSecret, isProduction);
 
   if (!validation.valid) {
@@ -481,7 +482,7 @@ export async function authenticate(req: express.Request, res: express.Response, 
       return sendApiError(res, 403, "حساب کاربری شما غیرفعال شده است. با مدیریت تماس بگیرید.");
     }
 
-    const mustChange = isDefaultPasswordOrMatches(user.password) || Boolean(user.mustChangePassword);
+    const mustChange = Boolean(user.mustChangePassword) || (isProductionEnvironment() && isDefaultPasswordOrMatches(user.password));
 
     // Role and identity strictly come from verified database record
     req.user = {

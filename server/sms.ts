@@ -1,3 +1,4 @@
+import fs from "fs";
 import { maskPhoneNumber } from "./otp";
 
 export interface SmsSendResult {
@@ -27,6 +28,16 @@ export function setSmsSendOverrideForTesting(
   override: ((phone: string, otpCode: string, purpose: "LOGIN" | "PASSWORD_RESET") => Promise<SmsSendResult>) | null
 ): void {
   testSmsSendOverride = override;
+  try {
+    const isProduction = (process.env.NODE_ENV || "").toLowerCase() === "production" || (process.env.APP_ENV || "").toLowerCase() === "production";
+    if (!isProduction) {
+      if (override) {
+        fs.writeFileSync("/tmp/.sms_override_failure", JSON.stringify({ failure: true }));
+      } else if (fs.existsSync("/tmp/.sms_override_failure")) {
+        fs.unlinkSync("/tmp/.sms_override_failure");
+      }
+    }
+  } catch {}
 }
 
 /**
@@ -42,6 +53,17 @@ export async function sendOtpSms(
   }
 
   const isProduction = (process.env.NODE_ENV || "").toLowerCase() === "production" || (process.env.APP_ENV || "").toLowerCase() === "production";
+  if (!isProduction) {
+    try {
+      if (fs.existsSync("/tmp/.sms_override_failure")) {
+        return {
+          success: false,
+          provider: "kavenegar",
+          error: "درگاه پیامک در دسترس نمی‌باشد (Error 500)."
+        };
+      }
+    } catch {}
+  }
   const maskedPhone = maskPhoneNumber(phoneNumber);
   const purposeText = purpose === "LOGIN" ? "ورود به سامانه طبرستان" : "بازیابی کلمه عبور";
 

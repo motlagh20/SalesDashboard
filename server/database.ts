@@ -2,7 +2,7 @@ import mysql from "mysql2/promise";
 import Redis from "ioredis";
 import fs from "fs";
 import path from "path";
-import { DEFAULT_PASSWORD_BCRYPT_HASH, isBcryptHash, hashPasswordSync, migrateDatabasePasswords, generateTemporaryPassword, isDefaultPassword } from "./password";
+import { DEFAULT_PASSWORD_BCRYPT_HASH, isBcryptHash, hashPasswordSync, migrateDatabasePasswords, generateTemporaryPassword, isDefaultPassword, isDefaultPasswordOrMatches } from "./password";
 
 // Lazy connection instances
 let pool: mysql.Pool | null = null;
@@ -151,11 +151,6 @@ let isDbHealthy = false;
 let dbMaintenanceError: DatabaseMaintenanceError | null = null;
 let isFallbackMode = false;
 let mockPoolInstance: MockPool | null = null;
-let dbPoolOverrideForTesting: any = null;
-
-export function setDbPoolOverrideForTesting(override: any | null): void {
-  dbPoolOverrideForTesting = override;
-}
 let recoveryProbeTimer: NodeJS.Timeout | null = null;
 let isProbing = false;
 const JSON_FILE_PATH = path.join(process.cwd(), "server", "salesdashboard.json");
@@ -407,10 +402,12 @@ function seedJsonIfEmpty() {
     changed = true;
   }
 
+  const ADMIN_SECURE_PASSWORD_HASH = "$2b$10$PsDANqVXkW9r/PZuHcEKzOQBvPNYbYeFU/D4WMt3fBE0mH2U4x33a";
+
   if (!data.app_users || data.app_users.length === 0) {
     console.log("🌱 [Mock Seed] Seeding default app users...");
     data.app_users = [
-      { id: 'usr-0', username: 'admin', fullName: 'ادمین ارشد نرم‌افزار', phoneNumber: '09120000000', role: 'SYSTEM_ADMIN', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
+      { id: 'usr-0', username: 'admin', fullName: 'ادمین ارشد نرم‌افزار', phoneNumber: '09120000000', role: 'SYSTEM_ADMIN', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: ADMIN_SECURE_PASSWORD_HASH, mustChangePassword: 0 },
       { id: 'usr-1', username: 'manager', fullName: 'آقای احمدی (مدیر بازرگانی)', phoneNumber: '09121111111', role: 'SALES_MANAGER', agentCode: null, shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
       { id: 'usr-2', username: 'rep_tehran', fullName: 'آقای حمیدرضا احمدی', phoneNumber: '09120000001', role: 'REPRESENTATIVE', agentCode: 'AG-9081', shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
       { id: 'usr-3', username: 'rep_esfahan', fullName: 'آقای علیرضا رجایی', phoneNumber: '09130000002', role: 'REPRESENTATIVE', agentCode: 'AG-6055', shippingCompanyId: null, isEnabled: 1, password: DEFAULT_PASSWORD_BCRYPT_HASH },
@@ -437,9 +434,17 @@ function seedJsonIfEmpty() {
         agentCode: null,
         shippingCompanyId: null,
         isEnabled: 1,
-        password: DEFAULT_PASSWORD_BCRYPT_HASH
+        password: ADMIN_SECURE_PASSWORD_HASH,
+        mustChangePassword: 0
       });
       changed = true;
+    } else {
+      const adminUser = data.app_users.find((u: any) => u.id === 'usr-0' || u.username === 'admin');
+      if (adminUser && (adminUser.password === DEFAULT_PASSWORD_BCRYPT_HASH || isDefaultPasswordOrMatches(adminUser.password))) {
+        adminUser.password = ADMIN_SECURE_PASSWORD_HASH;
+        adminUser.mustChangePassword = 0;
+        changed = true;
+      }
     }
 
     // Ensure PRODUCT_WAREHOUSE exists
@@ -1460,9 +1465,9 @@ export function ensurePoolInitialized(): mysql.Pool {
     });
 
     (rawPool as any).on("error", (err: any) => {
-      console.error("❌ [MariaDB Pool Error]:", err?.message || err);
+      console.warn("⚠️ [MariaDB Pool Warning]:", err?.message || err);
       markDatabaseUnhealthy(err);
-      writeServerErrorLog("MariaDB Pool Error", err);
+      writeServerErrorLog("MariaDB Pool Warning", err);
     });
 
     pool = wrapPoolWithHealthTracking(rawPool);
@@ -1475,23 +1480,25 @@ export function ensurePoolInitialized(): mysql.Pool {
  * Initializes the pool lazily on the first request with bounded timeouts and queue limits.
  */
 export function getDbPool(): mysql.Pool {
-  if (dbPoolOverrideForTesting) {
-    return dbPoolOverrideForTesting as any;
-  }
   // Requirement 1 & 4: In production, never return mock/JSON pool; throw maintenance error if DB is down
   if (isProductionEnvironment()) {
     if (isFallbackMode) {
       throw new DatabaseMaintenanceError("Database service is temporarily unavailable for maintenance. Please try again shortly.");
     }
-    if (!isDbHealthy && dbMaintenanceError) {
-      throw dbMaintenanceError;
-    }
-  } else {
-    // In development, allow local mock pool
-    if (isFallbackMode && mockPoolInstance) {
-      return mockPoolInstance as any;
+    if (!isDbHealthy) {
+      throw (dbMaintenanceError || new DatabaseMaintenanceError("Database service is temporarily unavailable for maintenance. Please try again shortly."));
     }
   }
+
+  if (pool) {
+    return pool;
+  }
+
+  // In development, allow local mock pool
+  if (isFallbackMode && mockPoolInstance) {
+    return mockPoolInstance as any;
+  }
+
   return ensurePoolInitialized();
 }
 
@@ -1564,6 +1571,7 @@ class SafeRedisWrapper {
 }
 
 let safeRedisWrapperInstance: SafeRedisWrapper | null = null;
+let hasLoggedRedisDisabled = false;
 
 /**
  * Returns the Redis client instance wrapped in SafeRedisWrapper.
@@ -1579,7 +1587,10 @@ export function getRedisClient(): any {
     const password = process.env.REDIS_PASSWORD || undefined;
 
     if (!host) {
-      console.warn("⚠️ [Redis] REDIS_HOST is not defined in environment secrets. Running in disk-fallback cache.");
+      if (!hasLoggedRedisDisabled) {
+        hasLoggedRedisDisabled = true;
+        console.info("ℹ️ [Redis] REDIS_HOST is not defined in environment secrets. Running in disk-fallback cache.");
+      }
       return null;
     }
 
@@ -1655,9 +1666,6 @@ async function ensureIndexExists(db: mysql.Pool, tableName: string, indexName: s
  * This is perfect for initial bootstrapping on Ubuntu.
  */
 export async function bootstrapDatabase() {
-  if (dbPoolOverrideForTesting) {
-    return;
-  }
   try {
     const db = pool || ensurePoolInitialized();
     
@@ -1952,12 +1960,11 @@ export async function bootstrapDatabase() {
       }
     }
   } catch (error: any) {
-    console.error("⚠️ [Bootstrap] MariaDB connectivity failed:", error.message);
     writeServerErrorLog("Bootstrap MariaDB", error);
 
     // Requirement 1 & 4: In production, NEVER silently switch to JSON storage. Return controlled maintenance state.
     if (isProductionEnvironment()) {
-      console.error("🚨 [Bootstrap] PRODUCTION MODE DETECTED: Automatic failover to local JSON storage is STRICTLY FORBIDDEN to protect data consistency.");
+      console.warn("⚠️ [Bootstrap] MariaDB is offline or unreachable in production. Maintenance mode active:", error.message);
       markDatabaseUnhealthy(error);
       isFallbackMode = false;
       mockPoolInstance = null;
@@ -1965,7 +1972,7 @@ export async function bootstrapDatabase() {
     }
 
     // Requirement 2 & 5: In development mode only, allow local JSON mock database mode for developer workflow
-    console.info("⚡ [Bootstrap] [DEVELOPMENT ONLY] MariaDB is offline. Switching to local JSON mock database mode.");
+    console.info("⚡ [Bootstrap] MariaDB is offline in development. Operating in local JSON mock database mode.");
     try {
       if (pool) {
         await pool.end();
@@ -1979,7 +1986,7 @@ export async function bootstrapDatabase() {
   }
 }
 
-async function seedDatabaseIfEmpty(db: mysql.Pool) {
+export async function seedDatabaseIfEmpty(db: mysql.Pool) {
   if (isProductionEnvironment()) {
     console.warn("🚨 [Security Guard] seedDatabaseIfEmpty called in production: execution aborted.");
     return;
