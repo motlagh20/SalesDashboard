@@ -2800,7 +2800,7 @@ function compactItemsJson(itemsInput: any): string | null {
       const clientIp = getClientIp(req);
 
       // Requirement 3: Enforce rate limits and resend cooldowns
-      const rateCheck = checkOtpRateLimit(cleanPhone, clientIp, "LOGIN");
+      const rateCheck = await checkOtpRateLimit(cleanPhone, clientIp, "LOGIN");
       if (!rateCheck.allowed) {
         if (rateCheck.retryAfter) {
           res.setHeader("Retry-After", String(rateCheck.retryAfter));
@@ -2817,7 +2817,7 @@ function compactItemsJson(itemsInput: any): string | null {
 
       // Requirement 4: Prevent account enumeration with consistent generic response
       if (matched.length === 0) {
-        recordOtpRequest(cleanPhone, clientIp, "LOGIN");
+        await recordOtpRequest(cleanPhone, clientIp, "LOGIN");
         return res.json({
           success: true,
           message: "در صورت ثبت بودن اطلاعات در سامانه، کد تایید پیامکی ارسال گردید.",
@@ -2831,7 +2831,7 @@ function compactItemsJson(itemsInput: any): string | null {
       }
 
       const targetPhone = user.phoneNumber || cleanPhone;
-      recordOtpRequest(targetPhone, clientIp, "LOGIN");
+      await recordOtpRequest(targetPhone, clientIp, "LOGIN");
 
       // Generate cryptographically secure OTP with expiration
       const { code: otpCode, expiresIn } = createOtp(targetPhone, "LOGIN");
@@ -2872,7 +2872,7 @@ function compactItemsJson(itemsInput: any): string | null {
       const clientIp = getClientIp(req);
 
       // Requirement 3: Enforce verification rate limit per source IP
-      const ipVerifyCheck = checkVerificationRateLimit(clientIp);
+      const ipVerifyCheck = await checkVerificationRateLimit(clientIp);
       if (!ipVerifyCheck.allowed) {
         return sendApiError(res, 429, ipVerifyCheck.error || "تعداد دفعات تلاش اشتباه بیش از حد مجاز است.");
       }
@@ -2886,7 +2886,7 @@ function compactItemsJson(itemsInput: any): string | null {
 
       // Requirement 4: Prevent account enumeration with generic error
       if (matched.length === 0) {
-        recordFailedVerification(clientIp);
+        await recordFailedVerification(clientIp);
         return sendApiError(res, 400, "کد تایید وارد شده نادرست است یا منقضی شده است.");
       }
 
@@ -2899,7 +2899,7 @@ function compactItemsJson(itemsInput: any): string | null {
       // Requirement 2 & 7: Strict verification (purpose='LOGIN', expiry, single-use, max attempts, safe concurrency)
       const verifyResult = await verifyOtp(targetPhone, cleanCode, "LOGIN");
       if (!verifyResult.success) {
-        recordFailedVerification(clientIp);
+        await recordFailedVerification(clientIp);
         return sendApiError(res, 400, verifyResult.error);
       }
 
@@ -3009,7 +3009,7 @@ function compactItemsJson(itemsInput: any): string | null {
       const clientIp = getClientIp(req);
 
       // Requirement 3: Enforce rate limits and resend cooldowns
-      const rateCheck = checkOtpRateLimit(cleanPhone, clientIp, "PASSWORD_RESET");
+      const rateCheck = await checkOtpRateLimit(cleanPhone, clientIp, "PASSWORD_RESET");
       if (!rateCheck.allowed) {
         if (rateCheck.retryAfter) {
           res.setHeader("Retry-After", String(rateCheck.retryAfter));
@@ -3026,7 +3026,7 @@ function compactItemsJson(itemsInput: any): string | null {
 
       // Requirement 4: Prevent account enumeration with consistent generic response
       if (matched.length === 0) {
-        recordOtpRequest(cleanPhone, clientIp, "PASSWORD_RESET");
+        await recordOtpRequest(cleanPhone, clientIp, "PASSWORD_RESET");
         return res.json({
           success: true,
           message: "در صورت ثبت بودن شماره همراه در سیستم، کد تایید بازیابی ارسال گردید.",
@@ -3040,7 +3040,7 @@ function compactItemsJson(itemsInput: any): string | null {
       }
 
       const targetPhone = user.phoneNumber || cleanPhone;
-      recordOtpRequest(targetPhone, clientIp, "PASSWORD_RESET");
+      await recordOtpRequest(targetPhone, clientIp, "PASSWORD_RESET");
 
       // Generate cryptographically secure OTP with expiration
       const { code: otpCode, expiresIn } = createOtp(targetPhone, "PASSWORD_RESET");
@@ -3082,7 +3082,7 @@ function compactItemsJson(itemsInput: any): string | null {
       const clientIp = getClientIp(req);
 
       // Requirement 3: Enforce verification rate limit per source IP
-      const ipVerifyCheck = checkVerificationRateLimit(clientIp);
+      const ipVerifyCheck = await checkVerificationRateLimit(clientIp);
       if (!ipVerifyCheck.allowed) {
         return sendApiError(res, 429, ipVerifyCheck.error || "تعداد دفعات تلاش اشتباه بیش از حد مجاز است.");
       }
@@ -3096,7 +3096,7 @@ function compactItemsJson(itemsInput: any): string | null {
 
       // Requirement 4: Prevent account enumeration
       if (matched.length === 0) {
-        recordFailedVerification(clientIp);
+        await recordFailedVerification(clientIp);
         return sendApiError(res, 400, "کد تایید وارد شده نادرست است یا منقضی شده است.");
       }
 
@@ -3109,7 +3109,7 @@ function compactItemsJson(itemsInput: any): string | null {
       // Requirement 2 & 7: Strict verification (purpose='PASSWORD_RESET')
       const verifyResult = await verifyOtp(targetPhone, cleanCode, "PASSWORD_RESET");
       if (!verifyResult.success) {
-        recordFailedVerification(clientIp);
+        await recordFailedVerification(clientIp);
         return sendApiError(res, 400, verifyResult.error);
       }
 
@@ -3741,7 +3741,7 @@ function compactItemsJson(itemsInput: any): string | null {
         }
         const hashedPassword = await hashPassword(rawPassword);
         const isDefault = isDefaultPassword(rawPassword);
-        const mustChange = isDefault ? 1 : 0;
+        const mustChange = (req.user.id !== id) ? 1 : (isDefault ? 1 : 0);
         await db.query(`
           UPDATE app_users 
           SET username = ?, fullName = ?, phoneNumber = ?, role = ?, agentCode = ?, shippingCompanyId = ?, isEnabled = ?, password = ?, mustChangePassword = ?
@@ -3867,6 +3867,22 @@ function compactItemsJson(itemsInput: any): string | null {
 
   app.post("/api/system/reset-demo", authenticate, authorize("SYSTEM_ADMIN"), async (req, res) => {
     try {
+      if (isProductionEnvironment() && process.env.ALLOW_DESTRUCTIVE_OPERATIONS !== "true") {
+        return sendApiError(
+          res,
+          403,
+          "عملیات بازنشانی داده‌های دمو در محیط عملیاتی به دلایل امنیتی مسدود می‌باشد. فعال‌سازی این قابلیت نیازمند تنظیم صریح متغیر محیطی ALLOW_DESTRUCTIVE_OPERATIONS است."
+        );
+      }
+
+      if (req.body?.confirm !== "CONFIRM_RESET_DEMO") {
+        return sendApiError(
+          res,
+          400,
+          "تایید صریح برای بازنشانی پایگاه داده الزامی است. لطفاً پارامتر confirm با مقدار 'CONFIRM_RESET_DEMO' را ارسال فرمایید."
+        );
+      }
+
       const db = getDbPool();
       
       const connection = await db.getConnection();
@@ -3896,42 +3912,58 @@ function compactItemsJson(itemsInput: any): string | null {
         await redis.del("shipping_companies_list");
       }
 
-      res.json({ success: true });
+      res.json({ success: true, message: "داده‌های نمایشی و پایه سامانه با موفقیت بازنشانی شدند." });
     } catch (err: any) {
       console.error("Error in POST /api/system/reset-demo:", err);
       return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  // CLEAR ALL TRANSACTIONS & ORDERS (PRESERVING MASTER USERS & DATA)
+  // CLEAR ALL TRANSACTIONS & ORDERS (STRICTLY PRESERVING AUDIT LOGS & MASTER USERS/DATA)
   app.post("/api/system/clear-transactions", authenticate, authorize("SYSTEM_ADMIN"), async (req, res) => {
     try {
-      const db = getDbPool();
-      try {
-        await db.query("SET FOREIGN_KEY_CHECKS = 0");
-        await db.query("TRUNCATE TABLE order_history");
-        await db.query("TRUNCATE TABLE orders");
-        await db.query("TRUNCATE TABLE user_activity_logs");
-        await db.query("SET FOREIGN_KEY_CHECKS = 1");
-      } catch (truncErr) {
-        await db.query("DELETE FROM order_history");
-        await db.query("DELETE FROM orders");
-        await db.query("DELETE FROM user_activity_logs");
+      if (isProductionEnvironment() && process.env.ALLOW_DESTRUCTIVE_OPERATIONS !== "true") {
+        return sendApiError(
+          res,
+          403,
+          "عملیات پاکسازی سفارشات و تراکنش‌ها در محیط عملیاتی مسدود می‌باشد. فعال‌سازی نیازمند تنظیم صریح متغیر محیطی ALLOW_DESTRUCTIVE_OPERATIONS است."
+        );
       }
 
-      clearInMemoryActivityLogs();
+      if (req.body?.confirm !== "CONFIRM_CLEAR_TRANSACTIONS") {
+        return sendApiError(
+          res,
+          400,
+          "تایید صریح برای پاکسازی تراکنش‌ها الزامی است. لطفاً پارامتر confirm با مقدار 'CONFIRM_CLEAR_TRANSACTIONS' را ارسال فرمایید."
+        );
+      }
+
+      const db = getDbPool();
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+        await connection.query("DELETE FROM order_history");
+        await connection.query("DELETE FROM orders");
+        // CRITICAL SECURITY REQUIREMENT: Never delete security audit logs (user_activity_logs)
+        await connection.commit();
+      } catch (txErr) {
+        await connection.rollback();
+        throw txErr;
+      } finally {
+        connection.release();
+      }
+
       clearAllRouteCaches();
 
       // Clear order-related Redis caches
       const redis = getRedisClient();
       if (redis) {
         await redis.del("orders_list");
-        await redis.del("activity_logs_list");
       }
 
       res.json({ 
         success: true, 
-        message: "کلیه سفارشات، سوابق فاکتورها و لاگ‌های سیستم با موفقیت و سرعت بالا پاکسازی شدند. اطلاعات پایه کاربران، باربری‌ها و محصولات حفظ گردید." 
+        message: "کلیه سفارشات و سوابق با موفقیت پاکسازی شدند. لاگ‌های امنیتی سیستم و اطلاعات پایه دست‌نخورده باقی ماندند." 
       });
     } catch (err: any) {
       console.error("Error in POST /api/system/clear-transactions:", err);
@@ -4310,17 +4342,46 @@ function compactItemsJson(itemsInput: any): string | null {
     }
   });
 
-  app.post("/api/system/flush-cache", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER"), async (req, res) => {
+  app.post("/api/system/flush-cache", authenticate, authorize("SYSTEM_ADMIN"), async (req, res) => {
     try {
       const redis = getRedisClient();
       if (redis) {
-        await redis.flushall();
+        // Targeted deletion of SalesDashboard-owned keys ONLY (never flushall)
+        // 1. All namespaced keys (salesdashboard:*)
+        const namespacedKeys = await redis.keys("salesdashboard:*");
+        if (Array.isArray(namespacedKeys) && namespacedKeys.length > 0) {
+          for (const k of namespacedKeys) {
+            await redis.del(k);
+          }
+        }
+        // 2. Application list cache keys
+        const appCacheKeys = [
+          "products_list",
+          "agents_list",
+          "shipping_companies_list",
+          "orders_list",
+          "activity_logs_list"
+        ];
+        for (const k of appCacheKeys) {
+          await redis.del(k);
+        }
+        // 3. Legacy un-prefixed rate, cooldown, and OTP keys
+        const legacyPatternKeys = [
+          ...(await redis.keys("rate:*")),
+          ...(await redis.keys("cooldown:*")),
+          ...(await redis.keys("otp:*"))
+        ];
+        for (const k of legacyPatternKeys) {
+          await redis.del(k);
+        }
       }
+      clearAllRouteCaches();
       await logUserActivity({
-        userName: 'ادمین ارشد نرم‌افزار',
-        userRole: 'SYSTEM_ADMIN',
+        userId: req.user?.id,
+        userName: req.user?.fullName || req.user?.username || 'ادمین ارشد نرم‌افزار',
+        userRole: req.user?.role || 'SYSTEM_ADMIN',
         action: 'پاکسازی کش سرور',
-        details: 'حافظه کش موقت سرور با موفقیت بازنشانی شد.',
+        details: 'حافظه کش موقت و کلیدهای اختصاصی داشبورد فروش با موفقیت پاکسازی شد.',
         module: 'SYSTEM',
         status: 'SUCCESS'
       });
@@ -4343,31 +4404,6 @@ function compactItemsJson(itemsInput: any): string | null {
 
 export async function startServer() {
   const PORT = process.env.PORT && process.env.PORT !== "8080" ? parseInt(process.env.PORT, 10) : 3000;
-
-  // In production container deployments (such as Cloud Run or containerized rollouts)
-  // where secrets cannot be supplied via .env files, ensure a cryptographically
-  // secure 256-bit runtime secret is available so that deployment rollouts succeed without crashing.
-  if (isProductionEnvironment() && (!process.env.JWT_SECRET || !process.env.JWT_SECRET.trim())) {
-    const runtimeKeyFile = path.join(process.cwd(), "data", ".runtime_jwt_secret");
-    try {
-      if (fs.existsSync(runtimeKeyFile)) {
-        const saved = fs.readFileSync(runtimeKeyFile, "utf-8").trim();
-        if (saved && saved.length >= 32) {
-          process.env.JWT_SECRET = saved;
-        }
-      }
-    } catch {}
-
-    if (!process.env.JWT_SECRET || !process.env.JWT_SECRET.trim()) {
-      console.log("🔒 [Deployment] Initializing cryptographically secure 256-bit runtime JWT secret...");
-      const generated = crypto.randomBytes(32).toString("hex");
-      process.env.JWT_SECRET = generated;
-      try {
-        fs.mkdirSync(path.dirname(runtimeKeyFile), { recursive: true });
-        fs.writeFileSync(runtimeKeyFile, generated, { encoding: "utf-8", mode: 0o600 });
-      } catch {}
-    }
-  }
 
   const app = await createExpressApp();
   const httpServer = http.createServer(app);

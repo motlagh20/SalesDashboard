@@ -10,3 +10,4 @@ coverage/
 *.log
 *.key
 .runtime_jwt_secret
+data/.runtime_jwt_secret

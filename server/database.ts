@@ -1568,10 +1568,46 @@ class SafeRedisWrapper {
       return -2;
     }
   }
+
+  async expire(key: string, seconds: number): Promise<number> {
+    try {
+      return await this.instance.expire(key, seconds);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in EXPIRE ${key}:`, err.message);
+      return 0;
+    }
+  }
+
+  async keys(pattern: string): Promise<string[]> {
+    try {
+      return await this.instance.keys(pattern);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in KEYS ${pattern}:`, err.message);
+      return [];
+    }
+  }
+
+  async eval(script: string, numkeys: number, ...args: (string | number)[]): Promise<any> {
+    try {
+      return await (this.instance as any).eval(script, numkeys, ...args);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in EVAL:`, err.message);
+      return null;
+    }
+  }
 }
 
-let safeRedisWrapperInstance: SafeRedisWrapper | null = null;
+let safeRedisWrapperInstance: any = null;
 let hasLoggedRedisDisabled = false;
+
+export function setRedisClientForTesting(client: any): void {
+  safeRedisWrapperInstance = client;
+}
+
+export function resetRedisStateForTesting(): void {
+  safeRedisWrapperInstance = null;
+  hasLoggedRedisDisabled = false;
+}
 
 /**
  * Returns the Redis client instance wrapped in SafeRedisWrapper.

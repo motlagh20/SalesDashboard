@@ -1,130 +1,113 @@
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import express from "express";
 import http from "http";
-import fs from "fs";
-import path from "path";
-import { generateToken } from "../server/auth";
-import { isProductionEnvironment } from "../server/database";
-import { isDefaultPassword, hashPasswordSync } from "../server/password";
+import { generateToken, setAuthDbPoolOverrideForTesting } from "../server/auth";
+import { hashPasswordSync } from "../server/password";
+import {
+  setDbPoolForTesting,
+  setDbHealthyForTesting,
+  resetDatabaseStateForTesting
+} from "../server/database";
+import { createExpressApp } from "../server";
 
-describe("Production Sandbox Elimination Security Test Suite", () => {
-  let app: express.Express;
+describe("Production Sandbox Security Test Suite (Actual Application Routes)", () => {
   let server: http.Server;
   let serverPort: number;
   let baseUrl: string;
 
-  // Track original environment variables
   const originalNodeEnv = process.env.NODE_ENV;
   const originalAppEnv = process.env.APP_ENV;
+  const originalJwtSecret = process.env.JWT_SECRET;
 
-  // Dedicated test sandbox file
-  const testDataDir = path.join(process.cwd(), "data");
-  const testSandboxConfigFile = path.join(testDataDir, "sandbox_config.json");
-  let originalConfigContent: string | null = null;
+  const strongAdminPassword = "RealSecretPass2026!";
+  const strongRepPassword = "RealRepPassword123!";
+
+  let testUsers: any[] = [];
+
+  const mockDbPool: any = {
+    query: async (sql: string, values: any[] = []) => {
+      const cleanSql = sql.trim().replace(/\s+/g, " ");
+
+      if (/SELECT\s+1/i.test(cleanSql)) {
+        return [[{ 1: 1 }], []];
+      }
+
+      if (/SELECT\s+COUNT\(\*\)\s+as\s+count\s+FROM\s+app_users/i.test(cleanSql)) {
+        return [[{ count: testUsers.length }], []];
+      }
+
+      if (/SELECT\s+\*\s+FROM\s+app_users\s+WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
+        const id = values[0];
+        const user = testUsers.find(u => u.id === id);
+        return [user ? [user] : [], []];
+      }
+
+      if (/SELECT\s+\*\s+FROM\s+app_users\s+WHERE\s+username\s*=\s*\?\s*OR\s*phoneNumber\s*=\s*\?\s*OR\s*agentCode\s*=\s*\?/i.test(cleanSql)) {
+        const key = values[0];
+        const user = testUsers.find(u => u.username === key || u.phoneNumber === key || u.agentCode === key);
+        return [user ? [user] : [], []];
+      }
+
+      if (/UPDATE\s+app_users\s+SET\s+password\s*=\s*\?/i.test(cleanSql)) {
+        return [{ affectedRows: 1 }, []];
+      }
+
+      return [[], []];
+    },
+    getConnection: async () => ({
+      query: async (sql: string, values: any[] = []) => mockDbPool.query(sql, values),
+      beginTransaction: async () => {},
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {}
+    })
+  };
 
   before(async () => {
-    // Preserve any existing sandbox config file
-    if (fs.existsSync(testSandboxConfigFile)) {
-      originalConfigContent = fs.readFileSync(testSandboxConfigFile, "utf-8");
-    }
-
-    // Set JWT secret for tests
     process.env.JWT_SECRET = "production-sandbox-test-jwt-secret-minimum-32-chars-long";
+    process.env.NODE_ENV = "production";
 
-    // Setup an Express test app mirroring server.ts sandbox and login logic
-    app = express();
-    app.use(express.json());
-
-    // Helper for simulating sandbox status routes exactly as in server.ts
-    app.get("/api/system/sandbox-status", (req, res) => {
-      const isProd = isProductionEnvironment();
-      if (isProd) {
-        return res.json({ sandboxEnabled: false, isProduction: true });
+    testUsers = [
+      {
+        id: "usr-admin",
+        username: "admin",
+        role: "SYSTEM_ADMIN",
+        fullName: "مدیر سیستم",
+        phoneNumber: "09121111111",
+        password: hashPasswordSync(strongAdminPassword),
+        isEnabled: 1,
+        mustChangePassword: 0
+      },
+      {
+        id: "usr-rep",
+        username: "rep_tehran",
+        role: "REPRESENTATIVE",
+        fullName: "نماینده تهران",
+        phoneNumber: "09122222222",
+        password: hashPasswordSync(strongRepPassword),
+        isEnabled: 1,
+        mustChangePassword: 0
+      },
+      {
+        id: "usr-demo",
+        username: "demo_user",
+        role: "REPRESENTATIVE",
+        fullName: "کاربر دمو",
+        phoneNumber: "09123333333",
+        password: hashPasswordSync("123456"),
+        isEnabled: 1,
+        mustChangePassword: 1
       }
+    ];
 
-      let enabled = false;
-      try {
-        if (fs.existsSync(testSandboxConfigFile)) {
-          const data = JSON.parse(fs.readFileSync(testSandboxConfigFile, "utf-8"));
-          if (typeof data.sandboxEnabled === "boolean") {
-            enabled = data.sandboxEnabled;
-          }
-        }
-      } catch {
-        enabled = false;
-      }
+    setDbPoolForTesting(mockDbPool);
+    setAuthDbPoolOverrideForTesting(mockDbPool);
+    setDbHealthyForTesting(true);
 
-      return res.json({ sandboxEnabled: enabled, isProduction: false });
-    });
+    const app = await createExpressApp({ skipDatabaseBootstrap: true });
+    server = http.createServer(app);
 
-    app.post("/api/system/sandbox-status", (req, res) => {
-      const isProd = isProductionEnvironment();
-      if (isProd) {
-        return res.status(403).json({
-          error: "امکان فعال‌سازی حالت شبیه‌ساز (Sandbox) در محیط عملیاتی به دلایل امنیتی وجود ندارد."
-        });
-      }
-
-      const { sandboxEnabled } = req.body || {};
-      if (typeof sandboxEnabled !== "boolean") {
-        return res.status(400).json({ error: "مقدار وضعیت سندباکس باید مقدار بولی باشد." });
-      }
-
-      try {
-        if (!fs.existsSync(testDataDir)) {
-          fs.mkdirSync(testDataDir, { recursive: true });
-        }
-        fs.writeFileSync(testSandboxConfigFile, JSON.stringify({ sandboxEnabled }), "utf-8");
-      } catch {}
-
-      return res.json({ success: true, sandboxEnabled, isProduction: false });
-    });
-
-    // Mock Login endpoint mirroring server.ts production guards
-    app.post("/api/auth/login-password", (req, res) => {
-      const isProd = isProductionEnvironment();
-      const { loginKey, password, isSandbox, isQuickLogin, shortcut } = req.body || {};
-
-      // Guard 1: Sandbox shortcut flag
-      if (isSandbox || isQuickLogin || shortcut) {
-        if (isProd) {
-          return res.status(403).json({
-            error: "ورود از طریق میانبر آزمایشی (سندباکس) در این محیط غیرفعال و مسدود است."
-          });
-        }
-      }
-
-      // Guard 2: Default/demo password in production
-      if (isProd && isDefaultPassword(password)) {
-        return res.status(403).json({
-          error: "ورود با کلمه عبور پیش‌فرض/دمو در محیط عملیاتی مسدود است. لطفاً از طریق احراز هویت پیامکی اقدام به ورود و تعیین رمز عبور اختصاصی فرمایید."
-        });
-      }
-
-      // Legitimate mock user verification
-      if (loginKey === "admin" && password === "RealSecretPass2026!") {
-        const token = generateToken({ id: "usr-admin", username: "admin", role: "SYSTEM_ADMIN" });
-        return res.json({ success: true, token, user: { username: "admin", role: "SYSTEM_ADMIN" } });
-      }
-
-      if (loginKey === "rep_tehran" && password === "RealRepPassword123!") {
-        const token = generateToken({ id: "usr-rep", username: "rep_tehran", role: "REPRESENTATIVE" });
-        return res.json({ success: true, token, user: { username: "rep_tehran", role: "REPRESENTATIVE" } });
-      }
-
-      // In dev mode with default password allowed
-      if (!isProd && password === "123456") {
-        const token = generateToken({ id: "usr-dev", username: loginKey, role: "REPRESENTATIVE" });
-        return res.json({ success: true, token, mustChangePassword: true });
-      }
-
-      return res.status(400).json({ error: "رمز عبور نادرست است." });
-    });
-
-    // Start HTTP server on dynamic port
     await new Promise<void>((resolve) => {
-      server = http.createServer(app);
       server.listen(0, () => {
         const address = server.address();
         if (address && typeof address === "object") {
@@ -137,18 +120,12 @@ describe("Production Sandbox Elimination Security Test Suite", () => {
   });
 
   after(async () => {
-    // Restore environment
     process.env.NODE_ENV = originalNodeEnv;
     process.env.APP_ENV = originalAppEnv;
+    process.env.JWT_SECRET = originalJwtSecret;
 
-    // Restore config file
-    if (originalConfigContent !== null) {
-      fs.writeFileSync(testSandboxConfigFile, originalConfigContent, "utf-8");
-    } else if (fs.existsSync(testSandboxConfigFile)) {
-      try {
-        fs.unlinkSync(testSandboxConfigFile);
-      } catch {}
-    }
+    resetDatabaseStateForTesting();
+    setAuthDbPoolOverrideForTesting(null);
 
     if (server) {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -156,78 +133,100 @@ describe("Production Sandbox Elimination Security Test Suite", () => {
   });
 
   beforeEach(() => {
-    // Reset NODE_ENV to production by default for safety
     process.env.NODE_ENV = "production";
     delete process.env.APP_ENV;
   });
 
-  it("1. Unauthenticated access: GET /api/system/sandbox-status responds without requiring authentication", async () => {
+  it("1. Unauthenticated access: GET /api/system/sandbox-status responds without authentication", async () => {
     const res = await fetch(`${baseUrl}/api/system/sandbox-status`);
     assert.equal(res.status, 200, "Must be accessible without token or auth cookie");
     const data = await res.json();
-    assert.equal(typeof data.sandboxEnabled, "boolean");
+    assert.equal(data.sandboxEnabled, false, "Production must report sandbox disabled");
+    assert.equal(data.isProduction, true, "Production flag must be true");
   });
 
-  it("2. Production with missing config: fails closed and returns sandboxEnabled: false", async () => {
+  it("2. Production mode: GET /api/system/sandbox-status strictly returns sandboxEnabled: false", async () => {
     process.env.NODE_ENV = "production";
-    if (fs.existsSync(testSandboxConfigFile)) {
-      try { fs.unlinkSync(testSandboxConfigFile); } catch {}
-    }
-
     const res = await fetch(`${baseUrl}/api/system/sandbox-status`);
     const data = await res.json();
     assert.equal(res.status, 200);
-    assert.equal(data.sandboxEnabled, false, "Missing configuration in production must fail closed to false");
+    assert.equal(data.sandboxEnabled, false);
     assert.equal(data.isProduction, true);
   });
 
-  it("3. Production with config file explicitly set to true: strictly ignored and returns sandboxEnabled: false", async () => {
+  it("3. Production mode: POST /api/system/sandbox-status rejects enabling sandbox with 403 Forbidden", async () => {
     process.env.NODE_ENV = "production";
-    if (!fs.existsSync(testDataDir)) {
-      fs.mkdirSync(testDataDir, { recursive: true });
-    }
-    fs.writeFileSync(testSandboxConfigFile, JSON.stringify({ sandboxEnabled: true }), "utf-8");
-
-    const res = await fetch(`${baseUrl}/api/system/sandbox-status`);
-    const data = await res.json();
-    assert.equal(res.status, 200);
-    assert.equal(data.sandboxEnabled, false, "Production must ignore sandboxEnabled: true in config file");
-    assert.equal(data.isProduction, true);
-  });
-
-  it("4. Production: POST /api/system/sandbox-status strictly returns 403 Forbidden", async () => {
-    process.env.NODE_ENV = "production";
+    const adminToken = generateToken({ id: "usr-admin", username: "admin", role: "SYSTEM_ADMIN" });
 
     const res = await fetch(`${baseUrl}/api/system/sandbox-status`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${adminToken}`
+      },
       body: JSON.stringify({ sandboxEnabled: true })
     });
 
     assert.equal(res.status, 403, "Production must reject enabling sandbox with 403 Forbidden");
     const data = await res.json();
-    assert.match(data.error, /محیط عملیاتی/);
+    const errorMessage = data.message || data.error || "";
+    assert.match(errorMessage, /محیط عملیاتی/);
   });
 
-  it("5. Production: Attempting to login with demo quick-login shortcut flag is blocked with 403 Forbidden", async () => {
-    process.env.NODE_ENV = "production";
-
-    const res = await fetch(`${baseUrl}/api/auth/login-password`, {
+  it("4. POST /api/system/sandbox-status requires authentication and SYSTEM_ADMIN role", async () => {
+    // Unauthenticated
+    const unauthRes = await fetch(`${baseUrl}/api/system/sandbox-status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ loginKey: "admin", password: "RealSecretPass2026!", isSandbox: true })
+      body: JSON.stringify({ sandboxEnabled: true })
     });
+    assert.equal(unauthRes.status, 401, "Unauthenticated request must return 401");
 
-    assert.equal(res.status, 403);
-    const data = await res.json();
-    assert.match(data.error, /میانبر آزمایشی/);
+    // Authenticated as non-admin (REPRESENTATIVE)
+    const repToken = generateToken({ id: "usr-rep", username: "rep_tehran", role: "REPRESENTATIVE" });
+    const repRes = await fetch(`${baseUrl}/api/system/sandbox-status`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${repToken}`
+      },
+      body: JSON.stringify({ sandboxEnabled: true })
+    });
+    assert.equal(repRes.status, 403, "Non-admin must be rejected with 403");
   });
 
-  it("6. Production: Attempting to login with hardcoded demo default password '123456' is blocked with 403 Forbidden", async () => {
+  it("5. Production: Attempting to login with shortcut / sandbox flags is blocked with 403 Forbidden", async () => {
     process.env.NODE_ENV = "production";
 
-    const demoUsers = ["admin", "manager", "rep_tehran", "factory", "shipping_transit", "warehouse", "security_gate"];
-    for (const username of demoUsers) {
+    const shortcutFlags = [
+      { isSandbox: true },
+      { isQuickLogin: true },
+      { shortcut: true }
+    ];
+
+    for (const flags of shortcutFlags) {
+      const res = await fetch(`${baseUrl}/api/auth/login-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          loginKey: "admin",
+          password: strongAdminPassword,
+          ...flags
+        })
+      });
+
+      assert.equal(res.status, 403, `Sandbox shortcut flag ${JSON.stringify(flags)} must return 403 in production`);
+      const data = await res.json();
+      const errorMessage = data.message || data.error || "";
+      assert.match(errorMessage, /میانبر آزمایشی/);
+    }
+  });
+
+  it("6. Production: Attempting to login with default demo password '123456' is blocked with 403 Forbidden", async () => {
+    process.env.NODE_ENV = "production";
+
+    const usernames = ["admin", "rep_tehran", "demo_user"];
+    for (const username of usernames) {
       const res = await fetch(`${baseUrl}/api/auth/login-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -240,84 +239,48 @@ describe("Production Sandbox Elimination Security Test Suite", () => {
         `User ${username} with default password '123456' must be rejected in production with 403`
       );
       const data = await res.json();
-      assert.match(data.error, /پیش‌فرض\/دمو/);
+      const errorMessage = data.message || data.error || "";
+      assert.match(errorMessage, /پیش‌فرض\/دمو/);
     }
   });
 
-  it("7. Production: Legitimate accounts with custom strong passwords authenticate successfully", async () => {
+  it("7. Production: Legitimate user with valid non-default password authenticates successfully", async () => {
     process.env.NODE_ENV = "production";
 
     const res = await fetch(`${baseUrl}/api/auth/login-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ loginKey: "admin", password: "RealSecretPass2026!" })
+      body: JSON.stringify({ loginKey: "admin", password: strongAdminPassword })
     });
 
     assert.equal(res.status, 200, "Legitimate password authentication must succeed in production");
     const data = await res.json();
     assert.equal(data.success, true);
     assert.ok(data.token, "JWT token must be returned");
+    assert.equal(data.user.username, "admin");
+    assert.equal(data.user.role, "SYSTEM_ADMIN");
   });
 
-  it("8. Development environment: sandbox status can be checked and updated when permitted", async () => {
-    process.env.NODE_ENV = "development";
-
-    // Enable sandbox in development
-    const postRes = await fetch(`${baseUrl}/api/system/sandbox-status`, {
+  it("8. Non-existent user receives 404 in POST /api/auth/login-password", async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sandboxEnabled: true })
+      body: JSON.stringify({ loginKey: "unknown_user", password: "SomeValidPassword123!" })
     });
-    assert.equal(postRes.status, 200);
 
-    const getRes = await fetch(`${baseUrl}/api/system/sandbox-status`);
-    assert.equal(getRes.status, 200);
-    const getData = await getRes.json();
-    assert.equal(getData.sandboxEnabled, true, "Development allows enabling sandbox");
-    assert.equal(getData.isProduction, false);
-
-    // Disable sandbox in development
-    const disableRes = await fetch(`${baseUrl}/api/system/sandbox-status`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sandboxEnabled: false })
-    });
-    assert.equal(disableRes.status, 200);
-
-    const getRes2 = await fetch(`${baseUrl}/api/system/sandbox-status`);
-    const getData2 = await getRes2.json();
-    assert.equal(getData2.sandboxEnabled, false);
+    assert.equal(res.status, 404);
   });
 
-  it("9. Frontend state logic: Fresh browser with empty/invalid localStorage defaults to false", () => {
-    // Simulate browser localStorage resolution logic from App.tsx
-    function resolveSandboxState(mockStorage: Record<string, string | null>, isProd: boolean) {
-      if (isProd) return false;
-      try {
-        const saved = mockStorage["tabarestan_sandbox_enabled"];
-        return saved !== null && saved !== undefined ? JSON.parse(saved) === true : false;
-      } catch {
-        return false;
-      }
-    }
+  it("9. Incorrect password receives 400 in POST /api/auth/login-password", async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ loginKey: "admin", password: "WrongPassword999!" })
+    });
 
-    // A. Fresh browser (empty localStorage)
-    assert.equal(resolveSandboxState({}, false), false, "Fresh browser must default to false");
-    assert.equal(resolveSandboxState({}, true), false, "Fresh browser in production must default to false");
-
-    // B. Production environment with localStorage set to true (must strictly be ignored)
-    assert.equal(
-      resolveSandboxState({ tabarestan_sandbox_enabled: "true" }, true),
-      false,
-      "localStorage cannot enable sandbox in production"
-    );
-
-    // C. Corrupted or invalid localStorage value
-    assert.equal(resolveSandboxState({ tabarestan_sandbox_enabled: "invalid-json{" }, false), false);
-    assert.equal(resolveSandboxState({ tabarestan_sandbox_enabled: "null" }, false), false);
-    assert.equal(resolveSandboxState({ tabarestan_sandbox_enabled: "123" }, false), false);
-
-    // D. Development environment with valid true
-    assert.equal(resolveSandboxState({ tabarestan_sandbox_enabled: "true" }, false), true);
+    assert.equal(res.status, 400);
+    const data = await res.json();
+    const errorMessage = data.message || data.error || "";
+    assert.match(errorMessage, /نادرست/);
   });
 });
