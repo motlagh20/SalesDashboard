@@ -1587,6 +1587,51 @@ class SafeRedisWrapper {
     }
   }
 
+  async scan(cursor: string, ...args: (string | number)[]): Promise<[string, string[]]> {
+    try {
+      return await (this.instance as any).scan(cursor, ...args);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in SCAN ${cursor}:`, err.message);
+      return ["0", []];
+    }
+  }
+
+  async zadd(key: string, ...args: (string | number)[]): Promise<number> {
+    try {
+      return await (this.instance as any).zadd(key, ...args);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in ZADD ${key}:`, err.message);
+      return 0;
+    }
+  }
+
+  async zcard(key: string): Promise<number> {
+    try {
+      return await (this.instance as any).zcard(key);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in ZCARD ${key}:`, err.message);
+      return 0;
+    }
+  }
+
+  async zremrangebyscore(key: string, min: string | number, max: string | number): Promise<number> {
+    try {
+      return await (this.instance as any).zremrangebyscore(key, min, max);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in ZREMRANGEBYSCORE ${key}:`, err.message);
+      return 0;
+    }
+  }
+
+  async zrange(key: string, start: number, stop: number, ...args: string[]): Promise<string[]> {
+    try {
+      return await (this.instance as any).zrange(key, start, stop, ...args);
+    } catch (err: any) {
+      console.warn(`⚠️ [Redis Safe Wrapper] Error in ZRANGE ${key}:`, err.message);
+      return [];
+    }
+  }
+
   async eval(script: string, numkeys: number, ...args: (string | number)[]): Promise<any> {
     try {
       return await (this.instance as any).eval(script, numkeys, ...args);
@@ -2022,57 +2067,94 @@ export async function bootstrapDatabase() {
   }
 }
 
+export async function seedDatabaseWithConnection(connection: any) {
+  const dummyProducts = [
+    ['prod-1', 'سفال سقف طبرستان (طرح کلاسیک)', 'roofing', 145000, 'عدد', 'مقاومت بسیار بالا در برابر تغییرات جوی و یخبندان، عایق حرارتی و رطوبتی فوق‌العاده با لعاب طبیعی.', '۳.۱ کیلوگرم', '۳۰ × ۴۲ سانتی‌متر', '۱۴ عدد در هر مترمربع', 1],
+    ['prod-2', 'آجر سفال ۱۰ سانتی طبرستان (تیغه)', 'bricks', 3400, 'قالب', 'جهت دیوارهای داخلی و فضاهای کم‌عرض، پخت با کوره تمام اتوماتیک هافمن و ابعاد کاملاً گونیا.', '۲.۲ کیلوگرم', '۱۰ × ۲۰ × ۲۰ سانتی‌متر', '۲۵ قالب در هر مترمربع تیغه', 1],
+    ['prod-3', 'آجر سفال ۱۵ سانتی درجه یک طبرستان', 'bricks', 4800, 'قالب', 'بهترین گزینه برای دیوارهای خارجی باغ، ویلا و آپارتمان جهت عایق‌بندی صوتی و حرارتی پیشرفته.', '۳.۳ کیلوگرم', '۱۵ × ۲۰ × ۲۰ سانتی‌متر', '۲۵ قالب در هر مترمربع دیوار', 1],
+    ['prod-4', 'آجر نما نسوز سموتی طبرستان', 'facade', 12500, 'قالب', 'مقاومت حرارتی بیش از ۱۲۰۰ درجه سانتی‌گراد، رنگ ثابت و مقاوم در برابر باران‌های اسیدی و شوره‌زدگی.', '۰.۸ کیلوگرم', '۵.۵ × ۲.۵ × ۲۶ سانتی‌متر', '۴۰ قالب در هر مترمربع با بندکشی', 1],
+    ['prod-5', 'تیغه سفال سقفی ۲۵ طبرستان (بلوک سقفی)', 'bricks', 9500, 'قالب', 'تولید شده با رس مرغوب شسته شده، مقاومت فشاری بالا و ایده آل برای سقف‌های تیرچه بلوک صنعتی.', '۷.۵ کیلوگرم', '۲۵ × ۲۰ × ۴۰ سانتی‌متر', '۱۰ قالب در هر مترمربع سقف', 1]
+  ];
+  for (const p of dummyProducts) {
+    await connection.query(
+      "INSERT INTO products (id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      p
+    );
+  }
+
+  const dummyAgents = [
+    ['ag-1', 'نمایندگی تهران - احمدی', 'AG-9081', 'تهران', '09120000001', 'تهران، خیابان شریعتی، بالاتر از پل رومی، پلاک ۴۲', '02122001122', 1],
+    ['ag-2', 'نمایندگی اصفهان - رجایی', 'AG-6055', 'اصفهان', '09130000002', 'اصفهان، خیابان چهارباغ بالا، مجتمع اداری کوثر، طبقه دوم', '03136203344', 1],
+    ['ag-3', 'نمایندگی رشت - پوربخش', 'AG-2019', 'گیلان', '09110000003', 'رشت، بلوار قلی‌پور، نبش کوچه شقایق، ساختمان طبرستان', '01332115566', 1],
+    ['ag-4', 'نمایندگی شیراز - نمازی', 'AG-7023', 'فارس', '09170000004', 'شیراز، بلوار امیرکبیر، روبروی باغ جنت، طبقه همکف', '07138207788', 1]
+  ];
+  for (const a of dummyAgents) {
+    await connection.query(
+      "INSERT INTO agents (id, name, code, province, phoneNumber, address, landline, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      a
+    );
+  }
+
+  const dummyShipping = [
+    ['sc-1', 'باربری ترانزیت شمال طبرستان', 'SC-101', '01133334444', 'آقای رستمی', 'ساری، جاده نکا، کیلومتر ۵، جنب کارخانه طبرستان', 1],
+    ['sc-2', 'باربری زاینده‌رود طبرستان', 'SC-102', '01133335555', 'آقای صادقی', 'اصفهان، شهرک صنعتی جی، خیابان چهارم، پایانه باربری زاینده‌رود', 1],
+    ['sc-3', 'اتوبار کاسپین طبرستان', 'SC-103', '01133336666', 'آقای احمدی', 'رشت، جاده انزلی، جنب پایانه حمل و نقل کاسپین', 1]
+  ];
+  for (const s of dummyShipping) {
+    await connection.query(
+      "INSERT INTO shipping_companies (id, name, code, phoneNumber, managerName, address, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      s
+    );
+  }
+
+  const dummyDrivers = [
+    ['drv-1', 'کریم قنبری', '09117772222', '۵۴ ع ۸۹۲ ایران ۷۲', 'تریلی ۱۸ چرخ لبه‌دار', 'باربری ترانزیت شمال', '2081234567', '3849201', 1],
+    ['drv-2', 'غلامرضا صادقی', '09139998888', '۷۲ ب ۵۵۱ ایران ۵۳', 'کامیون جفت ۱۰ تن', 'باربری زاینده‌رود', '1289876543', '4920183', 1],
+    ['drv-3', 'مرتضی حسینی', '09112223344', '۳۶ ج ۱۴۵ ایران ۶۲', 'خاور مسقف', 'باربری کاسپین', '2093344556', '1092837', 1],
+    ['drv-4', 'جواد علوی', '09112523456', '۶۲ ع ۴۸۱ ایران ۷۲', 'تریلی ۱۸ چرخ لبه‌دار', 'باربری ترانزیت طبرستان', '2089988771', '5544332', 1]
+  ];
+  for (const d of dummyDrivers) {
+    try {
+      await connection.query(
+        "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        d
+      );
+    } catch {}
+  }
+
+  const dummyUsers = [
+    ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+    ['usr-1', 'manager', 'آقای احمدی (مدیر بازرگانی)', '09121111111', 'SALES_MANAGER', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+    ['usr-2', 'rep_tehran', 'آقای حمیدرضا احمدی', '09120000001', 'REPRESENTATIVE', 'AG-9081', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+    ['usr-3', 'rep_esfahan', 'آقای علیرضا رجایی', '09130000002', 'REPRESENTATIVE', 'AG-6055', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+    ['usr-4', 'rep_rasht', 'آقای سهراب پوربخش', '09110000003', 'REPRESENTATIVE', 'AG-2019', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+    ['usr-5', 'rep_shiraz', 'آقای کریم نمازی', '09170000004', 'REPRESENTATIVE', 'AG-7023', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+    ['usr-6', 'factory', 'مسئول اول فروش کارخانه', '09110000005', 'FACTORY_TRANSPORT', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+    ['usr-62', 'factory2', 'مسئول دوم فروش کارخانه', '09110000007', 'FACTORY_TRANSPORT', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+    ['usr-7', 'shipping_transit', 'باربری ترانزیت طبرستان', '09110000006', 'SHIPPING_COMPANY', null, 'sc-1', 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+    ['usr-72', 'shipping_zayandeh', 'باربری زاینده‌رود طبرستان', '09130000007', 'SHIPPING_COMPANY', null, 'sc-2', 1, DEFAULT_PASSWORD_BCRYPT_HASH]
+  ];
+  for (const u of dummyUsers) {
+    try {
+      await connection.query(
+        "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        u
+      );
+    } catch {}
+  }
+}
+
 export async function seedDatabaseIfEmpty(db: mysql.Pool) {
   if (isProductionEnvironment()) {
     console.warn("🚨 [Security Guard] seedDatabaseIfEmpty called in production: execution aborted.");
     return;
   }
   try {
-    // 1. Products
     const [prodRows] = await db.query("SELECT COUNT(*) as count FROM products") as any[];
     const prodCount = (prodRows && prodRows[0]?.count !== undefined) ? prodRows[0].count : 0;
     if (prodCount === 0) {
-      console.log("🌱 [Seed] Seeding default products...");
-      const dummyProducts = [
-        ['prod-1', 'سفال سقف طبرستان (طرح کلاسیک)', 'roofing', 145000, 'عدد', 'مقاومت بسیار بالا در برابر تغییرات جوی و یخبندان، عایق حرارتی و رطوبتی فوق‌العاده با لعاب طبیعی.', '۳.۱ کیلوگرم', '۳۰ × ۴۲ سانتی‌متر', '۱۴ عدد در هر مترمربع', 1],
-        ['prod-2', 'آجر سفال ۱۰ سانتی طبرستان (تیغه)', 'bricks', 3400, 'قالب', 'جهت دیوارهای داخلی و فضاهای کم‌عرض، پخت با کوره تمام اتوماتیک هافمن و ابعاد کاملاً گونیا.', '۲.۲ کیلوگرم', '۱۰ × ۲۰ × ۲۰ سانتی‌متر', '۲۵ قالب در هر مترمربع تیغه', 1],
-        ['prod-3', 'آجر سفال ۱۵ سانتی درجه یک طبرستان', 'bricks', 4800, 'قالب', 'بهترین گزینه برای دیوارهای خارجی باغ، ویلا و آپارتمان جهت عایق‌بندی صوتی و حرارتی پیشرفته.', '۳.۳ کیلوگرم', '۱۵ × ۲۰ × ۲۰ سانتی‌متر', '۲۵ قالب در هر مترمربع دیوار', 1],
-        ['prod-4', 'آجر نما نسوز سموتی طبرستان', 'facade', 12500, 'قالب', 'مقاومت حرارتی بیش از ۱۲۰۰ درجه سانتی‌گراد، رنگ ثابت و مقاوم در برابر باران‌های اسیدی و شوره‌زدگی.', '۰.۸ کیلوگرم', '۵.۵ × ۲.۵ × ۲۶ سانتی‌متر', '۴۰ قالب در هر مترمربع با بندکشی', 1],
-        ['prod-5', 'تیغه سفال سقفی ۲۵ طبرستان (بلوک سقفی)', 'bricks', 9500, 'قالب', 'تولید شده با رس مرغوب شسته شده، مقاومت فشاری بالا و ایده آل برای سقف‌های تیرچه بلوک صنعتی.', '۷.۵ کیلوگرم', '۲۵ × ۲۰ × ۴۰ سانتی‌متر', '۱۰ قالب در هر مترمربع سقف', 1]
-      ];
-      for (const p of dummyProducts) {
-        await db.query(
-          "INSERT INTO products (id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          p
-        );
-      }
-    }
-
-    // 4. Orders table ready check (no auto-seeding of fake orders on empty database)
-
-    // 5. App Users
-    const [userRows] = await db.query("SELECT COUNT(*) as count FROM app_users") as any[];
-    const userCount = (userRows && userRows[0]?.count !== undefined) ? userRows[0].count : 0;
-    if (userCount === 0) {
-      console.log("🌱 [Seed] Seeding default app users...");
-      const dummyUsers = [
-        ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
-        ['usr-1', 'manager', 'آقای احمدی (مدیر بازرگانی)', '09121111111', 'SALES_MANAGER', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
-        ['usr-2', 'rep_tehran', 'آقای حمیدرضا احمدی', '09120000001', 'REPRESENTATIVE', 'AG-9081', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
-        ['usr-3', 'rep_esfahan', 'آقای علیرضا رجایی', '09130000002', 'REPRESENTATIVE', 'AG-6055', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
-        ['usr-4', 'rep_rasht', 'آقای سهراب پوربخش', '09110000003', 'REPRESENTATIVE', 'AG-2019', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
-        ['usr-5', 'rep_shiraz', 'آقای کریم نمازی', '09170000004', 'REPRESENTATIVE', 'AG-7023', null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
-        ['usr-6', 'factory', 'مسئول اول فروش کارخانه', '09110000005', 'FACTORY_TRANSPORT', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
-        ['usr-62', 'factory2', 'مسئول دوم فروش کارخانه', '09110000007', 'FACTORY_TRANSPORT', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
-        ['usr-7', 'shipping_transit', 'باربری ترانزیت طبرستان', '09110000006', 'SHIPPING_COMPANY', null, 'sc-1', 1, DEFAULT_PASSWORD_BCRYPT_HASH],
-        ['usr-72', 'shipping_zayandeh', 'باربری زاینده‌رود طبرستان', '09130000007', 'SHIPPING_COMPANY', null, 'sc-2', 1, DEFAULT_PASSWORD_BCRYPT_HASH]
-      ];
-      for (const u of dummyUsers) {
-        await db.query(
-          "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          u
-        );
-      }
+      console.log("🌱 [Seed] Seeding default database entities...");
+      await seedDatabaseWithConnection(db);
     } else {
       // Ensure SYSTEM_ADMIN (admin) user exists in SQL database if missing
       const [adminRows] = await db.query("SELECT COUNT(*) as count FROM app_users WHERE username = 'admin' OR role = 'SYSTEM_ADMIN' OR phoneNumber = '09120000000'") as any[];

@@ -185,78 +185,252 @@ export function getRedisOtpKey(purpose: string, phone: string): string {
   return `${REDIS_NAMESPACE}otp:${purpose}:${phone}`;
 }
 
+const ATOMIC_CHECK_AND_RECORD_OTP_LUA = `
+local cooldownTtl = redis.call('TTL', KEYS[1])
+if cooldownTtl > 0 then
+  return { 0, cooldownTtl, 'COOLDOWN' }
+end
+
+local now = tonumber(ARGV[1])
+local windowMs = tonumber(ARGV[2])
+local phoneMax = tonumber(ARGV[3])
+local ipMax = tonumber(ARGV[4])
+local cooldownSec = tonumber(ARGV[5])
+local memberId = tostring(ARGV[6])
+local windowStart = now - windowMs
+
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', windowStart)
+local phoneCount = redis.call('ZCARD', KEYS[2])
+if phoneCount >= phoneMax then
+  local oldest = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+  local retryAfter = math.ceil(windowMs / 1000)
+  if oldest and #oldest >= 2 then
+    local oldestScore = tonumber(oldest[2])
+    retryAfter = math.max(1, math.ceil((oldestScore + windowMs - now) / 1000))
+  end
+  return { 0, retryAfter, 'PHONE_LIMIT' }
+end
+
+redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', windowStart)
+local ipCount = redis.call('ZCARD', KEYS[3])
+if ipCount >= ipMax then
+  local oldest = redis.call('ZRANGE', KEYS[3], 0, 0, 'WITHSCORES')
+  local retryAfter = math.ceil(windowMs / 1000)
+  if oldest and #oldest >= 2 then
+    local oldestScore = tonumber(oldest[2])
+    retryAfter = math.max(1, math.ceil((oldestScore + windowMs - now) / 1000))
+  end
+  return { 0, retryAfter, 'IP_LIMIT' }
+end
+
+local windowSec = math.ceil(windowMs / 1000)
+if cooldownSec > 0 then
+  redis.call('SET', KEYS[1], '1', 'EX', cooldownSec)
+end
+
+redis.call('ZADD', KEYS[2], now, memberId)
+redis.call('EXPIRE', KEYS[2], windowSec)
+
+redis.call('ZADD', KEYS[3], now, memberId)
+redis.call('EXPIRE', KEYS[3], windowSec)
+
+return { 1, 0, 'OK' }
+`;
+
 const CHECK_OTP_RATE_LIMIT_LUA = `
 local cooldownTtl = redis.call('TTL', KEYS[1])
 if cooldownTtl > 0 then
   return { 0, cooldownTtl, 'COOLDOWN' }
 end
 
-local phoneCount = tonumber(redis.call('GET', KEYS[2]) or '0')
-if phoneCount >= tonumber(ARGV[1]) then
-  local phoneTtl = redis.call('TTL', KEYS[2])
-  if phoneTtl < 0 then phoneTtl = 900 end
-  return { 0, phoneTtl, 'PHONE_LIMIT' }
+local now = tonumber(ARGV[1]) or 0
+local windowMs = tonumber(ARGV[2]) or 900000
+local phoneMax = tonumber(ARGV[3]) or 5
+local ipMax = tonumber(ARGV[4]) or 10
+local windowStart = now - windowMs
+
+local pType = redis.call('TYPE', KEYS[2]).ok
+if pType == 'zset' then
+  redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', windowStart)
+  local phoneCount = redis.call('ZCARD', KEYS[2])
+  if phoneCount >= phoneMax then
+    local oldest = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+    local retryAfter = math.ceil(windowMs / 1000)
+    if oldest and #oldest >= 2 then
+      local oldestScore = tonumber(oldest[2])
+      retryAfter = math.max(1, math.ceil((oldestScore + windowMs - now) / 1000))
+    end
+    return { 0, retryAfter, 'PHONE_LIMIT' }
+  end
+else
+  local phoneCount = tonumber(redis.call('GET', KEYS[2]) or '0')
+  if phoneCount >= phoneMax then
+    local phoneTtl = redis.call('TTL', KEYS[2])
+    if phoneTtl < 0 then phoneTtl = 900 end
+    return { 0, phoneTtl, 'PHONE_LIMIT' }
+  end
 end
 
-local ipCount = tonumber(redis.call('GET', KEYS[3]) or '0')
-if ipCount >= tonumber(ARGV[2]) then
-  local ipTtl = redis.call('TTL', KEYS[3])
-  if ipTtl < 0 then ipTtl = 900 end
-  return { 0, ipTtl, 'IP_LIMIT' }
+local iType = redis.call('TYPE', KEYS[3]).ok
+if iType == 'zset' then
+  redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', windowStart)
+  local ipCount = redis.call('ZCARD', KEYS[3])
+  if ipCount >= ipMax then
+    local oldest = redis.call('ZRANGE', KEYS[3], 0, 0, 'WITHSCORES')
+    local retryAfter = math.ceil(windowMs / 1000)
+    if oldest and #oldest >= 2 then
+      local oldestScore = tonumber(oldest[2])
+      retryAfter = math.max(1, math.ceil((oldestScore + windowMs - now) / 1000))
+    end
+    return { 0, retryAfter, 'IP_LIMIT' }
+  end
+else
+  local ipCount = tonumber(redis.call('GET', KEYS[3]) or '0')
+  if ipCount >= ipMax then
+    local ipTtl = redis.call('TTL', KEYS[3])
+    if ipTtl < 0 then ipTtl = 900 end
+    return { 0, ipTtl, 'IP_LIMIT' }
+  end
 end
 
 return { 1, 0, 'OK' }
 `;
 
 const RECORD_OTP_REQUEST_LUA = `
-if tonumber(ARGV[1]) > 0 then
-  redis.call('SET', KEYS[1], '1', 'EX', tonumber(ARGV[1]))
+local cooldownSec = tonumber(ARGV[1]) or 60
+local windowSec = tonumber(ARGV[2]) or 900
+local now = tonumber(ARGV[3]) or 0
+local memberId = tostring(ARGV[4] or '')
+
+if cooldownSec > 0 then
+  redis.call('SET', KEYS[1], '1', 'EX', cooldownSec)
 end
 
-local pCount = redis.call('INCR', KEYS[2])
-if pCount == 1 then
-  redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]))
+if now > 0 and memberId ~= '' then
+  redis.call('ZADD', KEYS[2], now, memberId)
+  redis.call('EXPIRE', KEYS[2], windowSec)
+  redis.call('ZADD', KEYS[3], now, memberId)
+  redis.call('EXPIRE', KEYS[3], windowSec)
 else
-  local pTtl = redis.call('TTL', KEYS[2])
-  if pTtl < 0 then
-    redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]))
-  end
-end
-
-local iCount = redis.call('INCR', KEYS[3])
-if iCount == 1 then
-  redis.call('EXPIRE', KEYS[3], tonumber(ARGV[2]))
-else
-  local iTtl = redis.call('TTL', KEYS[3])
-  if iTtl < 0 then
-    redis.call('EXPIRE', KEYS[3], tonumber(ARGV[2]))
-  end
+  local pCount = redis.call('INCR', KEYS[2])
+  if pCount == 1 then redis.call('EXPIRE', KEYS[2], windowSec) end
+  local iCount = redis.call('INCR', KEYS[3])
+  if iCount == 1 then redis.call('EXPIRE', KEYS[3], windowSec) end
 end
 
 return 1
 `;
 
 const CHECK_VERIFY_RATE_LUA = `
-local count = tonumber(redis.call('GET', KEYS[1]) or '0')
-if count >= tonumber(ARGV[1]) then
-  local ttl = redis.call('TTL', KEYS[1])
-  if ttl < 0 then ttl = 900 end
-  return { 0, ttl }
+local now = tonumber(ARGV[1]) or 0
+local windowMs = tonumber(ARGV[2]) or 900000
+local maxAttempts = tonumber(ARGV[3]) or 20
+local windowStart = now - windowMs
+
+local kType = redis.call('TYPE', KEYS[1]).ok
+if kType == 'zset' then
+  redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', windowStart)
+  local count = redis.call('ZCARD', KEYS[1])
+  if count >= maxAttempts then
+    local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+    local retryAfter = math.ceil(windowMs / 1000)
+    if oldest and #oldest >= 2 then
+      local oldestScore = tonumber(oldest[2])
+      retryAfter = math.max(1, math.ceil((oldestScore + windowMs - now) / 1000))
+    end
+    return { 0, retryAfter }
+  end
+else
+  local count = tonumber(redis.call('GET', KEYS[1]) or '0')
+  if count >= maxAttempts then
+    local ttl = redis.call('TTL', KEYS[1])
+    if ttl < 0 then ttl = 900 end
+    return { 0, ttl }
+  end
 end
+
 return { 1, 0 }
 `;
 
 const RECORD_FAILED_VERIFY_LUA = `
-local count = redis.call('INCR', KEYS[1])
-if count == 1 then
-  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+local now = tonumber(ARGV[1]) or 0
+local windowMs = tonumber(ARGV[2]) or 900000
+local memberId = tostring(ARGV[3] or '')
+local windowSec = math.ceil(windowMs / 1000)
+
+if now > 0 and memberId ~= '' then
+  redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - windowMs)
+  redis.call('ZADD', KEYS[1], now, memberId)
+  redis.call('EXPIRE', KEYS[1], windowSec)
+  return redis.call('ZCARD', KEYS[1])
 else
-  local ttl = redis.call('TTL', KEYS[1])
-  if ttl < 0 then
-    redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+  local count = redis.call('INCR', KEYS[1])
+  if count == 1 then
+    redis.call('EXPIRE', KEYS[1], windowSec)
+  else
+    local ttl = redis.call('TTL', KEYS[1])
+    if ttl < 0 then
+      redis.call('EXPIRE', KEYS[1], windowSec)
+    end
+  end
+  return count
+end
+`;
+
+const VERIFY_OTP_ATOMIC_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return { 0, 'NOT_FOUND', 'کد تایید یافت نشد یا منقضی شده است. لطفاً مجدداً درخواست ارسال کد نمایید.' }
+end
+
+local ok, record = pcall(cjson.decode, raw)
+if not ok or not record then
+  redis.call('DEL', KEYS[1])
+  return { 0, 'NOT_FOUND', 'کد تایید یافت نشد یا منقضی شده است. لطفاً مجدداً درخواست ارسال کد نمایید.' }
+end
+
+local now = tonumber(ARGV[2])
+if record.expiresAt and now > tonumber(record.expiresAt) then
+  redis.call('DEL', KEYS[1])
+  return { 0, 'EXPIRED', 'کد تایید منقضی شده است. لطفاً مجدداً درخواست ارسال کد نمایید.' }
+end
+
+local attempts = tonumber(record.attempts or 0) + 1
+record.attempts = attempts
+
+if attempts > tonumber(ARGV[3]) then
+  redis.call('DEL', KEYS[1])
+  return { 0, 'TOO_MANY_ATTEMPTS', 'تعداد دفعات تلاش اشتباه بیش از حد مجاز است. کد باطل شد. لطفاً مجدداً درخواست کد نمایید.' }
+end
+
+local inputCode = tostring(ARGV[1])
+local expectedCode = tostring(record.code or '')
+
+local isMatch = (#inputCode == #expectedCode)
+if isMatch then
+  for i = 1, #inputCode do
+    if string.byte(inputCode, i) ~= string.byte(expectedCode, i) then
+      isMatch = false
+    end
   end
 end
-return count
+
+if not isMatch then
+  local ttl = redis.call('TTL', KEYS[1])
+  if ttl > 0 then
+    redis.call('SET', KEYS[1], cjson.encode(record), 'EX', ttl)
+  end
+  local remaining = tonumber(ARGV[3]) - attempts
+  return { 0, 'INVALID', 'کد تایید وارد شده نادرست است. (' .. tostring(remaining) .. ' تلاش باقی‌مانده)' }
+end
+
+-- Success! Code matches. Atomically consume (DEL) key immediately (single-use guarantee)
+redis.call('DEL', KEYS[1])
+if KEYS[2] then
+  redis.call('DEL', KEYS[2])
+end
+
+return { 1, 'OK', '' }
 `;
 
 export interface RateLimitResult {
@@ -268,13 +442,158 @@ export interface RateLimitResult {
 export type RateLimitResultThenable = RateLimitResult & PromiseLike<RateLimitResult>;
 
 /**
+ * In-memory sliding-window check helper
+ */
+function checkOtpRateLimitInMemory(
+  cleanPhone: string,
+  cleanIp: string,
+  purpose: string,
+  now: number,
+  cooldownSeconds: number
+): RateLimitResult {
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  const cooldownKey = `${purpose}:${cleanPhone}`;
+  const lastSent = phoneLastSentAt.get(cooldownKey) || 0;
+  const elapsedSeconds = (now - lastSent) / 1000;
+
+  if (cooldownSeconds > 0 && elapsedSeconds < cooldownSeconds) {
+    const retryAfter = Math.ceil(cooldownSeconds - elapsedSeconds);
+    return {
+      allowed: false,
+      retryAfter,
+      error: `لطفاً پیش از درخواست مجدد کد تایید، ${retryAfter} ثانیه صبر نمایید.`
+    };
+  }
+
+  const phoneHistory = (phoneRequestTimestamps.get(cleanPhone) || []).filter((t) => t > windowStart);
+  if (phoneHistory.length >= OTP_PHONE_MAX_REQUESTS) {
+    const oldest = phoneHistory[0];
+    const retryAfter = Math.max(1, Math.ceil((oldest + RATE_LIMIT_WINDOW_MS - now) / 1000));
+    return {
+      allowed: false,
+      retryAfter,
+      error: "تعداد درخواست‌های کد تایید برای این شماره بیش از حد مجاز است. لطفاً پس از ۱۵ دقیقه مجدداً تلاش فرمایید."
+    };
+  }
+
+  const ipHistory = (ipRequestTimestamps.get(cleanIp) || []).filter((t) => t > windowStart);
+  if (ipHistory.length >= OTP_IP_MAX_REQUESTS) {
+    const oldest = ipHistory[0];
+    const retryAfter = Math.max(1, Math.ceil((oldest + RATE_LIMIT_WINDOW_MS - now) / 1000));
+    return {
+      allowed: false,
+      retryAfter,
+      error: "تعداد درخواست‌های کد تایید از این آدرس شبکه بیش از حد مجاز است. لطفاً دقایقی دیگر تلاش فرمایید."
+    };
+  }
+
+  return { allowed: true };
+}
+
+/**
+ * In-memory record helper
+ */
+function recordOtpRequestInMemory(
+  cleanPhone: string,
+  cleanIp: string,
+  purpose: string,
+  now: number,
+  cooldownSec: number
+): void {
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  const cooldownKey = `${purpose}:${cleanPhone}`;
+  phoneLastSentAt.set(cooldownKey, now);
+
+  const phoneHistory = (phoneRequestTimestamps.get(cleanPhone) || []).filter((t) => t > windowStart);
+  phoneHistory.push(now);
+  phoneRequestTimestamps.set(cleanPhone, phoneHistory);
+
+  const ipHistory = (ipRequestTimestamps.get(cleanIp) || []).filter((t) => t > windowStart);
+  ipHistory.push(now);
+  ipRequestTimestamps.set(cleanIp, ipHistory);
+}
+
+/**
+ * Combines rate-limit check and request registration into one atomic operation.
+ * Uses atomic Redis Lua with Sorted Sets (ZSET) sliding-window algorithm.
+ * Eliminates race conditions (TOCTOU) under concurrent requests.
+ * Preserves a safe in-memory sliding-window fallback when Redis is offline.
+ */
+export async function checkAndRecordOtpRequest(
+  phone: string,
+  ip: string,
+  purpose: "LOGIN" | "PASSWORD_RESET"
+): Promise<RateLimitResult> {
+  const cleanPhone = normalizePhoneNumber(phone);
+  const cleanIp = String(ip || "127.0.0.1").trim();
+  const now = Date.now();
+  const cooldownSec = getOtpCooldownSeconds();
+  const memberId = `${now}:${crypto.randomBytes(6).toString("hex")}`;
+
+  const redis = getRedisClient();
+  if (redis && typeof redis.eval === "function") {
+    try {
+      const redisCooldownKey = getRedisCooldownKey(purpose, cleanPhone);
+      const redisPhoneRateKey = getRedisPhoneRateKey(cleanPhone);
+      const redisIpRateKey = getRedisIpRateKey(cleanIp);
+
+      const res = await redis.eval(
+        ATOMIC_CHECK_AND_RECORD_OTP_LUA,
+        3,
+        redisCooldownKey,
+        redisPhoneRateKey,
+        redisIpRateKey,
+        now,
+        RATE_LIMIT_WINDOW_MS,
+        OTP_PHONE_MAX_REQUESTS,
+        OTP_IP_MAX_REQUESTS,
+        cooldownSec,
+        memberId
+      );
+
+      if (Array.isArray(res)) {
+        const allowed = Number(res[0]) === 1;
+        const retryAfter = Number(res[1]) || 0;
+        const reason = String(res[2]);
+
+        if (!allowed) {
+          let error = "تعداد درخواست‌های کد تایید بیش از حد مجاز است.";
+          if (reason === "COOLDOWN") {
+            error = `لطفاً پیش از درخواست مجدد کد تایید، ${retryAfter} ثانیه صبر نمایید.`;
+          } else if (reason === "PHONE_LIMIT") {
+            error = "تعداد درخواست‌های کد تایید برای این شماره بیش از حد مجاز است. لطفاً پس از ۱۵ دقیقه مجدداً تلاش فرمایید.";
+          } else if (reason === "IP_LIMIT") {
+            error = "تعداد درخواست‌های کد تایید از این آدرس شبکه بیش از حد مجاز است. لطفاً دقایقی دیگر تلاش فرمایید.";
+          }
+          return { allowed: false, retryAfter, error };
+        }
+
+        // Keep in-memory mirror synchronized
+        recordOtpRequestInMemory(cleanPhone, cleanIp, purpose, now, cooldownSec);
+        return { allowed: true };
+      }
+    } catch (err: any) {
+      console.warn("⚠️ [Redis Rate Limit] Redis eval failed, falling back to in-memory sliding window:", err.message);
+    }
+  }
+
+  // Safe in-memory sliding-window fallback
+  const check = checkOtpRateLimitInMemory(cleanPhone, cleanIp, purpose, now, cooldownSec);
+  if (!check.allowed) {
+    return check;
+  }
+  recordOtpRequestInMemory(cleanPhone, cleanIp, purpose, now, cooldownSec);
+  return { allowed: true };
+}
+
+/**
  * Checks rate limits and cooldowns before issuing a new OTP.
  * Evaluates:
  * 1. Resend cooldown per phone (default: 60s)
  * 2. Window limit per phone (default: max 5 requests / 15m)
  * 3. Window limit per IP (default: max 10 requests / 15m)
  * 
- * Supports both synchronous return and \`await\` for atomic Redis checks.
+ * Supports both synchronous return and `await` for atomic Redis checks.
  */
 export function checkOtpRateLimit(
   phone: string,
@@ -285,44 +604,8 @@ export function checkOtpRateLimit(
   const cleanIp = String(ip || "127.0.0.1").trim();
   const now = Date.now();
   const cooldownSeconds = getOtpCooldownSeconds();
-  const windowStart = now - RATE_LIMIT_WINDOW_MS;
 
-  // 1. In-memory check (fast synchronous fallback & baseline)
-  let syncResult: RateLimitResult = { allowed: true };
-  const cooldownKey = `${purpose}:${cleanPhone}`;
-  const lastSent = phoneLastSentAt.get(cooldownKey) || 0;
-  const elapsedSeconds = (now - lastSent) / 1000;
-
-  if (cooldownSeconds > 0 && elapsedSeconds < cooldownSeconds) {
-    const retryAfter = Math.ceil(cooldownSeconds - elapsedSeconds);
-    syncResult = {
-      allowed: false,
-      retryAfter,
-      error: `لطفاً پیش از درخواست مجدد کد تایید، ${retryAfter} ثانیه صبر نمایید.`
-    };
-  } else {
-    const phoneHistory = (phoneRequestTimestamps.get(cleanPhone) || []).filter((t) => t > windowStart);
-    if (phoneHistory.length >= OTP_PHONE_MAX_REQUESTS) {
-      const oldest = phoneHistory[0];
-      const retryAfter = Math.max(1, Math.ceil((oldest + RATE_LIMIT_WINDOW_MS - now) / 1000));
-      syncResult = {
-        allowed: false,
-        retryAfter,
-        error: "تعداد درخواست‌های کد تایید برای این شماره بیش از حد مجاز است. لطفاً پس از ۱۵ دقیقه مجدداً تلاش فرمایید."
-      };
-    } else {
-      const ipHistory = (ipRequestTimestamps.get(cleanIp) || []).filter((t) => t > windowStart);
-      if (ipHistory.length >= OTP_IP_MAX_REQUESTS) {
-        const oldest = ipHistory[0];
-        const retryAfter = Math.max(1, Math.ceil((oldest + RATE_LIMIT_WINDOW_MS - now) / 1000));
-        syncResult = {
-          allowed: false,
-          retryAfter,
-          error: "تعداد درخواست‌های کد تایید از این آدرس شبکه بیش از حد مجاز است. لطفاً دقایقی دیگر تلاش فرمایید."
-        };
-      }
-    }
-  }
+  const syncResult = checkOtpRateLimitInMemory(cleanPhone, cleanIp, purpose, now, cooldownSeconds);
 
   // Thenable wrapper: performs atomic Redis Lua evaluation if Redis is connected
   return Object.assign(syncResult, {
@@ -344,6 +627,8 @@ export function checkOtpRateLimit(
               redisCooldownKey,
               redisPhoneRateKey,
               redisIpRateKey,
+              now,
+              RATE_LIMIT_WINDOW_MS,
               OTP_PHONE_MAX_REQUESTS,
               OTP_IP_MAX_REQUESTS
             );
@@ -389,6 +674,8 @@ export function checkOtpRateLimit(
     }
   });
 }
+
+
 
 /**
  * Records an OTP request timestamp against phone and IP buckets (atomic in Redis with fallback)
@@ -731,9 +1018,65 @@ export function verifyOtp(
       onfulfilled?: ((value: VerifyResult) => TResult1 | PromiseLike<TResult1>) | null,
       onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
     ) {
+      const redis = getRedisClient();
+      if (redis && typeof redis.eval === "function") {
+        return verifyOtpDistributed(cleanPhone, userInputCode, purpose).then(onfulfilled, onrejected);
+      }
       return Promise.resolve(syncResult).then(onfulfilled, onrejected);
     }
   });
+}
+
+/**
+ * Distributed atomic OTP verification across multiple application instances via Redis Lua.
+ * Enforces atomic existence check, expiration check, attempt threshold, timing-safe matching,
+ * and single-use immediate consumption (DEL) to eliminate race conditions and replay attacks.
+ */
+export async function verifyOtpDistributed(
+  phone: string,
+  userInputCode: string,
+  purpose: "LOGIN" | "PASSWORD_RESET"
+): Promise<VerifyResult> {
+  const cleanPhone = normalizePhoneNumber(phone);
+  const inputCode = String(userInputCode || "").trim();
+  const redis = getRedisClient();
+
+  if (redis && typeof redis.eval === "function") {
+    try {
+      const redisOtpKey = getRedisOtpKey(purpose, cleanPhone);
+      const redisCooldownKey = getRedisCooldownKey(purpose, cleanPhone);
+      const now = Date.now();
+
+      const res = await redis.eval(
+        VERIFY_OTP_ATOMIC_LUA,
+        2,
+        redisOtpKey,
+        redisCooldownKey,
+        inputCode,
+        now,
+        MAX_OTP_ATTEMPTS
+      );
+
+      if (Array.isArray(res)) {
+        const success = Number(res[0]) === 1;
+        const reason = String(res[1]) as any;
+        const error = String(res[2]);
+
+        if (success) {
+          otpStore.delete(`${purpose}:${cleanPhone}`);
+          phoneLastSentAt.delete(`${purpose}:${cleanPhone}`);
+          return { success: true };
+        }
+
+        return { success: false, reason, error };
+      }
+    } catch (err: any) {
+      console.warn("⚠️ [Redis Distributed OTP] Redis eval failed, falling back to local verification:", err.message);
+    }
+  }
+
+  // Fallback to local verification
+  return verifyOtp(cleanPhone, userInputCode, purpose);
 }
 
 /**
@@ -744,32 +1087,7 @@ export async function verifyOtpAsync(
   userInputCode: string,
   purpose: "LOGIN" | "PASSWORD_RESET"
 ): Promise<VerifyResult> {
-  const cleanPhone = normalizePhoneNumber(phone);
-  const key = `${purpose}:${cleanPhone}`;
-
-  // If found in local store, verify directly
-  if (otpStore.has(key)) {
-    return verifyOtp(phone, userInputCode, purpose);
-  }
-
-  // Check Redis for cross-process state
-  try {
-    const redis = getRedisClient();
-    if (redis) {
-      const cached = await redis.get(getRedisOtpKey(purpose, cleanPhone));
-      if (cached) {
-        const record: OtpRecord = JSON.parse(cached);
-        otpStore.set(key, record);
-        return verifyOtp(phone, userInputCode, purpose);
-      }
-    }
-  } catch {}
-
-  return {
-    success: false,
-    reason: "NOT_FOUND",
-    error: "کد تایید یافت نشد یا منقضی شده است. لطفاً مجدداً درخواست ارسال کد نمایید."
-  };
+  return verifyOtpDistributed(phone, userInputCode, purpose);
 }
 
 /**

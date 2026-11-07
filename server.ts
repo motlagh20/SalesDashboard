@@ -9,6 +9,7 @@ import dotenv from "dotenv";
 import os from "os";
 import {
   bootstrapDatabase,
+  seedDatabaseWithConnection,
   getDbPool,
   getRedisClient,
   writeServerErrorLog,
@@ -41,6 +42,7 @@ import {
 import {
   createOtp,
   verifyOtp,
+  verifyOtpDistributed,
   deleteOtp,
   getDevOtp,
   normalizePhoneNumber,
@@ -49,6 +51,7 @@ import {
   getOtpExpirySeconds,
   checkOtpRateLimit,
   recordOtpRequest,
+  checkAndRecordOtpRequest,
   checkVerificationRateLimit,
   recordFailedVerification,
   getClientIp
@@ -57,6 +60,13 @@ import { sendOtpSms, isSmsConfigured } from "./server/sms";
 import { hashPassword, verifyPassword, isDefaultPassword, isDefaultPasswordOrMatches, DEFAULT_PASSWORD_BCRYPT_HASH, generateTemporaryPassword } from "./server/password";
 import { sanitizeUser, sanitizeUsers } from "./server/sanitizer";
 import { sendApiError, handleServerError, expressErrorHandler, apiNotFoundHandler, ApiError } from "./server/errorHandler";
+
+export const CACHE_KEY_PRODUCTS = "salesdashboard:cache:products_list";
+export const CACHE_KEY_AGENTS = "salesdashboard:cache:agents_list";
+export const CACHE_KEY_SHIPPING_COMPANIES = "salesdashboard:cache:shipping_companies_list";
+export const CACHE_KEY_PERMANENT_DRIVERS = "salesdashboard:cache:permanent_drivers_list";
+export const CACHE_KEY_ORDERS = "salesdashboard:cache:orders_list";
+export const CACHE_KEY_ACTIVITY_LOGS = "salesdashboard:cache:activity_logs_list";
 import {
   sanitizeString,
   validateNumber,
@@ -553,7 +563,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
     try {
       const redis = getRedisClient();
       if (redis) {
-        const cached = await redis.get("products_list");
+        const cached = await redis.get(CACHE_KEY_PRODUCTS);
         if (cached) {
           return res.json(JSON.parse(cached));
         }
@@ -567,7 +577,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       }));
       
       if (redis) {
-        await redis.set("products_list", JSON.stringify(products), "EX", 600); // 10 minutes cache
+        await redis.set(CACHE_KEY_PRODUCTS, JSON.stringify(products), "EX", 600); // 10 minutes cache
       }
       res.json(products);
     } catch (err: any) {
@@ -605,7 +615,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       
       // Invalidate cache
       const redis = getRedisClient();
-      if (redis) await redis.del("products_list");
+      if (redis) await redis.del(CACHE_KEY_PRODUCTS);
 
       await recordActivity(
         req,
@@ -631,7 +641,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       
       // Invalidate cache
       const redis = getRedisClient();
-      if (redis) await redis.del("products_list");
+      if (redis) await redis.del(CACHE_KEY_PRODUCTS);
 
       res.json({ success: true });
     } catch (err: any) {
@@ -672,7 +682,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       `, [safeName, safeCategory, safePrice, safeUnit, safeDescription || null, safeWeight, safeDimensions || null, safeCoverageInfo || null, safePrimaryUnit || null, safeSecondaryUnit || null, safeConversionRatio, safeDefaultQuantity, isEnabled, safeImageUrl || null, safeId]);
 
       const redis = getRedisClient();
-      if (redis) await redis.del("products_list");
+      if (redis) await redis.del(CACHE_KEY_PRODUCTS);
 
       await recordActivity(
         req,
@@ -696,7 +706,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       
       // Invalidate cache
       const redis = getRedisClient();
-      if (redis) await redis.del("products_list");
+      if (redis) await redis.del(CACHE_KEY_PRODUCTS);
 
       await recordActivity(
         req,
@@ -717,7 +727,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
     try {
       const redis = getRedisClient();
       if (redis) {
-        const cached = await redis.get("agents_list");
+        const cached = await redis.get(CACHE_KEY_AGENTS);
         if (cached) {
           return res.json(JSON.parse(cached));
         }
@@ -736,7 +746,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       });
       
       if (redis) {
-        await redis.set("agents_list", JSON.stringify(agents), "EX", 600);
+        await redis.set(CACHE_KEY_AGENTS, JSON.stringify(agents), "EX", 600);
       }
       res.json(agents);
     } catch (err: any) {
@@ -803,7 +813,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       }
 
       const redis = getRedisClient();
-      if (redis) await redis.del("agents_list");
+      if (redis) await redis.del(CACHE_KEY_AGENTS);
 
       await recordActivity(
         req,
@@ -829,7 +839,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       await db.query("UPDATE agents SET isEnabled = NOT isEnabled WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del("agents_list");
+      if (redis) await redis.del(CACHE_KEY_AGENTS);
 
       res.json({ success: true });
     } catch (err: any) {
@@ -883,7 +893,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       }
 
       const redis = getRedisClient();
-      if (redis) await redis.del("agents_list");
+      if (redis) await redis.del(CACHE_KEY_AGENTS);
 
       await recordActivity(
         req,
@@ -916,7 +926,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       await db.query("DELETE FROM agents WHERE id = ?", [id]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del("agents_list");
+      if (redis) await redis.del(CACHE_KEY_AGENTS);
 
       await recordActivity(
         req,
@@ -938,7 +948,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
     try {
       const redis = getRedisClient();
       if (redis) {
-        const cached = await redis.get("shipping_companies_list");
+        const cached = await redis.get(CACHE_KEY_SHIPPING_COMPANIES);
         if (cached) {
           return res.json(JSON.parse(cached));
         }
@@ -952,7 +962,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       }));
       
       if (redis) {
-        await redis.set("shipping_companies_list", JSON.stringify(companies), "EX", 600);
+        await redis.set(CACHE_KEY_SHIPPING_COMPANIES, JSON.stringify(companies), "EX", 600);
       }
       res.json(companies);
     } catch (err: any) {
@@ -1010,7 +1020,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       }
       
       const redis = getRedisClient();
-      if (redis) await redis.del("shipping_companies_list");
+      if (redis) await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
       
       res.status(201).json({ success: true, id: safeId });
     } catch (err: any) {
@@ -1061,7 +1071,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       }
 
       const redis = getRedisClient();
-      if (redis) await redis.del("shipping_companies_list");
+      if (redis) await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
 
       res.json({ success: true });
     } catch (err: any) {
@@ -1077,7 +1087,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       await db.query("UPDATE shipping_companies SET isEnabled = NOT isEnabled WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del("shipping_companies_list");
+      if (redis) await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
       
       res.json({ success: true });
     } catch (err: any) {
@@ -1100,7 +1110,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       await db.query("DELETE FROM shipping_companies WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del("shipping_companies_list");
+      if (redis) await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
       
       res.json({ success: true });
     } catch (err: any) {
@@ -1114,7 +1124,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
     try {
       const redis = getRedisClient();
       if (redis) {
-        const cached = await redis.get("permanent_drivers_list");
+        const cached = await redis.get(CACHE_KEY_PERMANENT_DRIVERS);
         if (cached) {
           return res.json(JSON.parse(cached));
         }
@@ -1128,7 +1138,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       }));
       
       if (redis) {
-        await redis.set("permanent_drivers_list", JSON.stringify(drivers), "EX", 600);
+        await redis.set(CACHE_KEY_PERMANENT_DRIVERS, JSON.stringify(drivers), "EX", 600);
       }
       res.json(drivers);
     } catch (err: any) {
@@ -1155,7 +1165,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       );
       
       const redis = getRedisClient();
-      if (redis) await redis.del("permanent_drivers_list");
+      if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
       
       res.status(201).json({ success: true, id: safeId });
     } catch (err: any) {
@@ -1198,7 +1208,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
         await connection.commit();
 
         const redis = getRedisClient();
-        if (redis) await redis.del("permanent_drivers_list");
+        if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
 
         res.status(201).json({ success: true, count: insertedCount });
       } catch (txErr) {
@@ -1234,7 +1244,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       `, [safeName, safePhone, safePlate, safeVehicle, safeAgency || null, safeNationalCode || null, safeSmartCard || null, isEnabled, safeId]);
 
       const redis = getRedisClient();
-      if (redis) await redis.del("permanent_drivers_list");
+      if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
 
       res.json({ success: true });
     } catch (err: any) {
@@ -1250,7 +1260,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       await db.query("UPDATE permanent_drivers SET isEnabled = NOT isEnabled WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del("permanent_drivers_list");
+      if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
       
       res.json({ success: true });
     } catch (err: any) {
@@ -1266,7 +1276,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       await db.query("DELETE FROM permanent_drivers WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del("permanent_drivers_list");
+      if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
       
       res.json({ success: true });
     } catch (err: any) {
@@ -2227,7 +2237,7 @@ function compactItemsJson(itemsInput: any): string | null {
               [newDriverId, safeDriverName, safeDriverPhone, safeLicensePlate, safeVehicleType || 'تریلی ۱۸ چرخ لبه‌دار', safeShippingAgency || null]
             );
             const redis = getRedisClient();
-            if (redis) await redis.del("permanent_drivers_list");
+            if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
           }
         }
 
@@ -2422,7 +2432,7 @@ function compactItemsJson(itemsInput: any): string | null {
               [newDriverId, safeDriverName, safeDriverPhone, safeLicensePlate, safeVehicleType || 'تریلی ۱۸ چرخ لبه‌دار', safeShippingAgency || null]
             );
             const redis = getRedisClient();
-            if (redis) await redis.del("permanent_drivers_list");
+            if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
           }
         }
 
@@ -2799,8 +2809,8 @@ function compactItemsJson(itemsInput: any): string | null {
       const cleanPhone = validatePhoneNumber(req.body.phoneNumber);
       const clientIp = getClientIp(req);
 
-      // Requirement 3: Enforce rate limits and resend cooldowns
-      const rateCheck = await checkOtpRateLimit(cleanPhone, clientIp, "LOGIN");
+      // Requirement 1 & 3: Atomic check and record of rate limits and resend cooldowns (Lua ZSET)
+      const rateCheck = await checkAndRecordOtpRequest(cleanPhone, clientIp, "LOGIN");
       if (!rateCheck.allowed) {
         if (rateCheck.retryAfter) {
           res.setHeader("Retry-After", String(rateCheck.retryAfter));
@@ -2817,7 +2827,6 @@ function compactItemsJson(itemsInput: any): string | null {
 
       // Requirement 4: Prevent account enumeration with consistent generic response
       if (matched.length === 0) {
-        await recordOtpRequest(cleanPhone, clientIp, "LOGIN");
         return res.json({
           success: true,
           message: "در صورت ثبت بودن اطلاعات در سامانه، کد تایید پیامکی ارسال گردید.",
@@ -2831,7 +2840,6 @@ function compactItemsJson(itemsInput: any): string | null {
       }
 
       const targetPhone = user.phoneNumber || cleanPhone;
-      await recordOtpRequest(targetPhone, clientIp, "LOGIN");
 
       // Generate cryptographically secure OTP with expiration
       const { code: otpCode, expiresIn } = createOtp(targetPhone, "LOGIN");
@@ -3008,8 +3016,8 @@ function compactItemsJson(itemsInput: any): string | null {
       const cleanPhone = validatePhoneNumber(req.body.phoneNumber);
       const clientIp = getClientIp(req);
 
-      // Requirement 3: Enforce rate limits and resend cooldowns
-      const rateCheck = await checkOtpRateLimit(cleanPhone, clientIp, "PASSWORD_RESET");
+      // Requirement 1 & 3: Atomic check and record of rate limits and resend cooldowns (Lua ZSET)
+      const rateCheck = await checkAndRecordOtpRequest(cleanPhone, clientIp, "PASSWORD_RESET");
       if (!rateCheck.allowed) {
         if (rateCheck.retryAfter) {
           res.setHeader("Retry-After", String(rateCheck.retryAfter));
@@ -3026,7 +3034,6 @@ function compactItemsJson(itemsInput: any): string | null {
 
       // Requirement 4: Prevent account enumeration with consistent generic response
       if (matched.length === 0) {
-        await recordOtpRequest(cleanPhone, clientIp, "PASSWORD_RESET");
         return res.json({
           success: true,
           message: "در صورت ثبت بودن شماره همراه در سیستم، کد تایید بازیابی ارسال گردید.",
@@ -3040,7 +3047,6 @@ function compactItemsJson(itemsInput: any): string | null {
       }
 
       const targetPhone = user.phoneNumber || cleanPhone;
-      await recordOtpRequest(targetPhone, clientIp, "PASSWORD_RESET");
 
       // Generate cryptographically secure OTP with expiration
       const { code: otpCode, expiresIn } = createOtp(targetPhone, "PASSWORD_RESET");
@@ -3362,8 +3368,8 @@ function compactItemsJson(itemsInput: any): string | null {
 
       const redis = getRedisClient();
       if (redis) {
-        await redis.del("agents_list");
-        await redis.del("shipping_companies_list");
+        await redis.del(CACHE_KEY_AGENTS);
+        await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
       }
 
       res.json({
@@ -3893,6 +3899,12 @@ function compactItemsJson(itemsInput: any): string | null {
         await connection.query("DELETE FROM products");
         await connection.query("DELETE FROM agents");
         await connection.query("DELETE FROM shipping_companies");
+        await connection.query("DELETE FROM permanent_drivers");
+        await connection.query("DELETE FROM app_users");
+
+        // Reseed tables within the SAME transaction so failures rollback atomically
+        await seedDatabaseWithConnection(connection);
+
         await connection.commit();
       } catch (txErr) {
         await connection.rollback();
@@ -3901,16 +3913,16 @@ function compactItemsJson(itemsInput: any): string | null {
         connection.release();
       }
 
-      // Re-seed tables
-      await bootstrapDatabase();
-
-      // Clear all Redis caches
+      // Clear all SalesDashboard cache keys
       const redis = getRedisClient();
       if (redis) {
-        await redis.del("products_list");
-        await redis.del("agents_list");
-        await redis.del("shipping_companies_list");
+        await redis.del(CACHE_KEY_PRODUCTS);
+        await redis.del(CACHE_KEY_AGENTS);
+        await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
+        await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
+        await redis.del(CACHE_KEY_ORDERS);
       }
+      clearAllRouteCaches();
 
       res.json({ success: true, message: "داده‌های نمایشی و پایه سامانه با موفقیت بازنشانی شدند." });
     } catch (err: any) {
@@ -3958,7 +3970,7 @@ function compactItemsJson(itemsInput: any): string | null {
       // Clear order-related Redis caches
       const redis = getRedisClient();
       if (redis) {
-        await redis.del("orders_list");
+        await redis.del(CACHE_KEY_ORDERS);
       }
 
       res.json({ 
@@ -3986,7 +3998,7 @@ function compactItemsJson(itemsInput: any): string | null {
 
       const redis = getRedisClient();
       if (redis) {
-        await redis.del("activity_logs_list");
+        await redis.del(CACHE_KEY_ACTIVITY_LOGS);
       }
 
       res.json({
@@ -4345,51 +4357,47 @@ function compactItemsJson(itemsInput: any): string | null {
   app.post("/api/system/flush-cache", authenticate, authorize("SYSTEM_ADMIN"), async (req, res) => {
     try {
       const redis = getRedisClient();
+      let deletedKeysCount = 0;
       if (redis) {
-        // Targeted deletion of SalesDashboard-owned keys ONLY (never flushall)
-        // 1. All namespaced keys (salesdashboard:*)
-        const namespacedKeys = await redis.keys("salesdashboard:*");
-        if (Array.isArray(namespacedKeys) && namespacedKeys.length > 0) {
-          for (const k of namespacedKeys) {
-            await redis.del(k);
+        // Targeted deletion of SalesDashboard-owned keys ONLY (never flushall or foreign wildcards)
+        if (typeof redis.scan === "function") {
+          let cursor = "0";
+          do {
+            const [nextCursor, keys] = await redis.scan(cursor, "MATCH", "salesdashboard:*", "COUNT", 100);
+            cursor = nextCursor;
+            if (Array.isArray(keys) && keys.length > 0) {
+              for (const k of keys) {
+                await redis.del(k);
+                deletedKeysCount++;
+              }
+            }
+          } while (cursor !== "0");
+        } else if (typeof redis.keys === "function") {
+          const matched = await redis.keys("salesdashboard:*");
+          if (Array.isArray(matched)) {
+            for (const k of matched) {
+              await redis.del(k);
+              deletedKeysCount++;
+            }
           }
-        }
-        // 2. Application list cache keys
-        const appCacheKeys = [
-          "products_list",
-          "agents_list",
-          "shipping_companies_list",
-          "orders_list",
-          "activity_logs_list"
-        ];
-        for (const k of appCacheKeys) {
-          await redis.del(k);
-        }
-        // 3. Legacy un-prefixed rate, cooldown, and OTP keys
-        const legacyPatternKeys = [
-          ...(await redis.keys("rate:*")),
-          ...(await redis.keys("cooldown:*")),
-          ...(await redis.keys("otp:*"))
-        ];
-        for (const k of legacyPatternKeys) {
-          await redis.del(k);
         }
       }
       clearAllRouteCaches();
       await logUserActivity({
         userId: req.user?.id,
-        userName: req.user?.fullName || req.user?.username || 'ادمین ارشد نرم‌افزار',
-        userRole: req.user?.role || 'SYSTEM_ADMIN',
-        action: 'پاکسازی کش سرور',
-        details: 'حافظه کش موقت و کلیدهای اختصاصی داشبورد فروش با موفقیت پاکسازی شد.',
-        module: 'SYSTEM',
-        status: 'SUCCESS'
+        userName: req.user?.fullName || req.user?.username || "SYSTEM_ADMIN",
+        userRole: req.user?.role || "SYSTEM_ADMIN",
+        action: "پاکسازی کش سیستم",
+        details: `پاکسازی کامل کلیدهای کش اختصاصی SalesDashboard در ردیس (${deletedKeysCount} کلید)`,
+        module: "SYSTEM"
       });
-      res.json({ success: true, message: 'حافظه کش سرور با موفقیت پاکسازی شد.' });
+      res.json({ success: true, message: "کش سامانه با موفقیت پاکسازی شد.", deletedKeysCount });
     } catch (err: any) {
+      console.error("Error in POST /api/system/flush-cache:", err);
       return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
+
 
   // 404 handler for unmatched /api routes
   app.all("/api/*", (req, res) => {

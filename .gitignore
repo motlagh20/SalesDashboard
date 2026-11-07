@@ -11,3 +11,5 @@ coverage/
 *.key
 .runtime_jwt_secret
 data/.runtime_jwt_secret
+server/salesdashboard.json
+!server/salesdashboard.example.json
