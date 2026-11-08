@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { getRedisClient } from "./database";
+import { getRedisClient, isProductionEnvironment } from "./database";
 
 export interface OtpRecord {
   phone: string;
@@ -355,26 +355,17 @@ return { 1, 0 }
 const RECORD_FAILED_VERIFY_LUA = `
 local now = tonumber(ARGV[1]) or 0
 local windowMs = tonumber(ARGV[2]) or 900000
-local memberId = tostring(ARGV[3] or '')
+local maxAttempts = tonumber(ARGV[3]) or 20
+local memberId = tostring(ARGV[4] or '')
 local windowSec = math.ceil(windowMs / 1000)
+local windowStart = now - windowMs
 
-if now > 0 and memberId ~= '' then
-  redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - windowMs)
-  redis.call('ZADD', KEYS[1], now, memberId)
-  redis.call('EXPIRE', KEYS[1], windowSec)
-  return redis.call('ZCARD', KEYS[1])
-else
-  local count = redis.call('INCR', KEYS[1])
-  if count == 1 then
-    redis.call('EXPIRE', KEYS[1], windowSec)
-  else
-    local ttl = redis.call('TTL', KEYS[1])
-    if ttl < 0 then
-      redis.call('EXPIRE', KEYS[1], windowSec)
-    end
-  end
-  return count
-end
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', windowStart)
+redis.call('ZADD', KEYS[1], now, memberId)
+redis.call('EXPIRE', KEYS[1], windowSec)
+
+local count = redis.call('ZCARD', KEYS[1])
+return { count, count >= maxAttempts and 1 or 0 }
 `;
 
 const VERIFY_OTP_ATOMIC_LUA = `
@@ -437,6 +428,7 @@ export interface RateLimitResult {
   allowed: boolean;
   retryAfter?: number;
   error?: string;
+  isServiceUnavailable?: boolean;
 }
 
 export type RateLimitResultThenable = RateLimitResult & PromiseLike<RateLimitResult>;
@@ -531,6 +523,72 @@ export async function checkAndRecordOtpRequest(
   const memberId = `${now}:${crypto.randomBytes(6).toString("hex")}`;
 
   const redis = getRedisClient();
+  if (isProductionEnvironment()) {
+    if (!redis || typeof redis.eval !== "function") {
+      console.error("❌ [OTP Security] Redis unavailable in production for checkAndRecordOtpRequest. Failing closed.");
+      return {
+        allowed: false,
+        isServiceUnavailable: true,
+        error: "سرویس ارسال کد تایید به دلیل عدم دسترسی به زیرساخت امنیتی موقتاً در دسترس نیست. لطفاً دقایقی دیگر تلاش فرمایید."
+      };
+    }
+
+    try {
+      const redisCooldownKey = getRedisCooldownKey(purpose, cleanPhone);
+      const redisPhoneRateKey = getRedisPhoneRateKey(cleanPhone);
+      const redisIpRateKey = getRedisIpRateKey(cleanIp);
+
+      const res = await redis.eval(
+        ATOMIC_CHECK_AND_RECORD_OTP_LUA,
+        3,
+        redisCooldownKey,
+        redisPhoneRateKey,
+        redisIpRateKey,
+        now,
+        RATE_LIMIT_WINDOW_MS,
+        OTP_PHONE_MAX_REQUESTS,
+        OTP_IP_MAX_REQUESTS,
+        cooldownSec,
+        memberId
+      );
+
+      if (Array.isArray(res)) {
+        const allowed = Number(res[0]) === 1;
+        const retryAfter = Number(res[1]) || 0;
+        const reason = String(res[2]);
+
+        if (!allowed) {
+          let error = "تعداد درخواست‌های کد تایید بیش از حد مجاز است.";
+          if (reason === "COOLDOWN") {
+            error = `لطفاً پیش از درخواست مجدد کد تایید، ${retryAfter} ثانیه صبر نمایید.`;
+          } else if (reason === "PHONE_LIMIT") {
+            error = "تعداد درخواست‌های کد تایید برای این شماره بیش از حد مجاز است. لطفاً پس از ۱۵ دقیقه مجدداً تلاش فرمایید.";
+          } else if (reason === "IP_LIMIT") {
+            error = "تعداد درخواست‌های کد تایید از این آدرس شبکه بیش از حد مجاز است. لطفاً دقایقی دیگر تلاش فرمایید.";
+          }
+          return { allowed: false, retryAfter, error };
+        }
+
+        recordOtpRequestInMemory(cleanPhone, cleanIp, purpose, now, cooldownSec);
+        return { allowed: true };
+      }
+
+      return {
+        allowed: false,
+        isServiceUnavailable: true,
+        error: "سرویس ارسال کد تایید موقتاً با اختلال مواجه شده است. لطفاً دقایقی دیگر مجدداً تلاش فرمایید."
+      };
+    } catch (err: any) {
+      console.error("❌ [Redis Rate Limit] Redis eval failed in production:", err.message);
+      return {
+        allowed: false,
+        isServiceUnavailable: true,
+        error: "سرویس ارسال کد تایید موقتاً با اختلال مواجه شده است. لطفاً دقایقی دیگر مجدداً تلاش فرمایید."
+      };
+    }
+  }
+
+  // Non-production (dev/test)
   if (redis && typeof redis.eval === "function") {
     try {
       const redisCooldownKey = getRedisCooldownKey(purpose, cleanPhone);
@@ -568,12 +626,11 @@ export async function checkAndRecordOtpRequest(
           return { allowed: false, retryAfter, error };
         }
 
-        // Keep in-memory mirror synchronized
         recordOtpRequestInMemory(cleanPhone, cleanIp, purpose, now, cooldownSec);
         return { allowed: true };
       }
     } catch (err: any) {
-      console.warn("⚠️ [Redis Rate Limit] Redis eval failed, falling back to in-memory sliding window:", err.message);
+      console.warn("⚠️ [Redis Rate Limit] Redis eval failed in dev, falling back to in-memory:", err.message);
     }
   }
 
@@ -607,16 +664,25 @@ export function checkOtpRateLimit(
 
   const syncResult = checkOtpRateLimitInMemory(cleanPhone, cleanIp, purpose, now, cooldownSeconds);
 
-  // Thenable wrapper: performs atomic Redis Lua evaluation if Redis is connected
   return Object.assign(syncResult, {
     then<TResult1 = RateLimitResult, TResult2 = never>(
       onfulfilled?: ((value: RateLimitResult) => TResult1 | PromiseLike<TResult1>) | null,
       onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
     ) {
       const evaluateAsync = async (): Promise<RateLimitResult> => {
-        try {
-          const redis = getRedisClient();
-          if (redis && typeof redis.eval === "function") {
+        const redis = getRedisClient();
+        if (isProductionEnvironment()) {
+          if (!redis || typeof redis.eval !== "function") {
+            return {
+              allowed: false,
+              isServiceUnavailable: true,
+              error: "سرویس ارسال کد تایید موقتاً با اختلال مواجه شده است."
+            };
+          }
+        }
+
+        if (redis && typeof redis.eval === "function") {
+          try {
             const redisCooldownKey = getRedisCooldownKey(purpose, cleanPhone);
             const redisPhoneRateKey = getRedisPhoneRateKey(cleanPhone);
             const redisIpRateKey = getRedisIpRateKey(cleanIp);
@@ -663,9 +729,15 @@ export function checkOtpRateLimit(
               }
               return { allowed: true };
             }
+          } catch {
+            if (isProductionEnvironment()) {
+              return {
+                allowed: false,
+                isServiceUnavailable: true,
+                error: "سرویس ارسال کد تایید موقتاً با اختلال مواجه شده است."
+              };
+            }
           }
-        } catch {
-          // Redis failure: safe fallback to in-memory check result
         }
         return syncResult;
       };
@@ -674,8 +746,6 @@ export function checkOtpRateLimit(
     }
   });
 }
-
-
 
 /**
  * Records an OTP request timestamp against phone and IP buckets (atomic in Redis with fallback)
@@ -766,11 +836,30 @@ export function checkVerificationRateLimit(ip: string): RateLimitResultThenable 
       onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
     ) {
       const evaluateAsync = async (): Promise<RateLimitResult> => {
-        try {
-          const redis = getRedisClient();
-          if (redis && typeof redis.eval === "function") {
+        const redis = getRedisClient();
+        if (isProductionEnvironment()) {
+          if (!redis || typeof redis.eval !== "function") {
+            console.error("❌ [OTP Security] Redis unavailable for IP verification check in production. Failing closed.");
+            return {
+              allowed: false,
+              isServiceUnavailable: true,
+              error: "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد تلاش فرمایید."
+            };
+          }
+        }
+
+        if (redis && typeof redis.eval === "function") {
+          try {
             const redisVerifyKey = getRedisVerifyRateKey(cleanIp);
-            const res = await redis.eval(CHECK_VERIFY_RATE_LUA, 1, redisVerifyKey, VERIFY_IP_MAX_ATTEMPTS);
+            const res = await redis.eval(
+              CHECK_VERIFY_RATE_LUA,
+              1,
+              redisVerifyKey,
+              now,
+              RATE_LIMIT_WINDOW_MS,
+              VERIFY_IP_MAX_ATTEMPTS
+            );
+
             if (Array.isArray(res)) {
               const allowed = Number(res[0]) === 1;
               const retryAfter = Number(res[1]) || 0;
@@ -783,8 +872,17 @@ export function checkVerificationRateLimit(ip: string): RateLimitResultThenable 
               }
               return { allowed: true };
             }
+          } catch (err: any) {
+            if (isProductionEnvironment()) {
+              return {
+                allowed: false,
+                isServiceUnavailable: true,
+                error: "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد تلاش فرمایید."
+              };
+            }
           }
-        } catch {}
+        }
+
         return syncResult;
       };
 
@@ -800,6 +898,7 @@ export function recordFailedVerification(ip: string): Promise<void> & { recorded
   const cleanIp = String(ip || "127.0.0.1").trim();
   const now = Date.now();
   const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  const memberId = `${now}:${crypto.randomBytes(6).toString("hex")}`;
 
   const failedAttempts = (ipFailedVerificationTimestamps.get(cleanIp) || []).filter((t) => t > windowStart);
   failedAttempts.push(now);
@@ -810,10 +909,18 @@ export function recordFailedVerification(ip: string): Promise<void> & { recorded
       const redis = getRedisClient();
       if (redis) {
         const redisVerifyKey = getRedisVerifyRateKey(cleanIp);
-        const windowSec = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000);
         if (typeof redis.eval === "function") {
-          await redis.eval(RECORD_FAILED_VERIFY_LUA, 1, redisVerifyKey, windowSec);
+          await redis.eval(
+            RECORD_FAILED_VERIFY_LUA,
+            1,
+            redisVerifyKey,
+            now,
+            RATE_LIMIT_WINDOW_MS,
+            VERIFY_IP_MAX_ATTEMPTS,
+            memberId
+          );
         } else {
+          const windowSec = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000);
           await redis.incr(redisVerifyKey);
           await redis.expire(redisVerifyKey, windowSec);
         }
@@ -900,137 +1007,89 @@ export function createOtp(phone: string, purpose: "LOGIN" | "PASSWORD_RESET"): {
 
 export type VerifyResult =
   | { success: true; error?: undefined; reason?: undefined }
-  | { success: false; reason: "NOT_FOUND" | "EXPIRED" | "TOO_MANY_ATTEMPTS" | "INVALID" | "CONCURRENT_CONFLICT"; error: string };
-
-export type VerifyResultThenable = VerifyResult & PromiseLike<VerifyResult>;
+  | {
+      success: false;
+      reason: "NOT_FOUND" | "EXPIRED" | "TOO_MANY_ATTEMPTS" | "INVALID" | "CONCURRENT_CONFLICT" | "REDIS_UNAVAILABLE";
+      error: string;
+    };
 
 /**
- * Securely verifies an OTP using constant-time comparison.
- * Enforces:
- * 1. Single use: consumes/deletes code immediately upon match.
- * 2. Attempt limits: invalidates after MAX_OTP_ATTEMPTS.
- * 3. Expiration: rejects and deletes expired codes.
- * 4. Safe concurrent verification: rejects concurrent duplicate attempts on same OTP.
- * 5. Returns a result that can be used both synchronously and with `await`.
+ * In-memory OTP verification for local development and unit tests when Redis is not available.
  */
-export function verifyOtp(
+export function verifyOtpInMemory(
   phone: string,
   userInputCode: string,
   purpose: "LOGIN" | "PASSWORD_RESET"
-): VerifyResultThenable {
+): VerifyResult {
   const cleanPhone = normalizePhoneNumber(phone);
   const key = `${purpose}:${cleanPhone}`;
 
-  // 1. Concurrency conflict check
   if (verifyingKeys.has(key)) {
-    const conflictResult: VerifyResult = {
+    return {
       success: false,
       reason: "CONCURRENT_CONFLICT",
       error: "درخواست تایید همزمان در حال پردازش است. لطفاً چند لحظه دیگر تلاش فرمایید."
     };
-    return Object.assign(conflictResult, {
-      then<TResult1 = VerifyResult, TResult2 = never>(
-        onfulfilled?: ((value: VerifyResult) => TResult1 | PromiseLike<TResult1>) | null,
-        onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
-      ) {
-        return Promise.resolve(conflictResult).then(onfulfilled, onrejected);
-      }
-    });
   }
 
   verifyingKeys.add(key);
-
-  let syncResult: VerifyResult;
   try {
     const record = otpStore.get(key);
-
     if (!record) {
-      syncResult = {
+      return {
         success: false,
         reason: "NOT_FOUND",
         error: "کد تایید یافت نشد یا منقضی شده است. لطفاً مجدداً درخواست ارسال کد نمایید."
       };
-    } else {
-      const now = Date.now();
-      if (now > record.expiresAt) {
-        otpStore.delete(key);
-        try {
-          const redis = getRedisClient();
-          if (redis) redis.del(getRedisOtpKey(purpose, cleanPhone)).catch(() => {});
-        } catch {}
-
-        syncResult = {
-          success: false,
-          reason: "EXPIRED",
-          error: "کد تایید منقضی شده است. لطفاً مجدداً درخواست ارسال کد نمایید."
-        };
-      } else {
-        record.attempts += 1;
-        if (record.attempts > MAX_OTP_ATTEMPTS) {
-          otpStore.delete(key);
-          try {
-            const redis = getRedisClient();
-            if (redis) redis.del(getRedisOtpKey(purpose, cleanPhone)).catch(() => {});
-          } catch {}
-
-          syncResult = {
-            success: false,
-            reason: "TOO_MANY_ATTEMPTS",
-            error: "تعداد دفعات تلاش اشتباه بیش از حد مجاز است. کد باطل شد. لطفاً مجدداً درخواست کد نمایید."
-          };
-        } else {
-          const inputTrimmed = String(userInputCode || "").trim();
-          const expectedTrimmed = record.code.trim();
-
-          // Timing-safe constant-time comparison
-          const bufInput = Buffer.from(inputTrimmed);
-          const bufExpected = Buffer.from(expectedTrimmed);
-
-          const isMatch = bufInput.length === bufExpected.length && crypto.timingSafeEqual(bufInput, bufExpected);
-
-          if (!isMatch) {
-            syncResult = {
-              success: false,
-              reason: "INVALID",
-              error: `کد تایید وارد شده نادرست است. (${MAX_OTP_ATTEMPTS - record.attempts} تلاش باقی‌مانده)`
-            };
-          } else {
-            // Verification succeeded - consume and delete OTP immediately (single-use guarantee)
-            otpStore.delete(key);
-            clearCooldown(cleanPhone, purpose);
-            try {
-              const redis = getRedisClient();
-              if (redis) redis.del(getRedisOtpKey(purpose, cleanPhone)).catch(() => {});
-            } catch {}
-
-            syncResult = { success: true };
-          }
-        }
-      }
     }
+
+    const now = Date.now();
+    if (now > record.expiresAt) {
+      otpStore.delete(key);
+      return {
+        success: false,
+        reason: "EXPIRED",
+        error: "کد تایید منقضی شده است. لطفاً مجدداً درخواست ارسال کد نمایید."
+      };
+    }
+
+    record.attempts += 1;
+    if (record.attempts > MAX_OTP_ATTEMPTS) {
+      otpStore.delete(key);
+      return {
+        success: false,
+        reason: "TOO_MANY_ATTEMPTS",
+        error: "تعداد دفعات تلاش اشتباه بیش از حد مجاز است. کد باطل شد. لطفاً مجدداً درخواست کد نمایید."
+      };
+    }
+
+    const inputTrimmed = String(userInputCode || "").trim();
+    const expectedTrimmed = record.code.trim();
+
+    const bufInput = Buffer.from(inputTrimmed);
+    const bufExpected = Buffer.from(expectedTrimmed);
+    const isMatch = bufInput.length === bufExpected.length && crypto.timingSafeEqual(bufInput, bufExpected);
+
+    if (!isMatch) {
+      const remaining = MAX_OTP_ATTEMPTS - record.attempts;
+      return {
+        success: false,
+        reason: "INVALID",
+        error: `کد تایید وارد شده نادرست است. (${remaining} تلاش باقی‌مانده)`
+      };
+    }
+
+    // Success: consume and delete OTP immediately (single-use)
+    otpStore.delete(key);
+    phoneLastSentAt.delete(key);
+    return { success: true };
   } finally {
     verifyingKeys.delete(key);
   }
-
-  // Return thenable object that works both synchronously (`res.success`) and asynchronously (`await verifyOtp(...)`)
-  return Object.assign(syncResult, {
-    then<TResult1 = VerifyResult, TResult2 = never>(
-      onfulfilled?: ((value: VerifyResult) => TResult1 | PromiseLike<TResult1>) | null,
-      onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
-    ) {
-      const redis = getRedisClient();
-      if (redis && typeof redis.eval === "function") {
-        return verifyOtpDistributed(cleanPhone, userInputCode, purpose).then(onfulfilled, onrejected);
-      }
-      return Promise.resolve(syncResult).then(onfulfilled, onrejected);
-    }
-  });
 }
 
 /**
- * Distributed atomic OTP verification across multiple application instances via Redis Lua.
- * Enforces atomic existence check, expiration check, attempt threshold, timing-safe matching,
- * and single-use immediate consumption (DEL) to eliminate race conditions and replay attacks.
+ * Distributed atomic OTP verification via Redis Lua script.
  */
 export async function verifyOtpDistributed(
   phone: string,
@@ -1041,54 +1100,104 @@ export async function verifyOtpDistributed(
   const inputCode = String(userInputCode || "").trim();
   const redis = getRedisClient();
 
-  if (redis && typeof redis.eval === "function") {
-    try {
-      const redisOtpKey = getRedisOtpKey(purpose, cleanPhone);
-      const redisCooldownKey = getRedisCooldownKey(purpose, cleanPhone);
-      const now = Date.now();
-
-      const res = await redis.eval(
-        VERIFY_OTP_ATOMIC_LUA,
-        2,
-        redisOtpKey,
-        redisCooldownKey,
-        inputCode,
-        now,
-        MAX_OTP_ATTEMPTS
-      );
-
-      if (Array.isArray(res)) {
-        const success = Number(res[0]) === 1;
-        const reason = String(res[1]) as any;
-        const error = String(res[2]);
-
-        if (success) {
-          otpStore.delete(`${purpose}:${cleanPhone}`);
-          phoneLastSentAt.delete(`${purpose}:${cleanPhone}`);
-          return { success: true };
-        }
-
-        return { success: false, reason, error };
-      }
-    } catch (err: any) {
-      console.warn("⚠️ [Redis Distributed OTP] Redis eval failed, falling back to local verification:", err.message);
+  if (!redis || typeof redis.eval !== "function") {
+    if (isProductionEnvironment()) {
+      return {
+        success: false,
+        reason: "REDIS_UNAVAILABLE",
+        error: "سرویس اعتبارسنجی به دلیل عدم دسترسی به زیرساخت توزیع‌شده موقتاً در دسترس نیست."
+      };
     }
+    return verifyOtpInMemory(cleanPhone, inputCode, purpose);
   }
 
-  // Fallback to local verification
-  return verifyOtp(cleanPhone, userInputCode, purpose);
+  try {
+    const redisOtpKey = getRedisOtpKey(purpose, cleanPhone);
+    const redisCooldownKey = getRedisCooldownKey(purpose, cleanPhone);
+    const now = Date.now();
+
+    const res = await redis.eval(
+      VERIFY_OTP_ATOMIC_LUA,
+      2,
+      redisOtpKey,
+      redisCooldownKey,
+      inputCode,
+      now,
+      MAX_OTP_ATTEMPTS
+    );
+
+    if (Array.isArray(res)) {
+      const success = Number(res[0]) === 1;
+      const reason = String(res[1]) as any;
+      const error = String(res[2]);
+
+      if (success) {
+        otpStore.delete(`${purpose}:${cleanPhone}`);
+        phoneLastSentAt.delete(`${purpose}:${cleanPhone}`);
+        return { success: true };
+      }
+
+      return { success: false, reason, error };
+    }
+
+    if (isProductionEnvironment()) {
+      return {
+        success: false,
+        reason: "REDIS_UNAVAILABLE",
+        error: "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد مجدداً تلاش فرمایید."
+      };
+    }
+    return verifyOtpInMemory(cleanPhone, inputCode, purpose);
+  } catch (err: any) {
+    console.error("❌ [Redis Distributed OTP] Redis eval failed:", err.message);
+    if (isProductionEnvironment()) {
+      return {
+        success: false,
+        reason: "REDIS_UNAVAILABLE",
+        error: "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد مجدداً تلاش فرمایید."
+      };
+    }
+    return verifyOtpInMemory(cleanPhone, inputCode, purpose);
+  }
 }
 
 /**
- * Asynchronous verification that checks Redis if record is not present in local memory.
+ * Unified OTP verification function.
+ * - Standard async function with zero synchronous side effects.
+ * - In production: fails closed if Redis is unavailable.
+ * - In development/test: uses Redis when active, falls back to in-memory when not.
+ * - Single-use code consumption and deletion is atomic and executed exactly once.
  */
-export async function verifyOtpAsync(
+export async function verifyOtp(
   phone: string,
   userInputCode: string,
   purpose: "LOGIN" | "PASSWORD_RESET"
 ): Promise<VerifyResult> {
-  return verifyOtpDistributed(phone, userInputCode, purpose);
+  const cleanPhone = normalizePhoneNumber(phone);
+  const inputCode = String(userInputCode || "").trim();
+  const redis = getRedisClient();
+
+  if (isProductionEnvironment()) {
+    if (!redis || typeof redis.eval !== "function") {
+      console.error("❌ [OTP Security] Redis unavailable in production for verifyOtp. Failing closed.");
+      return {
+        success: false,
+        reason: "REDIS_UNAVAILABLE",
+        error: "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد مجدداً تلاش فرمایید."
+      };
+    }
+    return await verifyOtpDistributed(cleanPhone, inputCode, purpose);
+  }
+
+  // Non-production (development / test)
+  if (redis && typeof redis.eval === "function") {
+    return await verifyOtpDistributed(cleanPhone, inputCode, purpose);
+  }
+
+  return verifyOtpInMemory(cleanPhone, inputCode, purpose);
 }
+
+export const verifyOtpAsync = verifyOtp;
 
 /**
  * Clears any active OTP for a phone number

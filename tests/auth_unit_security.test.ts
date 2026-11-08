@@ -110,50 +110,50 @@ describe("Authentication & Security Unit Tests", () => {
       assert.ok(expiresIn > 0, "Expiry window must be positive");
     });
 
-    it("rejects incorrect OTP codes with remaining attempts tracking", () => {
+    it("rejects incorrect OTP codes with remaining attempts tracking", async () => {
       const { code } = createOtp(testPhone, "LOGIN");
       const wrongCode = code === "999999" ? "888888" : "999999";
-      const result = verifyOtp(testPhone, wrongCode, "LOGIN");
+      const result = await verifyOtp(testPhone, wrongCode, "LOGIN");
       assert.equal(result.success, false);
       assert.equal(result.reason, "INVALID");
       assert.ok(result.error.includes("نادرست است"), "Error message must indicate invalid code");
     });
 
-    it("invalidates OTP after exceeding maximum allowed attempts (Brute-Force Protection)", () => {
+    it("invalidates OTP after exceeding maximum allowed attempts (Brute-Force Protection)", async () => {
       const { code } = createOtp(testPhone, "LOGIN");
       const wrongCode = code === "111111" ? "222222" : "111111";
 
       // Attempt wrong code up to MAX_OTP_ATTEMPTS
       for (let i = 0; i < MAX_OTP_ATTEMPTS; i++) {
-        verifyOtp(testPhone, wrongCode, "LOGIN");
+        await verifyOtp(testPhone, wrongCode, "LOGIN");
       }
 
       // Next attempt must trigger TOO_MANY_ATTEMPTS and code invalidation
-      const result = verifyOtp(testPhone, wrongCode, "LOGIN");
+      const result = await verifyOtp(testPhone, wrongCode, "LOGIN");
       assert.equal(result.success, false);
       assert.equal(result.reason, "TOO_MANY_ATTEMPTS");
 
       // Even correct code should now be rejected as code was deleted
-      const attemptAfterLockout = verifyOtp(testPhone, code, "LOGIN");
+      const attemptAfterLockout = await verifyOtp(testPhone, code, "LOGIN");
       assert.equal(attemptAfterLockout.success, false);
       assert.equal(attemptAfterLockout.reason, "NOT_FOUND");
     });
 
-    it("enforces single-use OTP: consumption immediately deletes the code", () => {
+    it("enforces single-use OTP: consumption immediately deletes the code", async () => {
       const { code } = createOtp(testPhone, "LOGIN");
-      const firstAttempt = verifyOtp(testPhone, code, "LOGIN");
+      const firstAttempt = await verifyOtp(testPhone, code, "LOGIN");
       assert.equal(firstAttempt.success, true, "First verification must succeed");
 
       // Replay attack attempt
-      const replayAttempt = verifyOtp(testPhone, code, "LOGIN");
+      const replayAttempt = await verifyOtp(testPhone, code, "LOGIN");
       assert.equal(replayAttempt.success, false, "Replay verification must be rejected");
       assert.equal(replayAttempt.reason, "NOT_FOUND");
     });
 
-    it("isolates OTP codes between LOGIN and PASSWORD_RESET purposes", () => {
+    it("isolates OTP codes between LOGIN and PASSWORD_RESET purposes", async () => {
       const loginOtp = createOtp(testPhone, "LOGIN");
       // Trying to use LOGIN OTP for PASSWORD_RESET must fail
-      const resetAttempt = verifyOtp(testPhone, loginOtp.code, "PASSWORD_RESET");
+      const resetAttempt = await verifyOtp(testPhone, loginOtp.code, "PASSWORD_RESET");
       assert.equal(resetAttempt.success, false);
       assert.equal(resetAttempt.reason, "NOT_FOUND");
     });

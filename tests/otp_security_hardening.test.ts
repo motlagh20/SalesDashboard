@@ -1,5 +1,6 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import http from "http";
 import {
   createOtp,
   verifyOtp,
@@ -18,43 +19,108 @@ import {
   VERIFY_IP_MAX_ATTEMPTS
 } from "../server/otp";
 import { setSmsSendOverrideForTesting, sendOtpSms } from "../server/sms";
+import { createExpressApp } from "../server";
 
-const BASE_URL = process.env.TEST_API_URL || "http://127.0.0.1:3000";
-
-async function apiRequest(endpoint: string, options: {
-  method?: string;
-  body?: any;
-  headers?: Record<string, string>;
-} = {}): Promise<{ status: number; headers: Headers; data: any }> {
-  const { method = "POST", body, headers = {} } = options;
-  const reqHeaders: Record<string, string> = {
-    "Accept": "application/json",
-    "Content-Type": "application/json",
-    ...headers
-  };
-
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    method,
-    headers: reqHeaders,
-    body: body !== undefined ? JSON.stringify(body) : undefined
-  });
-
-  let data: any = null;
-  const contentType = res.headers.get("content-type");
-  if (contentType && contentType.includes("application/json")) {
-    try {
-      data = await res.json();
-    } catch {
-      data = null;
-    }
-  } else {
-    data = await res.text();
-  }
-
-  return { status: res.status, headers: res.headers, data };
-}
+import { setDbPoolForTesting, setDbHealthyForTesting } from "../server/database";
+import { setAuthDbPoolOverrideForTesting } from "../server/auth";
 
 describe("OTP Authentication & Password Recovery Security Hardening Tests", () => {
+  let server: http.Server;
+  let baseUrl: string;
+
+  const mockDbPool: any = {
+    query: async (sql: string, values: any[] = []) => {
+      const cleanSql = sql.trim().replace(/\s+/g, " ");
+      if (/SELECT\s+1/i.test(cleanSql)) {
+        return [[{ 1: 1 }], []];
+      }
+      if (/SELECT\s+\*\s+FROM\s+app_users\s+WHERE/i.test(cleanSql)) {
+        const key = values[0];
+        if (key === "09120000000" || key === "09120000001" || key === "09121112233") {
+          return [[{
+            id: "usr-hardened-1",
+            username: "hardened_user",
+            phoneNumber: key,
+            role: "SYSTEM_ADMIN",
+            fullName: "کاربر تست",
+            password: "$2b$10$PsDANqVXkW9r/PZuHcEKzOQBvPNYbYeFU/D4WMt3fBE0mH2U4x33a",
+            isEnabled: 1,
+            mustChangePassword: 0
+          }], []];
+        }
+        return [[], []];
+      }
+      return [[], []];
+    },
+    getConnection: async () => ({
+      query: async (sql: string, values: any[] = []) => mockDbPool.query(sql, values),
+      beginTransaction: async () => {},
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {}
+    })
+  };
+
+  before(async () => {
+    process.env.JWT_SECRET = "security-hardening-test-jwt-secret-minimum-32-chars";
+    setDbPoolForTesting(mockDbPool);
+    setAuthDbPoolOverrideForTesting(mockDbPool);
+    setDbHealthyForTesting(true);
+
+    const app = await createExpressApp({ skipDatabaseBootstrap: true });
+    server = http.createServer(app);
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => {
+        const address = server.address() as any;
+        baseUrl = `http://127.0.0.1:${address.port}`;
+        resolve();
+      });
+    });
+  });
+
+  after(async () => {
+    if (server) {
+      if (typeof (server as any).closeAllConnections === "function") {
+        (server as any).closeAllConnections();
+      }
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  async function apiRequest(endpoint: string, options: {
+    method?: string;
+    body?: any;
+    headers?: Record<string, string>;
+  } = {}): Promise<{ status: number; headers: Headers; data: any }> {
+    const { method = "POST", body, headers = {} } = options;
+    const reqHeaders: Record<string, string> = {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+      "Connection": "close",
+      ...headers
+    };
+
+    const res = await fetch(`${baseUrl}${endpoint}`, {
+      method,
+      headers: reqHeaders,
+      body: body !== undefined ? JSON.stringify(body) : undefined
+    });
+
+    let data: any = null;
+    const contentType = res.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+    } else {
+      data = await res.text();
+    }
+
+    return { status: res.status, headers: res.headers, data };
+  }
+
   beforeEach(() => {
     resetOtpRateLimitsForTesting();
     setSmsSendOverrideForTesting(null);

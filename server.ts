@@ -28,6 +28,7 @@ import {
   hasRole,
   extractToken,
   assertJwtSecretConfiguration,
+  ensureRuntimeJwtSecret,
   buildOrderQueryForUser,
   checkOrderOwnership,
   normalizeRole,
@@ -2812,6 +2813,9 @@ function compactItemsJson(itemsInput: any): string | null {
       // Requirement 1 & 3: Atomic check and record of rate limits and resend cooldowns (Lua ZSET)
       const rateCheck = await checkAndRecordOtpRequest(cleanPhone, clientIp, "LOGIN");
       if (!rateCheck.allowed) {
+        if (rateCheck.isServiceUnavailable) {
+          return sendApiError(res, 503, rateCheck.error || "سرویس ارسال کد تایید موقتاً در دسترس نیست.");
+        }
         if (rateCheck.retryAfter) {
           res.setHeader("Retry-After", String(rateCheck.retryAfter));
         }
@@ -2882,6 +2886,9 @@ function compactItemsJson(itemsInput: any): string | null {
       // Requirement 3: Enforce verification rate limit per source IP
       const ipVerifyCheck = await checkVerificationRateLimit(clientIp);
       if (!ipVerifyCheck.allowed) {
+        if (ipVerifyCheck.isServiceUnavailable) {
+          return sendApiError(res, 503, ipVerifyCheck.error || "سرویس اعتبارسنجی موقتاً در دسترس نیست.");
+        }
         return sendApiError(res, 429, ipVerifyCheck.error || "تعداد دفعات تلاش اشتباه بیش از حد مجاز است.");
       }
 
@@ -2907,6 +2914,9 @@ function compactItemsJson(itemsInput: any): string | null {
       // Requirement 2 & 7: Strict verification (purpose='LOGIN', expiry, single-use, max attempts, safe concurrency)
       const verifyResult = await verifyOtp(targetPhone, cleanCode, "LOGIN");
       if (!verifyResult.success) {
+        if (verifyResult.reason === "REDIS_UNAVAILABLE") {
+          return sendApiError(res, 503, verifyResult.error);
+        }
         await recordFailedVerification(clientIp);
         return sendApiError(res, 400, verifyResult.error);
       }
@@ -3019,6 +3029,9 @@ function compactItemsJson(itemsInput: any): string | null {
       // Requirement 1 & 3: Atomic check and record of rate limits and resend cooldowns (Lua ZSET)
       const rateCheck = await checkAndRecordOtpRequest(cleanPhone, clientIp, "PASSWORD_RESET");
       if (!rateCheck.allowed) {
+        if (rateCheck.isServiceUnavailable) {
+          return sendApiError(res, 503, rateCheck.error || "سرویس ارسال کد تایید موقتاً در دسترس نیست.");
+        }
         if (rateCheck.retryAfter) {
           res.setHeader("Retry-After", String(rateCheck.retryAfter));
         }
@@ -3090,6 +3103,9 @@ function compactItemsJson(itemsInput: any): string | null {
       // Requirement 3: Enforce verification rate limit per source IP
       const ipVerifyCheck = await checkVerificationRateLimit(clientIp);
       if (!ipVerifyCheck.allowed) {
+        if (ipVerifyCheck.isServiceUnavailable) {
+          return sendApiError(res, 503, ipVerifyCheck.error || "سرویس اعتبارسنجی موقتاً در دسترس نیست.");
+        }
         return sendApiError(res, 429, ipVerifyCheck.error || "تعداد دفعات تلاش اشتباه بیش از حد مجاز است.");
       }
 
@@ -3111,14 +3127,6 @@ function compactItemsJson(itemsInput: any): string | null {
         return sendApiError(res, 403, "حساب کاربری غیرفعال است.");
       }
 
-      const targetPhone = user.phoneNumber || cleanPhone;
-      // Requirement 2 & 7: Strict verification (purpose='PASSWORD_RESET')
-      const verifyResult = await verifyOtp(targetPhone, cleanCode, "PASSWORD_RESET");
-      if (!verifyResult.success) {
-        await recordFailedVerification(clientIp);
-        return sendApiError(res, 400, verifyResult.error);
-      }
-
       const trimmedPass = safeNewPassword.trim();
       if (trimmedPass.length < 6) {
         return sendApiError(res, 400, "رمز عبور جدید باید حداقل ۶ کاراکتر باشد.");
@@ -3126,6 +3134,17 @@ function compactItemsJson(itemsInput: any): string | null {
 
       if (isDefaultPassword(trimmedPass)) {
         return sendApiError(res, 400, "استفاده از کلمه عبور پیش‌فرض (مانند 123456) مجاز نیست. لطفاً یک رمز عبور امن و اختصاصی انتخاب فرمایید.");
+      }
+
+      const targetPhone = user.phoneNumber || cleanPhone;
+      // Requirement 2 & 7: Strict verification (purpose='PASSWORD_RESET')
+      const verifyResult = await verifyOtp(targetPhone, cleanCode, "PASSWORD_RESET");
+      if (!verifyResult.success) {
+        if (verifyResult.reason === "REDIS_UNAVAILABLE") {
+          return sendApiError(res, 503, verifyResult.error);
+        }
+        await recordFailedVerification(clientIp);
+        return sendApiError(res, 400, verifyResult.error);
       }
 
       const hashedPassword = await hashPassword(trimmedPass);
@@ -4399,6 +4418,11 @@ function compactItemsJson(itemsInput: any): string | null {
   });
 
 
+  // Cloud Run and container health check probes
+  app.get(["/healthz", "/api/health"], (req, res) => {
+    res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
   // 404 handler for unmatched /api routes
   app.all("/api/*", (req, res) => {
     return sendApiError(res, 404, "API endpoint not found");
@@ -4411,12 +4435,31 @@ function compactItemsJson(itemsInput: any): string | null {
 }
 
 export async function startServer() {
-  const PORT = process.env.PORT && process.env.PORT !== "8080" ? parseInt(process.env.PORT, 10) : 3000;
+  // Ensure a cryptographically secure JWT secret is initialized if unset
+  ensureRuntimeJwtSecret();
+
+  const isProduction =
+    process.env.NODE_ENV === "production" ||
+    isProductionEnvironment() ||
+    (typeof __filename !== "undefined" && (__filename.includes("dist") || __filename.endsWith(".cjs")));
+
+  // On Cloud Run production, container must listen on process.env.PORT (defaults to 8080).
+  // In AI Studio development environment, internal nginx proxies from 8080 to 3000, so dev server binds to 3000.
+  let PORT = 3000;
+  if (isProduction) {
+    PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+  } else if (process.env.DEFAULT_APP_PORT) {
+    PORT = parseInt(process.env.DEFAULT_APP_PORT, 10);
+  } else if (process.env.PORT && process.env.PORT !== "8080") {
+    PORT = parseInt(process.env.PORT, 10);
+  } else {
+    PORT = 3000;
+  }
 
   const app = await createExpressApp();
   const httpServer = http.createServer(app);
 
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProduction) {
     console.log("Starting in DEVELOPMENT mode with Vite dev middleware...");
     const vite = await createViteServer({
       server: {
@@ -4428,10 +4471,20 @@ export async function startServer() {
     app.use(vite.middlewares);
   } else {
     console.log("Starting in PRODUCTION mode...");
-    const distPath = path.join(process.cwd(), 'dist');
+    const possibleDistPaths = [
+      path.join(process.cwd(), 'dist'),
+      typeof __dirname !== "undefined" ? __dirname : "",
+      typeof __dirname !== "undefined" ? path.resolve(__dirname, 'dist') : ""
+    ].filter(Boolean);
+    const distPath = possibleDistPaths.find(p => fs.existsSync(path.join(p, 'index.html'))) || path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(200).send("<!DOCTYPE html><html><head><title>SalesDashboard</title></head><body><div id='root'></div></body></html>");
+      }
     });
   }
 
