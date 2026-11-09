@@ -813,7 +813,7 @@ export function recordOtpRequest(
 /**
  * Checks verification attempt rate limits per client IP (prevents distributed brute-forcing)
  */
-export function checkVerificationRateLimit(ip: string): RateLimitResultThenable {
+export function checkVerificationRateLimit(ip: string): Promise<RateLimitResult> & RateLimitResult {
   const cleanIp = String(ip || "127.0.0.1").trim();
   const now = Date.now();
   const windowStart = now - RATE_LIMIT_WINDOW_MS;
@@ -830,71 +830,69 @@ export function checkVerificationRateLimit(ip: string): RateLimitResultThenable 
     };
   }
 
-  return Object.assign(syncResult, {
-    then<TResult1 = RateLimitResult, TResult2 = never>(
-      onfulfilled?: ((value: RateLimitResult) => TResult1 | PromiseLike<TResult1>) | null,
-      onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
-    ) {
-      const evaluateAsync = async (): Promise<RateLimitResult> => {
-        const redis = getRedisClient();
-        if (isProductionEnvironment()) {
-          if (!redis || typeof redis.eval !== "function") {
-            console.error("❌ [OTP Security] Redis unavailable for IP verification check in production. Failing closed.");
+  const asyncFn = async (): Promise<RateLimitResult> => {
+    const redis = getRedisClient();
+    if (isProductionEnvironment()) {
+      if (!redis || typeof redis.eval !== "function") {
+        console.error("❌ [OTP Security] Redis unavailable for IP verification check in production. Failing closed.");
+        return {
+          allowed: false,
+          isServiceUnavailable: true,
+          error: "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد تلاش فرمایید."
+        };
+      }
+    }
+
+    if (redis && typeof redis.eval === "function") {
+      try {
+        const redisVerifyKey = getRedisVerifyRateKey(cleanIp);
+        const res = await redis.eval(
+          CHECK_VERIFY_RATE_LUA,
+          1,
+          redisVerifyKey,
+          now,
+          RATE_LIMIT_WINDOW_MS,
+          VERIFY_IP_MAX_ATTEMPTS
+        );
+
+        if (Array.isArray(res)) {
+          const allowed = Number(res[0]) === 1;
+          const retryAfter = Number(res[1]) || 0;
+          if (!allowed) {
             return {
               allowed: false,
-              isServiceUnavailable: true,
-              error: "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد تلاش فرمایید."
+              retryAfter,
+              error: "تعداد دفعات تلاش اشتباه بیش از حد مجاز است. لطفاً پس از ۱۵ دقیقه مجدداً تلاش فرمایید."
             };
           }
+          return { allowed: true };
         }
-
-        if (redis && typeof redis.eval === "function") {
-          try {
-            const redisVerifyKey = getRedisVerifyRateKey(cleanIp);
-            const res = await redis.eval(
-              CHECK_VERIFY_RATE_LUA,
-              1,
-              redisVerifyKey,
-              now,
-              RATE_LIMIT_WINDOW_MS,
-              VERIFY_IP_MAX_ATTEMPTS
-            );
-
-            if (Array.isArray(res)) {
-              const allowed = Number(res[0]) === 1;
-              const retryAfter = Number(res[1]) || 0;
-              if (!allowed) {
-                return {
-                  allowed: false,
-                  retryAfter,
-                  error: "تعداد دفعات تلاش اشتباه بیش از حد مجاز است. لطفاً پس از ۱۵ دقیقه مجدداً تلاش فرمایید."
-                };
-              }
-              return { allowed: true };
-            }
-          } catch (err: any) {
-            if (isProductionEnvironment()) {
-              return {
-                allowed: false,
-                isServiceUnavailable: true,
-                error: "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد تلاش فرمایید."
-              };
-            }
-          }
+      } catch (err: any) {
+        if (isProductionEnvironment()) {
+          console.error("❌ [OTP Security] Redis check failed in production:", err.message);
+          return {
+            allowed: false,
+            isServiceUnavailable: true,
+            error: "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد تلاش فرمایید."
+          };
         }
-
-        return syncResult;
-      };
-
-      return evaluateAsync().then(onfulfilled, onrejected);
+      }
     }
-  });
+
+    return syncResult;
+  };
+
+  const p = asyncFn();
+  return Object.assign(p, syncResult);
 }
 
 /**
- * Records a failed verification attempt against client IP (atomic in Redis with fallback)
+ * Records a failed verification attempt against client IP (atomic in Redis with fallback).
+ * In production, fails closed if Redis is unavailable rather than silently bypassing quotas.
  */
-export function recordFailedVerification(ip: string): Promise<void> & { recorded?: boolean } {
+export function recordFailedVerification(
+  ip: string
+): Promise<{ recorded: boolean; count?: number; isServiceUnavailable?: boolean }> & { recorded: boolean } {
   const cleanIp = String(ip || "127.0.0.1").trim();
   const now = Date.now();
   const windowStart = now - RATE_LIMIT_WINDOW_MS;
@@ -904,13 +902,20 @@ export function recordFailedVerification(ip: string): Promise<void> & { recorded
   failedAttempts.push(now);
   ipFailedVerificationTimestamps.set(cleanIp, failedAttempts);
 
-  const asyncUpdate = async (): Promise<void> => {
-    try {
-      const redis = getRedisClient();
-      if (redis) {
-        const redisVerifyKey = getRedisVerifyRateKey(cleanIp);
+  const asyncUpdate = async (): Promise<{ recorded: boolean; count?: number; isServiceUnavailable?: boolean }> => {
+    const redis = getRedisClient();
+    if (isProductionEnvironment()) {
+      if (!redis || typeof redis.eval !== "function") {
+        console.error("❌ [OTP Security] Redis unavailable for recording failed verification in production. Failing closed.");
+        return { recorded: false, isServiceUnavailable: true };
+      }
+    }
+
+    if (redis) {
+      const redisVerifyKey = getRedisVerifyRateKey(cleanIp);
+      try {
         if (typeof redis.eval === "function") {
-          await redis.eval(
+          const res = await redis.eval(
             RECORD_FAILED_VERIFY_LUA,
             1,
             redisVerifyKey,
@@ -919,13 +924,23 @@ export function recordFailedVerification(ip: string): Promise<void> & { recorded
             VERIFY_IP_MAX_ATTEMPTS,
             memberId
           );
+          const count = Array.isArray(res) ? Number(res[0]) : undefined;
+          return { recorded: true, count };
         } else {
           const windowSec = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000);
-          await redis.incr(redisVerifyKey);
+          const count = await redis.incr(redisVerifyKey);
           await redis.expire(redisVerifyKey, windowSec);
+          return { recorded: true, count };
+        }
+      } catch (err: any) {
+        if (isProductionEnvironment()) {
+          console.error("❌ [OTP Security] Redis recording failed verification threw in production:", err.message);
+          return { recorded: false, isServiceUnavailable: true };
         }
       }
-    } catch {}
+    }
+
+    return { recorded: true, count: failedAttempts.length };
   };
 
   const p = asyncUpdate();

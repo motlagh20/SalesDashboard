@@ -1,0 +1,50 @@
+name: CI & Security Verification
+
+on:
+  push:
+    branches:
+      - google-ai-studio-updated
+  pull_request:
+    branches:
+      - google-ai-studio-updated
+
+jobs:
+  build-and-test:
+    name: Build & Security Tests
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun Runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies with Bun lockfile
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript & Lint Verification
+        run: npm run lint
+
+      - name: Production Application Build
+        run: npm run build
+
+      - name: Run All Automated Unit, Integration & Security Tests
+        env:
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          JWT_SECRET: "ci-automated-test-jwt-secret-minimum-32-chars-high-entropy-2026!"
+        run: npm test

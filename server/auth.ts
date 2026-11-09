@@ -149,41 +149,6 @@ export function getJwtSecret(): string {
 }
 
 /**
- * Ensures that a cryptographically secure JWT secret is available in process.env.
- * If JWT_SECRET is unset in production or development, creates a 256-bit cryptographically
- * secure random key so that Cloud Run containers and production deployments boot up reliably
- * without crashing, while satisfying all entropy and character diversity requirements.
- */
-export function ensureRuntimeJwtSecret(): string {
-  if (process.env.JWT_SECRET && process.env.JWT_SECRET.trim().length >= 32) {
-    return process.env.JWT_SECRET.trim();
-  }
-
-  // Look for existing runtime secret file
-  const runtimeSecretPath = path.resolve(process.cwd(), ".runtime_jwt_secret");
-  try {
-    if (fs.existsSync(runtimeSecretPath)) {
-      const savedSecret = fs.readFileSync(runtimeSecretPath, "utf-8").trim();
-      if (savedSecret.length >= 32) {
-        process.env.JWT_SECRET = savedSecret;
-        return savedSecret;
-      }
-    }
-  } catch {}
-
-  // Generate a cryptographically secure 256-bit random key (64 hex characters)
-  const generated = crypto.randomBytes(32).toString("hex");
-  process.env.JWT_SECRET = generated;
-
-  try {
-    fs.writeFileSync(runtimeSecretPath, generated, { mode: 0o600 });
-  } catch {}
-
-  console.log("ℹ️ [Auth Security] Initialized secure runtime JWT secret (256-bit entropy).");
-  return generated;
-}
-
-/**
  * Asserts that the JWT secret is properly configured.
  * Called at server startup to prevent starting in an insecure state.
  */

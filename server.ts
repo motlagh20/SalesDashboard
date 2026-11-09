@@ -28,7 +28,6 @@ import {
   hasRole,
   extractToken,
   assertJwtSecretConfiguration,
-  ensureRuntimeJwtSecret,
   buildOrderQueryForUser,
   checkOrderOwnership,
   normalizeRole,
@@ -2901,7 +2900,10 @@ function compactItemsJson(itemsInput: any): string | null {
 
       // Requirement 4: Prevent account enumeration with generic error
       if (matched.length === 0) {
-        await recordFailedVerification(clientIp);
+        const recordRes = await recordFailedVerification(clientIp);
+        if (recordRes.isServiceUnavailable) {
+          return sendApiError(res, 503, "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد تلاش فرمایید.");
+        }
         return sendApiError(res, 400, "کد تایید وارد شده نادرست است یا منقضی شده است.");
       }
 
@@ -2917,7 +2919,10 @@ function compactItemsJson(itemsInput: any): string | null {
         if (verifyResult.reason === "REDIS_UNAVAILABLE") {
           return sendApiError(res, 503, verifyResult.error);
         }
-        await recordFailedVerification(clientIp);
+        const recordRes = await recordFailedVerification(clientIp);
+        if (recordRes.isServiceUnavailable) {
+          return sendApiError(res, 503, "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد تلاش فرمایید.");
+        }
         return sendApiError(res, 400, verifyResult.error);
       }
 
@@ -3118,7 +3123,10 @@ function compactItemsJson(itemsInput: any): string | null {
 
       // Requirement 4: Prevent account enumeration
       if (matched.length === 0) {
-        await recordFailedVerification(clientIp);
+        const recordRes = await recordFailedVerification(clientIp);
+        if (recordRes.isServiceUnavailable) {
+          return sendApiError(res, 503, "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد تلاش فرمایید.");
+        }
         return sendApiError(res, 400, "کد تایید وارد شده نادرست است یا منقضی شده است.");
       }
 
@@ -3143,7 +3151,10 @@ function compactItemsJson(itemsInput: any): string | null {
         if (verifyResult.reason === "REDIS_UNAVAILABLE") {
           return sendApiError(res, 503, verifyResult.error);
         }
-        await recordFailedVerification(clientIp);
+        const recordRes = await recordFailedVerification(clientIp);
+        if (recordRes.isServiceUnavailable) {
+          return sendApiError(res, 503, "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است. لطفاً دقایقی بعد تلاش فرمایید.");
+        }
         return sendApiError(res, 400, verifyResult.error);
       }
 
@@ -4418,9 +4429,76 @@ function compactItemsJson(itemsInput: any): string | null {
   });
 
 
-  // Cloud Run and container health check probes
-  app.get(["/healthz", "/api/health"], (req, res) => {
-    res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+  // Liveness Probe (/healthz): confirms Node.js process is alive and responsive.
+  // Must NOT fail merely because external dependencies (DB/Redis) are degraded.
+  app.get("/healthz", (req, res) => {
+    res.status(200).json({
+      status: "healthy",
+      uptime: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString()
+    });
+  });
+
+  // Readiness Probe (/readyz & /api/health): checks external dependencies.
+  // Returns HTTP 503 if MariaDB or mandatory Redis service is unavailable.
+  // Never exposes credentials, connection strings, stack traces, or internal infrastructure details.
+  app.get(["/readyz", "/api/health"], async (req, res) => {
+    try {
+      const dbHealthy = isDatabaseHealthy();
+
+      const redisClient = getRedisClient();
+      let redisStatus: "up" | "down" | "not_configured" = "not_configured";
+      let redisHealthy = true;
+
+      const requireRedis = Boolean(process.env.REQUIRE_REDIS === "true" || process.env.REDIS_HOST);
+
+      if (requireRedis || redisClient) {
+        if (!redisClient) {
+          redisStatus = "down";
+          redisHealthy = false;
+        } else {
+          try {
+            await Promise.race([
+              redisClient.ping(),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 1000))
+            ]);
+            redisStatus = "up";
+          } catch {
+            redisStatus = "down";
+            redisHealthy = false;
+          }
+        }
+      }
+      const isReady = dbHealthy && (!requireRedis || redisHealthy);
+
+      const checks = {
+        database: dbHealthy ? "up" : "down",
+        redis: redisStatus
+      };
+
+      if (!isReady) {
+        return res.status(503).json({
+          status: "not_ready",
+          checks,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      return res.status(200).json({
+        status: "ready",
+        checks,
+        timestamp: new Date().toISOString()
+      });
+    } catch {
+      return res.status(503).json({
+        status: "not_ready",
+        checks: {
+          database: "down",
+          redis: "down"
+        },
+        timestamp: new Date().toISOString()
+      });
+    }
   });
 
   // 404 handler for unmatched /api routes
@@ -4434,27 +4512,33 @@ function compactItemsJson(itemsInput: any): string | null {
   return app;
 }
 
-export async function startServer() {
-  // Ensure a cryptographically secure JWT secret is initialized if unset
-  ensureRuntimeJwtSecret();
-
-  const isProduction =
-    process.env.NODE_ENV === "production" ||
-    isProductionEnvironment() ||
-    (typeof __filename !== "undefined" && (__filename.includes("dist") || __filename.endsWith(".cjs")));
-
-  // On Cloud Run production, container must listen on process.env.PORT (defaults to 8080).
-  // In AI Studio development environment, internal nginx proxies from 8080 to 3000, so dev server binds to 3000.
-  let PORT = 3000;
-  if (isProduction) {
-    PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
-  } else if (process.env.DEFAULT_APP_PORT) {
-    PORT = parseInt(process.env.DEFAULT_APP_PORT, 10);
-  } else if (process.env.PORT && process.env.PORT !== "8080") {
-    PORT = parseInt(process.env.PORT, 10);
-  } else {
-    PORT = 3000;
+/**
+ * Validates and resolves the TCP server listening port.
+ * Ensures the port is an integer between 1 and 65535.
+ * Defaults to 8080 in production and 3000 in development.
+ */
+export function resolveServerPort(
+  rawPort: any = process.env.PORT,
+  isProduction: boolean = isProductionEnvironment()
+): number {
+  if (rawPort === undefined || rawPort === null || String(rawPort).trim() === "") {
+    return isProduction ? 8080 : 3000;
   }
+  const portStr = String(rawPort).trim();
+  const parsed = Number(portStr);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    throw new Error(`Invalid server port: "${rawPort}". PORT must be a valid integer between 1 and 65535.`);
+  }
+  // In development container, if PORT happens to be set to 8080 by default container env, use 3000 fallback
+  if (!isProduction && parsed === 8080 && !process.env.FORCE_DEV_PORT_8080) {
+    return 3000;
+  }
+  return parsed;
+}
+
+export async function startServer() {
+  const isProduction = isProductionEnvironment();
+  const PORT = resolveServerPort(process.env.PORT, isProduction);
 
   const app = await createExpressApp();
   const httpServer = http.createServer(app);
@@ -4504,6 +4588,7 @@ const isTestRunner =
 if (!isTestRunner) {
   startServer().catch(err => {
     console.error("Fatal startup error:", err);
+    process.exit(1);
   });
 }
 
