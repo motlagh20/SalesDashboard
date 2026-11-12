@@ -580,9 +580,15 @@ function executeQuery(sql: string, values: any[] = []): any {
   }
 
   if (/INSERT\s+INTO\s+app_users/i.test(cleanSql)) {
-    let id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled = 1, password, mustChangePassword = 0;
-    if (values.length === 10) {
-      [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password, mustChangePassword] = values;
+    let id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled = 1, email: string | null = null, password, mustChangePassword = 0;
+    if (values.length === 11) {
+      [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, email, password, mustChangePassword] = values;
+    } else if (values.length === 10) {
+      if (/email/i.test(cleanSql)) {
+        [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, email, password, mustChangePassword] = values;
+      } else {
+        [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password, mustChangePassword] = values;
+      }
     } else if (values.length === 9) {
       if (/mustChangePassword/i.test(cleanSql)) {
         [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, password, mustChangePassword] = values;
@@ -625,6 +631,7 @@ function executeQuery(sql: string, values: any[] = []): any {
       agentCode: agentCode || null,
       shippingCompanyId: shippingCompanyId || null,
       isEnabled: Number(isEnabled ?? 1),
+      email: email || null,
       password: finalPassword,
       mustChangePassword: finalMustChange
     });
@@ -706,6 +713,7 @@ function executeQuery(sql: string, values: any[] = []): any {
         if (/agentCode\s*=\s*\?/i.test(cleanSql)) usr.agentCode = values[idx++] || null;
         if (/shippingCompanyId\s*=\s*\?/i.test(cleanSql)) usr.shippingCompanyId = values[idx++] || null;
         if (/isEnabled\s*=\s*\?/i.test(cleanSql)) usr.isEnabled = Number(values[idx++]);
+        if (/email\s*=\s*\?/i.test(cleanSql)) usr.email = values[idx++] || null;
         if (/password\s*=\s*\?/i.test(cleanSql)) {
           const rawPassword = values[idx++];
           usr.password = isBcryptHash(rawPassword) ? rawPassword : hashPasswordSync(rawPassword);
@@ -1928,6 +1936,7 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "app_users", "agentCode", "VARCHAR(50) NULL");
     await ensureColumnExists(db, "app_users", "shippingCompanyId", "VARCHAR(100) NULL");
     await ensureColumnExists(db, "app_users", "isEnabled", "TINYINT(1) DEFAULT 1");
+    await ensureColumnExists(db, "app_users", "email", "VARCHAR(150) NULL");
     await ensureColumnExists(db, "app_users", "password", `VARCHAR(255) DEFAULT '${DEFAULT_PASSWORD_BCRYPT_HASH}'`);
     await ensureColumnExists(db, "app_users", "mustChangePassword", "TINYINT(1) DEFAULT 0");
     await ensureColumnExists(db, "app_users", "lastSeenAt", "VARCHAR(50) NULL");

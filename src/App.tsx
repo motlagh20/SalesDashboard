@@ -1499,7 +1499,7 @@ export default function App() {
             setActiveRole(user.role);
             if (user.mustChangePassword) {
               setIsChangePasswordModalOpen(true);
-              showToast('⚠️ جهت امنیت حساب کاربری، لطفاً کلمه عبور پیش‌فرض را به رمز اختصاصی تغییر دهید.', 'info');
+              showToast('⚠️ شما با رمز عبور موقت وارد شده‌اید؛ لطفاً کلمه عبور اختصاصی خود را تعیین نمایید.', 'info');
             }
             if (user.role === 'REPRESENTATIVE') {
               const allAgents = agents.length > 0 ? agents : PRESET_AGENTS;
@@ -1636,6 +1636,26 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Forced / Reminder Password Change Banner */}
+      {currentUser?.mustChangePassword && (
+        <div className="bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 px-4 py-2.5 text-xs font-bold shadow-md border-b-2 border-amber-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-right dir-rtl" id="must-change-password-sticky-banner">
+          <div className="flex items-center gap-2">
+            <span className="text-base">⚠️</span>
+            <span>
+              <strong>یادآوری امنیتی:</strong> شما با رمز عبور موقت یا اولیه وارد شده‌اید. لطفاً جهت جلوگیری از دسترسی غیرمجاز و حفظ امنیت، کلمه عبور اختصاصی خود را تعیین نمایید.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsChangePasswordModalOpen(true)}
+            className="bg-slate-950 hover:bg-slate-900 text-amber-300 px-3.5 py-1.5 rounded-xl text-xs font-black shadow-xs transition-colors cursor-pointer shrink-0 flex items-center justify-center gap-1.5"
+          >
+            <Lock className="w-3.5 h-3.5 text-amber-400" />
+            <span>هم‌اکنون رمز عبور را تغییر دهید 🔑</span>
+          </button>
+        </div>
+      )}
 
       {/* Role Play Tester Nav strictly visible for SYSTEM_ADMIN or when sandboxEnabled is active in development */}
       {!isProduction && (currentUser?.role === 'SYSTEM_ADMIN' || (sandboxEnabled && !currentUser)) && (
@@ -1991,7 +2011,7 @@ export default function App() {
 
               {currentUser?.mustChangePassword && (
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-[11px] text-amber-300 leading-relaxed text-right">
-                  ⚠️ جهت امنیت حساب کاربری، کلمه عبور پیش‌فرض (۱۲۳۴۵۶) غیرفعال خواهد شد و تعیین کلمه عبور اختصاصی الزامی است.
+                  ⚠️ جهت امنیت حساب کاربری، شما با رمز عبور موقت یا اولیه وارد شده‌اید و تعیین کلمه عبور اختصاصی الزامی است.
                 </div>
               )}
 

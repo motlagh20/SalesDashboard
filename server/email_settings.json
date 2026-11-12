@@ -1,0 +1,17 @@
+{
+  "providerType": "SMTP",
+  "isEnabled": true,
+  "senderName": "شرکت سفال طبرستان",
+  "senderEmail": "sales@tabarestan.ir",
+  "allowPasswordReset": true,
+  "allowNotifications": true,
+  "smtpHost": "smtp.tabarestan.ir",
+  "smtpPort": 587,
+  "smtpSecure": false,
+  "smtpUser": "sales",
+  "smtpPassword": "secretpassword123",
+  "apiUrl": "",
+  "apiKey": "",
+  "apiMethod": "POST",
+  "customHeaders": ""
+}

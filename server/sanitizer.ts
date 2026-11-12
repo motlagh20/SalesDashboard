@@ -9,6 +9,7 @@ export interface PublicUser {
   username: string;
   fullName: string;
   phoneNumber: string;
+  email?: string | null;
   role: string;
   agentCode: string | null;
   shippingCompanyId: string | null;
@@ -30,6 +31,7 @@ export function sanitizeUser(rawUser: any, extra?: { isOnline?: boolean; lastSee
       username: "",
       fullName: "",
       phoneNumber: "",
+      email: null,
       role: "GUEST",
       agentCode: null,
       shippingCompanyId: null,
@@ -42,6 +44,7 @@ export function sanitizeUser(rawUser: any, extra?: { isOnline?: boolean; lastSee
     username: String(rawUser.username || ""),
     fullName: String(rawUser.fullName || rawUser.username || ""),
     phoneNumber: String(rawUser.phoneNumber || ""),
+    email: rawUser.email ? String(rawUser.email) : null,
     role: String(rawUser.role || "GUEST"),
     agentCode: rawUser.agentCode ? String(rawUser.agentCode) : null,
     shippingCompanyId: rawUser.shippingCompanyId ? String(rawUser.shippingCompanyId) : null,

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Smartphone, ShieldCheck, ArrowRight, Lock, Key, User } from 'lucide-react';
+import { Smartphone, ShieldCheck, ArrowRight, Lock, Key, User, Mail } from 'lucide-react';
 import { AppUser } from '../types';
 import TabarestanLogo from './TabarestanLogo';
 
@@ -25,10 +25,13 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
   const [loginPassword, setLoginPassword] = useState('');
 
   // Password Recovery States
+  const [recoveryChannel, setRecoveryChannel] = useState<'SMS' | 'EMAIL'>('SMS');
   const [recoveryPhone, setRecoveryPhone] = useState('');
+  const [recoveryEmail, setRecoveryEmail] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
   const [recoveryNewPassword, setRecoveryNewPassword] = useState('');
   const [recoveryOtp, setRecoveryOtp] = useState<string | null>(null);
+  const [maskedTarget, setMaskedTarget] = useState<string | null>(null);
 
   // Default seeded users for Sandbox quick-access: strictly excluded from production bundles
   const defaultAccounts = import.meta.env.DEV
@@ -167,22 +170,38 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
     }
   };
 
-  // 4. Request Recovery SMS
+  // 4. Request Recovery (SMS or Email)
   const handleRequestRecovery = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!recoveryPhone.trim()) {
-      showToast('لطفا شماره همراه خود را وارد کنید.', 'error');
-      return;
+    if (recoveryChannel === 'SMS') {
+      if (!recoveryPhone.trim()) {
+        showToast('لطفا شماره همراه خود را وارد کنید.', 'error');
+        return;
+      }
+    } else {
+      if (!recoveryEmail.trim()) {
+        showToast('لطفا آدرس ایمیل یا نام کاربری حساب خود را وارد کنید.', 'error');
+        return;
+      }
     }
 
     setLoading(true);
     setRecoveryOtp(null);
+    setMaskedTarget(null);
 
     try {
-      const res = await fetch('/api/auth/forgot-password-send', {
+      const endpoint = recoveryChannel === 'SMS' 
+        ? '/api/auth/forgot-password-send' 
+        : '/api/auth/forgot-password-email-send';
+      
+      const payload = recoveryChannel === 'SMS'
+        ? { phoneNumber: recoveryPhone.trim() }
+        : { identifier: recoveryEmail.trim() };
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber: recoveryPhone })
+        body: JSON.stringify(payload)
       });
 
       if (res.ok) {
@@ -194,11 +213,19 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
         } else {
           setRecoveryCode('');
         }
+        if (data.maskedEmail) {
+          setMaskedTarget(data.maskedEmail);
+        }
         setLoginMode('RESET_PASS');
-        showToast('🔑 کد تایید پیامکی بازیابی صادر گردید.', 'success');
+        showToast(
+          recoveryChannel === 'SMS' 
+            ? '🔑 کد تایید پیامکی بازیابی صادر گردید.' 
+            : `✉️ کد تایید بازیابی به ایمیل ارسال گردید.`, 
+          'success'
+        );
       } else {
         const errorData = await res.json();
-        showToast(errorData.message || errorData.error || 'کاربری با این شماره همراه یافت نشد.', 'error');
+        showToast(errorData.message || errorData.error || 'کاربری با این مشخصات یافت نشد.', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -208,7 +235,7 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
     }
   };
 
-  // 5. Submit Recovery Reset
+  // 5. Submit Recovery Reset (SMS or Email)
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!recoveryCode.trim() || !recoveryNewPassword.trim()) {
@@ -218,27 +245,40 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
 
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/forgot-password-reset', {
+      const endpoint = recoveryChannel === 'SMS'
+        ? '/api/auth/forgot-password-reset'
+        : '/api/auth/forgot-password-email-reset';
+
+      const payload = recoveryChannel === 'SMS'
+        ? {
+            phoneNumber: recoveryPhone.trim(),
+            code: recoveryCode.trim(),
+            newPassword: recoveryNewPassword
+          }
+        : {
+            identifier: recoveryEmail.trim(),
+            code: recoveryCode.trim(),
+            newPassword: recoveryNewPassword
+          };
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phoneNumber: recoveryPhone,
-          code: recoveryCode,
-          newPassword: recoveryNewPassword
-        }
-      )});
+        body: JSON.stringify(payload)
+      });
 
       if (res.ok) {
         showToast('🔒 رمز عبور با موفقیت به روز گردید. هم‌اکنون وارد شوید.', 'success');
-        setLoginKey(recoveryPhone);
+        setLoginKey(recoveryChannel === 'SMS' ? recoveryPhone : recoveryEmail);
         setLoginPassword(recoveryNewPassword);
         setLoginMode('PASSWORD');
         setRecoveryCode('');
         setRecoveryNewPassword('');
         setRecoveryOtp(null);
+        setMaskedTarget(null);
       } else {
         const errorData = await res.json();
-        showToast(errorData.message || errorData.error || 'کد تایید پیامکی نادرست است.', 'error');
+        showToast(errorData.message || errorData.error || 'کد تایید وارد شده نادرست است.', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -492,25 +532,73 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
           {loginMode === 'RECOVERY' && (
             <form onSubmit={handleRequestRecovery} className="space-y-4">
               <div className="bg-slate-900/50 p-3 rounded-lg text-slate-300 text-[10.5px] leading-relaxed border border-slate-700/50">
-                <span className="font-extrabold text-amber-500">راهنمای بازیابی کلمه عبور:</span>
-                <p className="mt-1">شماره تلفن همراه حساب خود را وارد سازید. سیستم به صورت شبیه‌سازی یک پیامک حاوی رمزارز OTP ارسال خواهد کرد تا بتوانید رمز عبور را بازنشانی کنید.</p>
+                <span className="font-extrabold text-amber-500">کانال بازیابی کلمه عبور:</span>
+                <p className="mt-1">
+                  می‌توانید کلمه عبور خود را از طریق دریافت کد یکبار مصرف پیامکی (SMS OTP) یا ارسال به آدرس ایمیل ثبت شده بازیابی نمایید.
+                </p>
               </div>
 
-              <div className="space-y-1">
-                <label className="block text-slate-300 text-xs font-bold">شماره تلفن همراه حساب کاربری:</label>
-                <div className="relative">
-                  <input
-                    type="tel"
-                    placeholder="مثال: 09121111111"
-                    value={recoveryPhone}
-                    onChange={(e) => setRecoveryPhone(e.target.value)}
-                    disabled={loading}
-                    className="w-full bg-slate-900/80 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    required
-                  />
-                  <Smartphone className="w-4 h-4 text-slate-500 absolute right-3.5 top-3.5" />
-                </div>
+              {/* Channel Switcher */}
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900/90 rounded-xl border border-slate-700/60">
+                <button
+                  type="button"
+                  onClick={() => setRecoveryChannel('SMS')}
+                  className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    recoveryChannel === 'SMS'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>پیامک (SMS OTP)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecoveryChannel('EMAIL')}
+                  className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    recoveryChannel === 'EMAIL'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>ایمیل (Email OTP)</span>
+                </button>
               </div>
+
+              {recoveryChannel === 'SMS' ? (
+                <div className="space-y-1">
+                  <label className="block text-slate-300 text-xs font-bold">شماره تلفن همراه حساب کاربری:</label>
+                  <div className="relative">
+                    <input
+                      type="tel"
+                      placeholder="مثال: 09121111111"
+                      value={recoveryPhone}
+                      onChange={(e) => setRecoveryPhone(e.target.value)}
+                      disabled={loading}
+                      className="w-full bg-slate-900/80 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      required
+                    />
+                    <Smartphone className="w-4 h-4 text-slate-500 absolute right-3.5 top-3.5" />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <label className="block text-slate-300 text-xs font-bold">آدرس ایمیل یا نام کاربری ثبت شده:</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="مثال: user@company.com یا admin"
+                      value={recoveryEmail}
+                      onChange={(e) => setRecoveryEmail(e.target.value)}
+                      disabled={loading}
+                      className="w-full bg-slate-900/80 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      required
+                    />
+                    <Mail className="w-4 h-4 text-slate-500 absolute right-3.5 top-3.5" />
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-2">
                 <button
@@ -518,7 +606,7 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                   disabled={loading}
                   className="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-2 px-3 rounded-lg text-xs transition-all cursor-pointer flex items-center justify-center gap-1 shadow-lg shadow-amber-500/10"
                 >
-                  {loading ? 'در حال ارسال...' : 'ارسال لینک/کد بازیابی'}
+                  {loading ? 'در حال ارسال...' : (recoveryChannel === 'SMS' ? 'ارسال پیامک کد بازیابی' : 'ارسال ایمیل کد بازیابی')}
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
                 <button
@@ -540,21 +628,26 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                 <div className="bg-slate-950 border-r-4 border-amber-500 rounded p-3 text-right text-xs animate-bounce">
                   <div className="flex items-center justify-between text-[10px] text-slate-400 border-b border-slate-800 pb-1 mb-1.5 font-sans">
                     <span>هم‌اکنون • ۱ دقیقه پیش</span>
-                    <span className="font-bold text-amber-500 flex items-center gap-1">📱 پیامک بازیابی کلمه عبور</span>
+                    <span className="font-bold text-amber-500 flex items-center gap-1">
+                      {recoveryChannel === 'SMS' ? '📱 پیامک بازیابی کلمه عبور' : '✉️ ایمیل بازیابی کلمه عبور'}
+                    </span>
                   </div>
                   <p className="text-slate-300 font-sans leading-relaxed">
                     کد یکبار مصرف جهت تغییر و بازیابی رمز عبور: <span className="font-mono font-black text-amber-500 text-sm tracking-widest px-1 bg-slate-900 rounded">{recoveryOtp}</span> ثبت گردید.
+                    {maskedTarget && <span className="block text-[11px] text-slate-400 mt-1">ارسال شده به: {maskedTarget}</span>}
                   </p>
                 </div>
               )}
 
               <div className="space-y-1">
-                <label className="block text-slate-300 text-xs font-bold">کد تایید پیامکی بازیابی:</label>
+                <label className="block text-slate-300 text-xs font-bold">
+                  {recoveryChannel === 'SMS' ? 'کد تایید پیامکی بازیابی:' : 'کد تایید ارسال شده به ایمیل:'}
+                </label>
                 <div className="relative">
                   <input
                     type="text"
                     maxLength={8}
-                    placeholder="کد پیامک شده را وارد کنید"
+                    placeholder="کد ۶ رقمی را وارد کنید"
                     value={recoveryCode}
                     onChange={(e) => setRecoveryCode(e.target.value)}
                     disabled={loading}

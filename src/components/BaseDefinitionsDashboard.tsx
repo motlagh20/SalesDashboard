@@ -15,9 +15,18 @@ import {
   Power, 
   Lock,
   ArrowRight,
-  Sparkles
+  Sparkles,
+  AlertCircle,
+  Copy,
+  Check,
+  Eye,
+  EyeOff,
+  Mail,
+  Send,
+  Activity,
+  CheckCircle2
 } from 'lucide-react';
-import { Agent, Product, ShippingCompany, UserRole, TerritoryAssignment } from '../types';
+import { Agent, Product, ShippingCompany, UserRole, TerritoryAssignment, EmailSettings, EmailProviderType } from '../types';
 import { TerritorySelector } from './TerritorySelector';
 import { TerritoryBadgeList } from './TerritoryBadgeList';
 import { formatTerritoriesSummary, parseTerritoriesFromArea, normalizeProvinceName } from '../data/iranLocations';
@@ -28,7 +37,7 @@ export interface BaseDefinitionsDashboardProps {
   products: Product[];
   shippingCompanies: ShippingCompany[];
   onClose: () => void;
-  initialSubTab?: 'AGENTS' | 'USERS' | 'PRODUCTS' | 'SHIPPING';
+  initialSubTab?: 'AGENTS' | 'USERS' | 'PRODUCTS' | 'SHIPPING' | 'EMAIL_SETTINGS';
   
   // Agent actions
   onAddAgent: (agent: Agent) => Promise<boolean> | void;
@@ -78,11 +87,15 @@ export function BaseDefinitionsDashboard({
   showToast,
   askConfirm,
 }: BaseDefinitionsDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'AGENTS' | 'USERS' | 'PRODUCTS' | 'SHIPPING'>(initialSubTab);
+  const [activeTab, setActiveTab] = useState<'AGENTS' | 'USERS' | 'PRODUCTS' | 'SHIPPING' | 'EMAIL_SETTINGS'>(initialSubTab);
 
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  // --- USER-FIRST LINKING STATE ---
+  const [selectedAgentUserId, setSelectedAgentUserId] = useState('');
+  const [selectedSCUserId, setSelectedSCUserId] = useState('');
 
   // --- AGENT STATE ---
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
@@ -100,6 +113,63 @@ export function BaseDefinitionsDashboard({
   const [newAgentEconomicCode, setNewAgentEconomicCode] = useState('');
   const [newAgentNationalCode, setNewAgentNationalCode] = useState('');
   const [newAgentIsExport, setNewAgentIsExport] = useState(false);
+
+  // Available representative users who don't have an agent assigned yet
+  const availableRepUsers = users.filter((u: any) => {
+    if (u.role !== 'REPRESENTATIVE') return false;
+    if (editingAgent) {
+      if (editingAgent.userId && u.id === editingAgent.userId) return true;
+      if (editingAgent.agentCode && u.agentCode === editingAgent.agentCode) return true;
+      if (editingAgent.phoneNumber && u.phoneNumber === editingAgent.phoneNumber) return true;
+    }
+    const isClaimed = agents.some((a) => {
+      if (editingAgent && a.id === editingAgent.id) return false;
+      return (a.userId && a.userId === u.id) || (u.agentCode && a.agentCode === u.agentCode) || (a.phoneNumber && a.phoneNumber === u.phoneNumber);
+    });
+    return !isClaimed;
+  });
+
+  // Available shipping company users who don't have a shipping company assigned yet
+  const availableScUsers = users.filter((u: any) => {
+    if (u.role !== 'SHIPPING_COMPANY') return false;
+    if (editingShippingCompany) {
+      if (editingShippingCompany.userId && u.id === editingShippingCompany.userId) return true;
+      if (editingShippingCompany.id && u.shippingCompanyId === editingShippingCompany.id) return true;
+      if (editingShippingCompany.phoneNumber && u.phoneNumber === editingShippingCompany.phoneNumber) return true;
+    }
+    const isClaimed = shippingCompanies.some((s) => {
+      if (editingShippingCompany && s.id === editingShippingCompany.id) return false;
+      return (s.userId && s.userId === u.id) || (u.shippingCompanyId && s.id === u.shippingCompanyId) || (s.phoneNumber && s.phoneNumber === u.phoneNumber);
+    });
+    return !isClaimed;
+  });
+
+  const handleSelectAgentUser = (userId: string) => {
+    setSelectedAgentUserId(userId);
+    const selectedUser = users.find((u: any) => u.id === userId);
+    if (selectedUser) {
+      setNewAgentFullName(selectedUser.fullName || '');
+      setNewAgentPhone(selectedUser.phoneNumber || '');
+      if (!newAgentAlias.trim()) {
+        setNewAgentAlias(`نمایندگی ${selectedUser.fullName || selectedUser.username}`);
+      }
+      if (selectedUser.agentCode && !newAgentCode.trim()) {
+        setNewAgentCode(selectedUser.agentCode);
+      }
+    }
+  };
+
+  const handleSelectSCUser = (userId: string) => {
+    setSelectedSCUserId(userId);
+    const selectedUser = users.find((u: any) => u.id === userId);
+    if (selectedUser) {
+      if (!newSCName.trim()) {
+        setNewSCName(selectedUser.fullName || `باربری ${selectedUser.username}`);
+      }
+      setNewSCPhone(selectedUser.phoneNumber || '');
+      setNewSCManager(selectedUser.fullName || '');
+    }
+  };
 
   const startEditingAgent = (agent: Agent) => {
     setEditingAgent(agent);
@@ -166,6 +236,13 @@ export function BaseDefinitionsDashboard({
       }
     }
 
+    const matchingUser = users.find((u: any) => 
+      (agent.userId && u.id === agent.userId) ||
+      (agent.agentCode && u.agentCode === agent.agentCode) ||
+      (agent.phoneNumber && u.phoneNumber === agent.phoneNumber)
+    );
+    setSelectedAgentUserId(matchingUser ? matchingUser.id : (agent.userId || ''));
+
     setNewAgentTerritories(initialTerritories);
     setNewAgentFullName(agent.fullName);
     setNewAgentPhone(agent.phoneNumber);
@@ -181,6 +258,7 @@ export function BaseDefinitionsDashboard({
 
   const cancelEditingAgent = () => {
     setEditingAgent(null);
+    setSelectedAgentUserId('');
     setNewAgentAlias('');
     setNewAgentCode('');
     setNewAgentArea('');
@@ -199,6 +277,11 @@ export function BaseDefinitionsDashboard({
 
   const handleSaveAgent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!editingAgent && !selectedAgentUserId) {
+      showToast('خطا: ابتدا باید حساب کاربری نماینده را از لیست انتخاب نمایید (یا از بخش کاربران تعریف کنید).', 'error');
+      return;
+    }
+
     if (!newAgentAlias.trim() || !newAgentCode.trim() || !newAgentFullName.trim()) {
       showToast('لطفاً عنوان نمایندگی، کد و نام مسئول را وارد نمایید.', 'error');
       return;
@@ -215,6 +298,7 @@ export function BaseDefinitionsDashboard({
 
     const payload: Agent = {
       id: editingAgent ? editingAgent.id : `agent-${Date.now()}`,
+      userId: selectedAgentUserId || (editingAgent ? editingAgent.userId : undefined),
       alias: newAgentAlias.trim(),
       agentCode: newAgentCode.trim(),
       area: summaryArea,
@@ -245,6 +329,7 @@ export function BaseDefinitionsDashboard({
   const [newUsername, setNewUsername] = useState('');
   const [newUserFullName, setNewUserFullName] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<UserRole>('REPRESENTATIVE');
   const [newUserAgentCode, setNewUserAgentCode] = useState('');
@@ -255,10 +340,60 @@ export function BaseDefinitionsDashboard({
     setNewUsername(u.username);
     setNewUserFullName(u.fullName || '');
     setNewUserPhone(u.phoneNumber || '');
+    setNewUserEmail(u.email || '');
     setNewUserPassword('');
     setNewUserRole(u.role);
     setNewUserAgentCode(u.agentCode || '');
     setNewUserSCId(u.shippingCompanyId || '');
+  };
+
+  // --- CREDENTIALS ISSUED MODAL STATE ---
+  const [issuedCredentials, setIssuedCredentials] = useState<{
+    username: string;
+    fullName: string;
+    phoneNumber?: string;
+    role: string;
+    tempPassword: string;
+    isReset?: boolean;
+  } | null>(null);
+
+  const [copiedPassword, setCopiedPassword] = useState(false);
+  const [showUserPassword, setShowUserPassword] = useState(false);
+
+  const handleGenerateTempPassword = () => {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    let randomPart = "";
+    for (let i = 0; i < 6; i++) {
+      randomPart += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+    }
+    const generated = `Tb9#${randomPart}`;
+    setNewUserPassword(generated);
+    setShowUserPassword(true);
+    copyToClipboard(generated, 'رمز عبور موقت ایجاد و در حافظه کپی شد.');
+  };
+
+  const copyToClipboard = (text: string, customMessage?: string) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text);
+      } else {
+        // Fallback for older browsers/contexts
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopiedPassword(true);
+      showToast(customMessage || 'رمز عبور موقت در کلیپ‌بورد کپی شد.', 'success');
+      setTimeout(() => setCopiedPassword(false), 2500);
+    } catch {
+      showToast('خطا در کپی کردن رمز.', 'error');
+    }
   };
 
   const cancelEditingUser = () => {
@@ -266,7 +401,9 @@ export function BaseDefinitionsDashboard({
     setNewUsername('');
     setNewUserFullName('');
     setNewUserPhone('');
+    setNewUserEmail('');
     setNewUserPassword('');
+    setShowUserPassword(false);
     setNewUserRole('REPRESENTATIVE');
     setNewUserAgentCode('');
     setNewUserSCId('');
@@ -280,7 +417,7 @@ export function BaseDefinitionsDashboard({
     }
 
     if (!editingUser && !newUserPassword.trim()) {
-      showToast('تعیین رمز عبور برای کاربر جدید الزامی است.', 'error');
+      showToast('تعیین رمز عبور برای کاربر جدید الزامی است (می‌توانید روی «ایجاد رمز موقت» کلیک نمایید).', 'error');
       return;
     }
 
@@ -289,6 +426,7 @@ export function BaseDefinitionsDashboard({
         username: newUsername.trim(),
         fullName: newUserFullName.trim(),
         phoneNumber: newUserPhone.trim(),
+        email: newUserEmail.trim() || null,
         role: newUserRole || 'REPRESENTATIVE',
         agentCode: newUserRole === 'REPRESENTATIVE' ? newUserAgentCode : undefined,
         shippingCompanyId: newUserRole === 'SHIPPING_COMPANY' ? newUserSCId : undefined,
@@ -317,13 +455,44 @@ export function BaseDefinitionsDashboard({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
+        const resData = await res.json().catch(() => ({}));
         if (res.ok) {
-          showToast('کاربر جدید با موفقیت ایجاد شد.', 'success');
           fetchUsers();
           cancelEditingUser();
+          const createdUser = resData.user || { ...payload, id: resData.id };
+          const issuedPass = resData.tempPassword || payload.password;
+
+          // Open one-time visible credentials modal
+          if (issuedPass) {
+            setIssuedCredentials({
+              username: createdUser.username || payload.username,
+              fullName: createdUser.fullName || payload.fullName,
+              phoneNumber: createdUser.phoneNumber || payload.phoneNumber,
+              role: createdUser.role || payload.role,
+              tempPassword: issuedPass,
+              isReset: false
+            });
+          }
+
+          if (payload.role === 'REPRESENTATIVE') {
+            showToast('حساب کاربر نماینده با موفقیت ایجاد گردید. اکنون می‌توانید در تب «نمایندگان فروش»، سایر مشخصات و مناطق را تکمیل نمایید.', 'success');
+            setSelectedAgentUserId(createdUser.id || '');
+            setNewAgentFullName(createdUser.fullName || payload.fullName);
+            setNewAgentPhone(createdUser.phoneNumber || payload.phoneNumber);
+            setNewAgentAlias(`نمایندگی ${createdUser.fullName || payload.fullName}`);
+            setActiveTab('AGENTS');
+          } else if (payload.role === 'SHIPPING_COMPANY') {
+            showToast('حساب کاربر باربری با موفقیت ایجاد گردید. اکنون می‌توانید در تب «شرکت‌های حمل»، کد ترابری و پایانه را ثبت نمایید.', 'success');
+            setSelectedSCUserId(createdUser.id || '');
+            setNewSCName(createdUser.fullName || payload.fullName);
+            setNewSCPhone(createdUser.phoneNumber || payload.phoneNumber);
+            setNewSCManager(createdUser.fullName || payload.fullName);
+            setActiveTab('SHIPPING');
+          } else {
+            showToast('کاربر جدید با موفقیت ایجاد شد.', 'success');
+          }
         } else {
-          const err = await res.json().catch(() => ({}));
-          showToast(err.message || err.error || 'خطا در تعریف کاربر جدید.', 'error');
+          showToast(resData.message || resData.error || 'خطا در تعریف کاربر جدید.', 'error');
         }
       }
     } catch {
@@ -362,24 +531,33 @@ export function BaseDefinitionsDashboard({
   };
 
   const handleResetUserPassword = async (userItem: any) => {
-    const defaultPassword = '123';
     askConfirm(
-      'بازنشانی رمز عبور',
-      `رمز عبور کاربر «${userItem.fullName || userItem.username}» به "${defaultPassword}" تغییر خواهد کرد. ادامه می‌دهید؟`,
+      'بازنشانی رمز عبور کاربر',
+      `آیا از بازنشانی رمز عبور کاربر «${userItem.fullName || userItem.username}» به یک رمز عبور موقت جدید اطمینان دارید؟ این رمز فقط یکبار در کادر اختصاصی به شما نمایش داده می‌شود و کاربر در اولین ورود موظف به تغییر آن خواهد بود.`,
       async () => {
         try {
-          const res = await fetch(`/api/users/${userItem.id}`, {
-            method: 'PUT',
+          const res = await fetch(`/api/users/${userItem.id}/reset-password`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: defaultPassword }),
+            body: JSON.stringify({}),
           });
-          if (res.ok) {
-            showToast(`رمز عبور به ${defaultPassword} تغییر یافت.`, 'success');
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.tempPassword) {
+            fetchUsers();
+            setIssuedCredentials({
+              username: data.username || userItem.username,
+              fullName: data.fullName || userItem.fullName,
+              phoneNumber: userItem.phoneNumber,
+              role: userItem.role,
+              tempPassword: data.tempPassword,
+              isReset: true
+            });
+            showToast('رمز عبور موقت با موفقیت صادر گردید.', 'success');
           } else {
-            showToast('خطا در تغییر رمز عبور.', 'error');
+            showToast(data.message || data.error || 'خطا در بازنشانی رمز عبور.', 'error');
           }
         } catch {
-          showToast('خطا در ریست رمز عبور.', 'error');
+          showToast('خطای شبکه در بازنشانی رمز عبور.', 'error');
         }
       }
     );
@@ -459,6 +637,13 @@ export function BaseDefinitionsDashboard({
 
   const startEditingShippingCompany = (sc: ShippingCompany) => {
     setEditingShippingCompany(sc);
+    const matchingUser = users.find((u: any) =>
+      (sc.userId && u.id === sc.userId) ||
+      (sc.id && u.shippingCompanyId === sc.id) ||
+      (sc.phoneNumber && u.phoneNumber === sc.phoneNumber)
+    );
+    setSelectedSCUserId(matchingUser ? matchingUser.id : (sc.userId || ''));
+
     setNewSCName(sc.name);
     setNewSCCode(sc.code || '');
     setNewSCManager(sc.managerName || '');
@@ -470,6 +655,7 @@ export function BaseDefinitionsDashboard({
 
   const cancelEditingShippingCompany = () => {
     setEditingShippingCompany(null);
+    setSelectedSCUserId('');
     setNewSCName('');
     setNewSCCode('');
     setNewSCManager('');
@@ -481,6 +667,11 @@ export function BaseDefinitionsDashboard({
 
   const handleSaveShippingCompany = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!editingShippingCompany && !selectedSCUserId) {
+      showToast('خطا: ابتدا باید حساب کاربری شرکت حمل‌ونقل را از لیست انتخاب نمایید (یا از بخش کاربران تعریف کنید).', 'error');
+      return;
+    }
+
     if (!newSCName.trim() || !newSCPhone.trim()) {
       showToast('نام شرکت باربری و شماره تماس الزامی است.', 'error');
       return;
@@ -488,6 +679,7 @@ export function BaseDefinitionsDashboard({
 
     const payload: ShippingCompany = {
       id: editingShippingCompany ? editingShippingCompany.id : `sc-${Date.now()}`,
+      userId: selectedSCUserId || (editingShippingCompany ? editingShippingCompany.userId : undefined),
       name: newSCName.trim(),
       code: newSCCode.trim(),
       managerName: newSCManager.trim(),
@@ -506,6 +698,114 @@ export function BaseDefinitionsDashboard({
       showToast('شرکت باربری جدید ثبت گردید.', 'success');
     }
     cancelEditingShippingCompany();
+  };
+
+  // --- EMAIL SERVICE MANAGEMENT STATE ---
+  const [emailSettings, setEmailSettings] = useState<EmailSettings>({
+    providerType: 'SMTP',
+    isEnabled: false,
+    senderName: 'سامانه مدیریت فروش',
+    senderEmail: 'noreply@company.com',
+    allowPasswordReset: true,
+    allowNotifications: true,
+    smtpHost: 'smtp.example.com',
+    smtpPort: 587,
+    smtpSecure: false,
+    smtpUser: '',
+    smtpPassword: '',
+    hasSmtpPassword: false,
+    apiUrl: '',
+    apiKey: '',
+    hasApiKey: false,
+    apiMethod: 'POST',
+    customHeaders: ''
+  });
+
+  const [isLoadingEmailSettings, setIsLoadingEmailSettings] = useState(false);
+  const [isSavingEmailSettings, setIsSavingEmailSettings] = useState(false);
+  const [isTestingEmailConnection, setIsTestingEmailConnection] = useState(false);
+  const [testRecipientEmail, setTestRecipientEmail] = useState('');
+  const [diagnosticResult, setDiagnosticResult] = useState<{
+    success: boolean;
+    message: string;
+    timestamp: string;
+    provider: EmailProviderType;
+    logs: string[];
+    messageId?: string;
+  } | null>(null);
+
+  const fetchEmailSettings = async () => {
+    setIsLoadingEmailSettings(true);
+    try {
+      const res = await fetch('/api/system/email-settings');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.settings) {
+          setEmailSettings(data.settings);
+        }
+      }
+    } catch {
+      showToast('خطا در دریافت تنظیمات ایمیل.', 'error');
+    } finally {
+      setIsLoadingEmailSettings(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'EMAIL_SETTINGS') {
+      fetchEmailSettings();
+    }
+  }, [activeTab]);
+
+  const handleSaveEmailSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingEmailSettings(true);
+    try {
+      const res = await fetch('/api/system/email-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(emailSettings)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        if (data.settings) {
+          setEmailSettings(data.settings);
+        }
+        showToast('تنظیمات سرویس ایمیل با موفقیت ذخیره شد.', 'success');
+      } else {
+        showToast(data.error || 'خطا در ذخیره تنظیمات ایمیل.', 'error');
+      }
+    } catch {
+      showToast('خطای شبکه در ذخیره تنظیمات ایمیل.', 'error');
+    } finally {
+      setIsSavingEmailSettings(false);
+    }
+  };
+
+  const handleRunEmailDiagnostic = async () => {
+    setIsTestingEmailConnection(true);
+    setDiagnosticResult(null);
+    try {
+      const res = await fetch('/api/system/email-settings/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: testRecipientEmail.trim() || undefined,
+          settings: emailSettings
+        })
+      });
+      const data = await res.json();
+      setDiagnosticResult(data);
+      if (data.success) {
+        showToast('تست اتصال و ارسال ایمیل با موفقیت انجام شد.', 'success');
+      } else {
+        showToast(data.message || 'تست اتصال با خطا مواجه شد.', 'error');
+      }
+    } catch (err: any) {
+      showToast('خطا در برقراری ارتباط با سرور برای تست.', 'error');
+    } finally {
+      setIsTestingEmailConnection(false);
+    }
   };
 
   return (
@@ -599,6 +899,22 @@ export function BaseDefinitionsDashboard({
           >
             <Truck className="w-4 h-4 text-blue-400" />
             <span>شرکت‌های حمل ({shippingCompanies.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('EMAIL_SETTINGS');
+              fetchEmailSettings();
+            }}
+            className={`flex-1 min-w-[140px] py-2 px-3 rounded-lg text-xs font-black cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'EMAIL_SETTINGS'
+                ? 'bg-slate-900 text-amber-300 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }`}
+          >
+            <Mail className="w-4 h-4 text-rose-400" />
+            <span>تنظیمات ایمیل {emailSettings.isEnabled && <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>}</span>
           </button>
         </div>
 
@@ -705,10 +1021,76 @@ export function BaseDefinitionsDashboard({
             <div className="lg:col-span-5 bg-slate-50 border border-slate-200 p-5 rounded-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                 <h4 className="font-bold text-slate-800 text-xs">
-                  {editingAgent ? 'ویرایش اطلاعات نمایندگی رسمی' : 'ثبت نمایندگی رسمی جدید'}
+                  {editingAgent ? 'ویرایش اطلاعات نمایندگی رسمی' : 'ثبت مشخصات نمایندگی رسمی'}
                 </h4>
                 <ShieldCheck className="w-4 h-4 text-emerald-600" />
               </div>
+
+              {/* Requirement: User Account must exist first */}
+              {!editingAgent ? (
+                availableRepUsers.length === 0 ? (
+                  <div className="p-4 bg-amber-50 border-2 border-amber-300 rounded-xl space-y-2.5 text-right shadow-xs">
+                    <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>نیاز به تعریف کاربر در بخش «کاربران و دسترسی‌ها»</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 leading-relaxed font-sans">
+                      طبق فرآیند سیستم، ابتدا باید حساب کاربری نماینده (نام کاربری، رمز عبور و شماره تماس OTP) در بخش <strong>«کاربران و دسترسی‌ها»</strong> با نقش <em>«نمایندگی رسمی فروش»</em> ایجاد شود. سپس در این بخش می‌توانید کد تفصیلی، مناطق تحت سرپرستی و مشخصات حقوقی را تکمیل فرمایید.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab('USERS');
+                        setNewUserRole('REPRESENTATIVE');
+                      }}
+                      className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs font-sans"
+                    >
+                      <Users className="w-4 h-4" />
+                      <span>انتقال به بخش کاربران جهت تعریف نماینده جدید ⬅️</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-emerald-50/80 border border-emerald-300 p-3 rounded-xl space-y-1.5 shadow-xs">
+                    <label className="text-[11px] font-bold text-emerald-950 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <UserCheck className="w-4 h-4 text-emerald-700" />
+                        <span>انتخاب حساب کاربری نماینده *</span>
+                      </span>
+                      <span className="text-[9px] bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-full font-bold font-mono">
+                        {availableRepUsers.length} کاربر در انتظار پرونده
+                      </span>
+                    </label>
+                    <select
+                      value={selectedAgentUserId}
+                      onChange={(e) => handleSelectAgentUser(e.target.value)}
+                      className="w-full bg-white border border-emerald-300 rounded-lg px-2.5 py-2 text-xs text-slate-800 font-sans focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                    >
+                      <option value="">-- انتخاب حساب کاربری نماینده (الزامی) --</option>
+                      {availableRepUsers.map((u: any) => (
+                        <option key={u.id} value={u.id}>
+                          👤 {u.fullName} (نام کاربری: {u.username} | تماس: {u.phoneNumber})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-emerald-700">
+                      با انتخاب کاربر، نام مسئول و شماره تماس به طور خودکار بارگذاری و متصل می‌گردد.
+                    </p>
+                  </div>
+                )
+              ) : (
+                <div className="bg-slate-100 border border-slate-200 p-2.5 rounded-xl text-xs text-slate-700 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <UserCheck className="w-4 h-4 text-slate-500" />
+                    <span>حساب کاربری متصل:</span>
+                    <strong className="text-slate-900 font-sans">
+                      {users.find((u: any) => (editingAgent.userId && u.id === editingAgent.userId) || (editingAgent.agentCode && u.agentCode === editingAgent.agentCode) || (editingAgent.phoneNumber && u.phoneNumber === editingAgent.phoneNumber))?.fullName || editingAgent.fullName}
+                    </strong>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    {editingAgent.phoneNumber}
+                  </span>
+                </div>
+              )}
 
               <form onSubmit={handleSaveAgent} className="space-y-3 font-sans">
                 {/* Person Type */}
@@ -898,10 +1280,19 @@ export function BaseDefinitionsDashboard({
                   <button
                     type="submit"
                     id="agent-submit-btn"
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow"
+                    disabled={!editingAgent && (!selectedAgentUserId || availableRepUsers.length === 0)}
+                    className={`flex-1 font-bold py-2.5 px-4 rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow ${
+                      !editingAgent && (!selectedAgentUserId || availableRepUsers.length === 0)
+                        ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                    }`}
                   >
                     {editingAgent ? <Edit className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                    <span>{editingAgent ? 'ذخیره تغییرات نمایندگی' : 'افزودن و ثبت پروتکل نمایندگی جدید'}</span>
+                    <span>
+                      {editingAgent 
+                        ? 'ذخیره تغییرات نمایندگی' 
+                        : (!selectedAgentUserId ? 'لطفاً ابتدا حساب کاربری نماینده را انتخاب کنید' : 'افزودن و ثبت مشخصات نمایندگی')}
+                    </span>
                   </button>
                   {editingAgent && (
                     <button
@@ -944,6 +1335,7 @@ export function BaseDefinitionsDashboard({
                         <th className="p-3">نام و مسئولیت</th>
                         <th className="p-3">نام کاربری</th>
                         <th className="p-3">شماره تماس (جهت پیامک)</th>
+                        <th className="p-3">آدرس ایمیل</th>
                         <th className="p-3">نقش سیستمی</th>
                         <th className="p-3">منتسب به</th>
                         <th className="p-3 text-center">وضعیت ورود</th>
@@ -952,13 +1344,67 @@ export function BaseDefinitionsDashboard({
                     </thead>
                     <tbody>
                       {users.map((u) => {
-                        let matchDesc = '-';
-                        if (u.role === 'REPRESENTATIVE' && u.agentCode) {
-                          const ag = agents.find(a => a.agentCode === u.agentCode);
-                          matchDesc = ag ? `نمایندگی ${ag.alias}` : `کد نمایندگی ${u.agentCode}`;
-                        } else if (u.role === 'SHIPPING_COMPANY' && u.shippingCompanyId) {
-                          const sc = shippingCompanies.find(s => s.id === u.shippingCompanyId);
-                          matchDesc = sc ? `شرکت ${sc.name}` : `شناسه باربری ${u.shippingCompanyId}`;
+                        let matchDescNode: React.ReactNode = '-';
+                        if (u.role === 'REPRESENTATIVE') {
+                          const ag = agents.find(a => (u.agentCode && a.agentCode === u.agentCode) || (a.phoneNumber && a.phoneNumber === u.phoneNumber) || (a.userId && a.userId === u.id));
+                          if (ag) {
+                            matchDescNode = (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                🏢 {ag.alias} (کد: {ag.agentCode})
+                              </span>
+                            );
+                          } else {
+                            matchDescNode = (
+                              <div className="flex flex-col gap-1 items-start">
+                                <span className="text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                                  ⏳ در انتظار پرونده نمایندگی
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedAgentUserId(u.id);
+                                    setNewAgentFullName(u.fullName || '');
+                                    setNewAgentPhone(u.phoneNumber || '');
+                                    setNewAgentAlias(`نمایندگی ${u.fullName || u.username}`);
+                                    setActiveTab('AGENTS');
+                                  }}
+                                  className="text-[10px] text-emerald-700 hover:text-emerald-900 font-bold underline cursor-pointer"
+                                >
+                                  تکمیل پرونده در تب نمایندگان ⬅️
+                                </button>
+                              </div>
+                            );
+                          }
+                        } else if (u.role === 'SHIPPING_COMPANY') {
+                          const sc = shippingCompanies.find(s => (u.shippingCompanyId && s.id === u.shippingCompanyId) || (s.phoneNumber && s.phoneNumber === u.phoneNumber) || (s.userId && s.userId === u.id));
+                          if (sc) {
+                            matchDescNode = (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                                🚛 {sc.name} (کد: {sc.code || '-'})
+                              </span>
+                            );
+                          } else {
+                            matchDescNode = (
+                              <div className="flex flex-col gap-1 items-start">
+                                <span className="text-[10px] font-bold bg-blue-100 text-blue-900 border border-blue-300 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                                  ⏳ در انتظار پرونده باربری
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedSCUserId(u.id);
+                                    setNewSCName(u.fullName || `باربری ${u.username}`);
+                                    setNewSCPhone(u.phoneNumber || '');
+                                    setNewSCManager(u.fullName || '');
+                                    setActiveTab('SHIPPING');
+                                  }}
+                                  className="text-[10px] text-blue-700 hover:text-blue-900 font-bold underline cursor-pointer"
+                                >
+                                  تکمیل پرونده در تب باربری ⬅️
+                                </button>
+                              </div>
+                            );
+                          }
                         }
 
                         let roleColor = 'bg-slate-100 text-slate-800';
@@ -999,12 +1445,22 @@ export function BaseDefinitionsDashboard({
                             </td>
                             <td className="p-3 font-mono text-slate-600 font-bold">{u.username}</td>
                             <td className="p-3 font-mono text-slate-600 text-left">{u.phoneNumber || '-'}</td>
+                            <td className="p-3 font-mono text-[11px] text-slate-600 text-left">
+                              {u.email ? (
+                                <span className="inline-flex items-center gap-1 text-slate-700 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
+                                  <Mail className="w-3 h-3 text-indigo-500 shrink-0" />
+                                  <span className="truncate max-w-[140px]" title={u.email}>{u.email}</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-[10px]">ثبت نشده</span>
+                              )}
+                            </td>
                             <td className="p-3">
                               <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${roleColor}`}>
                                 {roleLabel}
                               </span>
                             </td>
-                            <td className="p-3 text-[11px] text-slate-500 font-sans">{matchDesc}</td>
+                            <td className="p-3 text-[11px] font-sans">{matchDescNode}</td>
                             <td className="p-3 text-center">
                               {u.isEnabled !== false ? (
                                 <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 py-0.5 px-2 rounded-full text-[10px] font-bold">
@@ -1104,16 +1560,64 @@ export function BaseDefinitionsDashboard({
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-slate-500 block mb-1">
-                    {editingUser ? 'رمز عبور جدید (اختیاری):' : 'رمز عبور ورودی اولیه *'}
-                  </label>
+                  <label className="text-[10px] text-slate-500 block mb-1">آدرس ایمیل (جهت بازیابی رمز و اطلاعیه‌ها)</label>
                   <input
-                    type="password"
-                    placeholder={editingUser ? 'فقط در صورت نیاز به تغییر وارد کنید' : 'کلمه عبور'}
-                    value={newUserPassword}
-                    onChange={(e) => setNewUserPassword(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                    type="email"
+                    placeholder="example@company.com"
+                    value={newUserEmail}
+                    onChange={(e) => setNewUserEmail(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
                   />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[10px] text-slate-500 font-bold">
+                      {editingUser ? 'رمز عبور جدید (اختیاری):' : 'رمز عبور ورودی اولیه *'}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleGenerateTempPassword}
+                      className="text-[10px] font-bold text-indigo-700 hover:text-indigo-900 flex items-center gap-1 cursor-pointer transition-colors bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded border border-indigo-200"
+                      title="ایجاد کلمه عبور موقت تصادفی و امن"
+                    >
+                      <Sparkles className="w-3 h-3 text-indigo-600" />
+                      <span>⚡ ایجاد رمز موقت</span>
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showUserPassword ? 'text' : 'password'}
+                      placeholder={editingUser ? 'فقط در صورت نیاز به تغییر وارد کنید' : 'کلمه عبور (یا کلیک روی ایجاد رمز موقت)'}
+                      value={newUserPassword}
+                      onChange={(e) => setNewUserPassword(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 pl-20 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                    />
+                    <div className="absolute left-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      {newUserPassword && (
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(newUserPassword, 'کلمه عبور در حافظه کپی شد.')}
+                          className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-0.5 transition-colors cursor-pointer"
+                          title="کپی سریع رمز در حافظه"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>کپی</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowUserPassword(!showUserPassword)}
+                        className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer rounded"
+                        title={showUserPassword ? 'پنهان کردن رمز' : 'مشاهده رمز'}
+                      >
+                        {showUserPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-slate-400 mt-1 leading-relaxed">
+                    با کلیک بر روی <strong>«ایجاد رمز موقت»</strong>، یک رمز امن تولید می‌شود که پس از ثبت فقط یک‌بار نمایش داده خواهد شد و کاربر در اولین ورود موظف به تغییر آن است.
+                  </p>
                 </div>
 
                 <div>
@@ -1135,38 +1639,64 @@ export function BaseDefinitionsDashboard({
                 </div>
 
                 {newUserRole === 'REPRESENTATIVE' && (
-                  <div>
-                    <label className="text-[10px] text-slate-500 block mb-1">انتساب به نمایندگی</label>
-                    <select
-                      value={newUserAgentCode}
-                      onChange={(e) => setNewUserAgentCode(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-sans cursor-pointer"
-                    >
-                      <option value="">-- انتخاب نمایندگی همکار --</option>
-                      {agents.map((ag) => (
-                        <option key={ag.id} value={ag.agentCode}>
-                          {ag.alias} (کد: {ag.agentCode})
-                        </option>
-                      ))}
-                    </select>
+                  <div className="space-y-2">
+                    <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] text-emerald-900 space-y-1">
+                      <p className="font-bold flex items-center gap-1 text-emerald-950">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>فرآیند دو مرحله‌ای نمایندگی فروش:</span>
+                      </p>
+                      <p className="text-[10px] text-emerald-800 leading-relaxed font-sans">
+                        ابتدا نام کاربری، رمز عبور و شماره تماس نماینده را در این فرم ثبت فرمایید. پس از ثبت، به تب «نمایندگان فروش» هدایت می‌شوید تا محدوده استانی، کد تفصیلی و مشخصات حقوقی را تکمیل نمایید.
+                      </p>
+                    </div>
+                    {agents.length > 0 && (
+                      <div>
+                        <label className="text-[10px] text-slate-500 block mb-1">انتساب به نمایندگی موجود (اختیاری)</label>
+                        <select
+                          value={newUserAgentCode}
+                          onChange={(e) => setNewUserAgentCode(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-sans cursor-pointer"
+                        >
+                          <option value="">-- پرونده نمایندگی جدید (تکمیل در مرحله بعد) --</option>
+                          {agents.map((ag) => (
+                            <option key={ag.id} value={ag.agentCode}>
+                              {ag.alias} (کد: {ag.agentCode})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {newUserRole === 'SHIPPING_COMPANY' && (
-                  <div>
-                    <label className="text-[10px] text-slate-500 block mb-1">انتساب به شرکت باربری</label>
-                    <select
-                      value={newUserSCId}
-                      onChange={(e) => setNewUserSCId(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-sans cursor-pointer"
-                    >
-                      <option value="">-- انتخاب ناوگان باربری --</option>
-                      {shippingCompanies.map((sc) => (
-                        <option key={sc.id} value={sc.id}>
-                          {sc.name}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="space-y-2">
+                    <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-[11px] text-blue-900 space-y-1">
+                      <p className="font-bold flex items-center gap-1 text-blue-950">
+                        <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                        <span>فرآیند دو مرحله‌ای شرکت حمل و نقل:</span>
+                      </p>
+                      <p className="text-[10px] text-blue-800 leading-relaxed font-sans">
+                        ابتدا نام کاربری و شماره تماس باربری را در این فرم ایجاد فرمایید. پس از ثبت، در تب «شرکت‌های حمل» کد ترابری و اطلاعات پایانه ناوگان را ثبت خواهید فرمود.
+                      </p>
+                    </div>
+                    {shippingCompanies.length > 0 && (
+                      <div>
+                        <label className="text-[10px] text-slate-500 block mb-1">انتساب به شرکت باربری موجود (اختیاری)</label>
+                        <select
+                          value={newUserSCId}
+                          onChange={(e) => setNewUserSCId(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-sans cursor-pointer"
+                        >
+                          <option value="">-- پرونده باربری جدید (تکمیل در مرحله بعد) --</option>
+                          {shippingCompanies.map((sc) => (
+                            <option key={sc.id} value={sc.id}>
+                              {sc.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1495,10 +2025,76 @@ export function BaseDefinitionsDashboard({
             <div className="lg:col-span-4 bg-slate-50 border border-slate-200 p-5 rounded-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                 <h4 className="font-bold text-slate-800 text-xs">
-                  {editingShippingCompany ? 'ویرایش ناوگان باربری' : 'ثبت شرکت حمل و نقل جدید'}
+                  {editingShippingCompany ? 'ویرایش ناوگان باربری' : 'ثبت مشخصات شرکت حمل و نقل جدید'}
                 </h4>
                 <Truck className="w-4 h-4 text-blue-600" />
               </div>
+
+              {/* Requirement: User Account must exist first */}
+              {!editingShippingCompany ? (
+                availableScUsers.length === 0 ? (
+                  <div className="p-4 bg-amber-50 border-2 border-amber-300 rounded-xl space-y-2.5 text-right shadow-xs">
+                    <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>نیاز به تعریف کاربر در بخش «کاربران و دسترسی‌ها»</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 leading-relaxed font-sans">
+                      طبق فرآیند سیستم، ابتدا باید حساب کاربری شرکت باربری (نام کاربری، رمز عبور و شماره تماس OTP) در بخش <strong>«کاربران و دسترسی‌ها»</strong> با نقش <em>«شرکت حمل و نقل باربری»</em> ایجاد شود. سپس در این بخش می‌توانید کد ترابری، مشخصات پایانه و شناسه ملی را تکمیل فرمایید.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab('USERS');
+                        setNewUserRole('SHIPPING_COMPANY');
+                      }}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs font-sans"
+                    >
+                      <Users className="w-4 h-4" />
+                      <span>انتقال به بخش کاربران جهت تعریف کاربر باربری ⬅️</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-blue-50/80 border border-blue-300 p-3 rounded-xl space-y-1.5 shadow-xs">
+                    <label className="text-[11px] font-bold text-blue-950 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <UserCheck className="w-4 h-4 text-blue-700" />
+                        <span>انتخاب حساب کاربری باربری *</span>
+                      </span>
+                      <span className="text-[9px] bg-blue-200 text-blue-900 px-2 py-0.5 rounded-full font-bold font-mono">
+                        {availableScUsers.length} کاربر در انتظار پرونده
+                      </span>
+                    </label>
+                    <select
+                      value={selectedSCUserId}
+                      onChange={(e) => handleSelectSCUser(e.target.value)}
+                      className="w-full bg-white border border-blue-300 rounded-lg px-2.5 py-2 text-xs text-slate-800 font-sans focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    >
+                      <option value="">-- انتخاب حساب کاربری باربری (الزامی) --</option>
+                      {availableScUsers.map((u: any) => (
+                        <option key={u.id} value={u.id}>
+                          🚛 {u.fullName} (نام کاربری: {u.username} | تماس: {u.phoneNumber})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-blue-700">
+                      با انتخاب کاربر، نام مسئول و شماره تماس به طور خودکار بارگذاری و متصل می‌گردد.
+                    </p>
+                  </div>
+                )
+              ) : (
+                <div className="bg-slate-100 border border-slate-200 p-2.5 rounded-xl text-xs text-slate-700 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <UserCheck className="w-4 h-4 text-slate-500" />
+                    <span>حساب کاربری متصل:</span>
+                    <strong className="text-slate-900 font-sans">
+                      {users.find((u: any) => (editingShippingCompany.userId && u.id === editingShippingCompany.userId) || (editingShippingCompany.id && u.shippingCompanyId === editingShippingCompany.id) || (editingShippingCompany.phoneNumber && u.phoneNumber === editingShippingCompany.phoneNumber))?.fullName || editingShippingCompany.name}
+                    </strong>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    {editingShippingCompany.phoneNumber}
+                  </span>
+                </div>
+              )}
 
               <form onSubmit={handleSaveShippingCompany} className="space-y-3 font-sans">
                 <div>
@@ -1583,16 +2179,25 @@ export function BaseDefinitionsDashboard({
                 <div className="flex gap-2 pt-2">
                   <button
                     type="submit"
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow"
+                    disabled={!editingShippingCompany && (!selectedSCUserId || availableScUsers.length === 0)}
+                    className={`flex-1 font-bold py-2.5 px-4 rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow ${
+                      !editingShippingCompany && (!selectedSCUserId || availableScUsers.length === 0)
+                        ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                    }`}
                   >
                     {editingShippingCompany ? <Edit className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                    <span>{editingShippingCompany ? 'ذخیره تغییرات باربری' : 'ثبت شرکت باربری جدید'}</span>
+                    <span>
+                      {editingShippingCompany 
+                        ? 'ذخیره تغییرات باربری' 
+                        : (!selectedSCUserId ? 'لطفاً ابتدا حساب کاربری باربری را انتخاب کنید' : 'افزودن و ثبت مشخصات باربری')}
+                    </span>
                   </button>
                   {editingShippingCompany && (
                     <button
                       type="button"
                       onClick={cancelEditingShippingCompany}
-                      className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-3 rounded-lg text-xs transition-colors cursor-pointer font-sans"
+                      className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2.5 px-3 rounded-lg text-xs transition-colors cursor-pointer font-sans"
                     >
                       انصراف
                     </button>
@@ -1603,7 +2208,488 @@ export function BaseDefinitionsDashboard({
           </div>
         )}
 
+        {/* 5. EMAIL SERVICE SETTINGS PANEL */}
+        {activeTab === 'EMAIL_SETTINGS' && (
+          <div className="space-y-6 text-right animate-fade-in font-sans pb-10" id="email-settings-panel">
+            {/* Header info banner */}
+            <div className="bg-gradient-to-l from-slate-900 to-indigo-950 text-white rounded-2xl p-5 border border-indigo-900/50 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-300 border border-indigo-500/30">
+                    <Mail className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <h3 className="font-black text-sm md:text-base text-white">پیکربندی سرور و درگاه ارسال ایمیل سازمانی</h3>
+                </div>
+                <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                  مدیریت اتصال به میل‌سرورهای SMTP یا وب‌هوک‌های API جهت ارسال خودکار کدهای بازیابی کلمه عبور، اعلان‌های سیستمی و اخبار کارتابل.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 bg-slate-800/80 px-4 py-2.5 rounded-xl border border-slate-700">
+                <span className="text-xs font-bold text-slate-300">وضعیت کلی سرویس:</span>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black ${
+                  emailSettings.isEnabled 
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
+                    : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${emailSettings.isEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></span>
+                  {emailSettings.isEnabled ? 'سرویس فعال است' : 'سرویس غیرفعال است'}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Form Column */}
+              <div className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
+                <form onSubmit={handleSaveEmailSettings} className="space-y-5">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <Key className="w-4 h-4 text-indigo-600" />
+                      <h4 className="font-bold text-slate-800 text-xs sm:text-sm">مشخصات پروتکل و احراز هویت</h4>
+                    </div>
+                    {isLoadingEmailSettings && (
+                      <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                        <RefreshCw className="w-3 h-3 animate-spin" /> در حال بارگذاری...
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Service Toggle & Feature Flags */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={emailSettings.isEnabled}
+                        onChange={(e) => setEmailSettings({ ...emailSettings, isEnabled: e.target.checked })}
+                        className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                      />
+                      <span className="text-xs font-black text-slate-800">فعال‌سازی ماژول ارسال ایمیل در سامانه</span>
+                    </label>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-200">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={emailSettings.allowPasswordReset}
+                          onChange={(e) => setEmailSettings({ ...emailSettings, allowPasswordReset: e.target.checked })}
+                          className="w-3.5 h-3.5 text-indigo-600 rounded focus:ring-indigo-500"
+                        />
+                        <span className="text-xs text-slate-700">مجاز بودن بازیابی رمز عبور با ایمیل</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={emailSettings.allowNotifications}
+                          onChange={(e) => setEmailSettings({ ...emailSettings, allowNotifications: e.target.checked })}
+                          className="w-3.5 h-3.5 text-indigo-600 rounded focus:ring-indigo-500"
+                        />
+                        <span className="text-xs text-slate-700">ارسال اعلان‌ها و هشدارهای سیستمی</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Provider Selector */}
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-2">نوع پروتکل / ارائه‌دهنده سرویس:</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setEmailSettings({ ...emailSettings, providerType: 'SMTP' })}
+                        className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
+                          emailSettings.providerType === 'SMTP'
+                            ? 'border-indigo-600 bg-indigo-50/60 shadow-xs ring-1 ring-indigo-500'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="font-bold text-xs text-slate-900 flex items-center justify-between">
+                          <span>پروتکل SMTP استاندارد</span>
+                          <span className={`w-3 h-3 rounded-full border ${emailSettings.providerType === 'SMTP' ? 'border-4 border-indigo-600' : 'border-slate-300'}`}></span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-1">اتصال مستقیم به سرورهای ایمیل سازمانی، جیمیل، میل‌گان یا هاست</p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setEmailSettings({ ...emailSettings, providerType: 'WEBHOOK_API' })}
+                        className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
+                          emailSettings.providerType === 'WEBHOOK_API'
+                            ? 'border-indigo-600 bg-indigo-50/60 shadow-xs ring-1 ring-indigo-500'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="font-bold text-xs text-slate-900 flex items-center justify-between">
+                          <span>وب‌سرویس REST API / Webhook</span>
+                          <span className={`w-3 h-3 rounded-full border ${emailSettings.providerType === 'WEBHOOK_API' ? 'border-4 border-indigo-600' : 'border-slate-300'}`}></span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-1">ارسال پیام از طریق وب‌هوک، سرویس‌های ابری یا پنل‌های پیام‌رسان</p>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Sender Details */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">نام فرستنده ایمیل *</label>
+                      <input
+                        type="text"
+                        placeholder="سامانه جامع مدیریت فروش طبرستان"
+                        value={emailSettings.senderName}
+                        onChange={(e) => setEmailSettings({ ...emailSettings, senderName: e.target.value })}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-sans"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">آدرس ایمیل فرستنده (From) *</label>
+                      <input
+                        type="email"
+                        placeholder="noreply@company.com"
+                        value={emailSettings.senderEmail}
+                        onChange={(e) => setEmailSettings({ ...emailSettings, senderEmail: e.target.value })}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* SMTP Form Fields */}
+                  {emailSettings.providerType === 'SMTP' && (
+                    <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-4 space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="sm:col-span-2">
+                          <label className="text-xs font-bold text-slate-700 block mb-1">آدرس هاست SMTP *</label>
+                          <input
+                            type="text"
+                            placeholder="mail.domain.com یا smtp.gmail.com"
+                            value={emailSettings.smtpHost || ''}
+                            onChange={(e) => setEmailSettings({ ...emailSettings, smtpHost: e.target.value })}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">پورت سرور *</label>
+                          <input
+                            type="number"
+                            placeholder="587 یا 465"
+                            value={emailSettings.smtpPort || 587}
+                            onChange={(e) => setEmailSettings({ ...emailSettings, smtpPort: Number(e.target.value) })}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(emailSettings.smtpSecure)}
+                            onChange={(e) => setEmailSettings({ ...emailSettings, smtpSecure: e.target.checked })}
+                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                          />
+                          <span className="text-xs text-slate-700">استفاده از پروتکل امن SSL/TLS (برای پورت ۴۶۵)</span>
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200">
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">نام کاربری SMTP</label>
+                          <input
+                            type="text"
+                            placeholder="user@domain.com"
+                            value={emailSettings.smtpUser || ''}
+                            onChange={(e) => setEmailSettings({ ...emailSettings, smtpUser: e.target.value })}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">
+                            رمز عبور SMTP {emailSettings.hasSmtpPassword && <span className="text-[10px] text-emerald-600 font-normal">(ذخیره شده - بدون تغییر بماند)</span>}
+                          </label>
+                          <input
+                            type="password"
+                            placeholder={emailSettings.hasSmtpPassword ? '••••••••' : 'رمز عبور سرور ایمیل'}
+                            value={emailSettings.smtpPassword || ''}
+                            onChange={(e) => setEmailSettings({ ...emailSettings, smtpPassword: e.target.value })}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Webhook API Form Fields */}
+                  {emailSettings.providerType === 'WEBHOOK_API' && (
+                    <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-4 space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                        <div className="sm:col-span-3">
+                          <label className="text-xs font-bold text-slate-700 block mb-1">آدرس وب‌سرویس / Webhook URL *</label>
+                          <input
+                            type="url"
+                            placeholder="https://api.mailservice.com/v1/send"
+                            value={emailSettings.apiUrl || ''}
+                            onChange={(e) => setEmailSettings({ ...emailSettings, apiUrl: e.target.value })}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">متد HTTP</label>
+                          <select
+                            value={emailSettings.apiMethod || 'POST'}
+                            onChange={(e) => setEmailSettings({ ...emailSettings, apiMethod: e.target.value as any })}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                          >
+                            <option value="POST">POST</option>
+                            <option value="PUT">PUT</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 block mb-1">
+                          کلید احراز هویت (API Key / Bearer Token) {emailSettings.hasApiKey && <span className="text-[10px] text-emerald-600 font-normal">(ذخیره شده)</span>}
+                        </label>
+                        <input
+                          type="password"
+                          placeholder={emailSettings.hasApiKey ? '••••••••' : 'Bearer token یا کلید دسترسی'}
+                          value={emailSettings.apiKey || ''}
+                          onChange={(e) => setEmailSettings({ ...emailSettings, apiKey: e.target.value })}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 block mb-1">هدرهای اختصاصی (اختیاری - هر هدر در یک خط به فرمت Key: Value)</label>
+                        <textarea
+                          rows={2}
+                          placeholder="X-Custom-Client: SalesDashboard&#10;X-Tenant-Id: 1002"
+                          value={emailSettings.customHeaders || ''}
+                          onChange={(e) => setEmailSettings({ ...emailSettings, customHeaders: e.target.value })}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-2 flex items-center justify-end gap-3">
+                    <button
+                      type="submit"
+                      disabled={isSavingEmailSettings}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-5 rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                    >
+                      {isSavingEmailSettings ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                      <span>ذخیره و اعمال تنظیمات ایمیل</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Diagnostics & Test Delivery Column */}
+              <div className="lg:col-span-5 space-y-5">
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+                  <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+                    <Activity className="w-4 h-4 text-emerald-600" />
+                    <h4 className="font-bold text-slate-800 text-xs sm:text-sm">تست اتصال و ارسال آزمایشی (Diagnostics)</h4>
+                  </div>
+
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    جهت اطمینان از صحت دسترسی به سرور و گذر از فایروال، می‌توانید یک پیام آزمایشی به آدرس ایمیل دلخواه ارسال کنید و لاگ خط‌به‌خط اتصال را مشاهده فرمایید.
+                  </p>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-700 block">آدرس ایمیل گیرنده آزمایشی:</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        placeholder="your-email@company.com"
+                        value={testRecipientEmail}
+                        onChange={(e) => setTestRecipientEmail(e.target.value)}
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRunEmailDiagnostic}
+                        disabled={isTestingEmailConnection}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-xs transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50 shrink-0"
+                      >
+                        {isTestingEmailConnection ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        <span>ارسال و تست</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Diagnostic Output Log Window */}
+                  {diagnosticResult && (
+                    <div className="mt-4 pt-4 border-t border-slate-200 space-y-3 animate-fade-in">
+                      <div className={`p-3 rounded-xl border flex items-center gap-2 text-xs font-bold ${
+                        diagnosticResult.success 
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                          : 'bg-rose-50 border-rose-200 text-rose-800'
+                      }`}>
+                        {diagnosticResult.success ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                        )}
+                        <span>{diagnosticResult.message}</span>
+                      </div>
+
+                      <div>
+                        <div className="text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
+                          <span>لاگ تشخیصی ارتباط سرور:</span>
+                          <span className="font-mono text-[10px] text-slate-400">{new Date(diagnosticResult.timestamp).toLocaleTimeString('fa-IR')}</span>
+                        </div>
+                        <div className="bg-slate-900 text-emerald-400 p-3 rounded-xl font-mono text-[11px] space-y-1 max-h-48 overflow-y-auto dir-ltr text-left border border-slate-800 shadow-inner">
+                          {diagnosticResult.logs.map((log, index) => (
+                            <div key={index} className="leading-snug">
+                              {log}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Helpful Hints Card */}
+                <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-5 text-xs text-amber-900 space-y-2">
+                  <div className="flex items-center gap-2 font-bold text-amber-950">
+                    <Sparkles className="w-4 h-4 text-amber-600" />
+                    <span>راهنمای اتصال امن:</span>
+                  </div>
+                  <ul className="list-disc list-inside space-y-1 text-slate-700 text-[11px] leading-relaxed">
+                    <li>برای سرویس Gmail حتماً از <strong>App Password</strong> به جای رمز اصلی اکانت استفاده فرمایید.</li>
+                    <li>پورت‌های رایج: ۵۸۷ برای STARTTLS و ۴۶۵ برای SSL مستقیم.</li>
+                    <li>در صورت استفاده از وب‌هوک، خروجی JSON درخواست حاوی فیلدهای to, subject, html و from خواهد بود.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
+
+      {/* ONE-TIME TEMPORARY CREDENTIALS MODAL */}
+      {issuedCredentials && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 animate-fade-in font-sans" id="issued-credentials-modal">
+          <div className="bg-white rounded-2xl border-2 border-indigo-200 max-w-md w-full p-6 shadow-2xl text-right dir-rtl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
+                  <Key className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">
+                    {issuedCredentials.isReset ? 'رمز عبور موقت صادر گردید' : 'رمز عبور اولیه کاربر صادر گردید'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">اطلاعات احراز هویت اولیه جهت تحویل به کاربر</p>
+                </div>
+              </div>
+              <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded-full">
+                ⚠️ فقط یک‌بار قابل رویت
+              </span>
+            </div>
+
+            {/* User Info Summary */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2 text-xs">
+              <div className="flex justify-between items-center border-b border-slate-200/80 pb-1.5">
+                <span className="text-slate-500">نام و نام خانوادگی:</span>
+                <strong className="text-slate-900 font-sans">{issuedCredentials.fullName}</strong>
+              </div>
+              <div className="flex justify-between items-center border-b border-slate-200/80 pb-1.5">
+                <span className="text-slate-500">نام کاربری ورود (Username):</span>
+                <strong className="font-mono text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 font-bold">
+                  {issuedCredentials.username}
+                </strong>
+              </div>
+              {issuedCredentials.phoneNumber && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">شماره تماس (جهت پیامک OTP):</span>
+                  <strong className="font-mono text-slate-800">{issuedCredentials.phoneNumber}</strong>
+                </div>
+              )}
+            </div>
+
+            {/* Temporary Password Highlight Box */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-700 block">
+                کلمه عبور موقت اختصاص‌یافته:
+              </label>
+              <div className="flex items-center gap-2 bg-slate-900 text-white rounded-xl p-3 border border-slate-700 shadow-inner">
+                <span className="flex-1 font-mono text-base tracking-wider text-amber-300 select-all text-left dir-ltr font-bold">
+                  {issuedCredentials.tempPassword}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(issuedCredentials.tempPassword, 'رمز عبور موقت در حافظه کپی شد.')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs ${
+                    copiedPassword
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-black'
+                  }`}
+                  title="کپی سریع رمز عبور موقت"
+                >
+                  {copiedPassword ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedPassword ? 'کپی شد!' : 'کپی سریع رمز'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Action Options */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => copyToClipboard(issuedCredentials.tempPassword, 'رمز عبور موقت در حافظه کپی شد.')}
+                className="py-2 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-200 shadow-2xs"
+                title="کپی سریع رمز"
+              >
+                <Copy className="w-3.5 h-3.5 text-indigo-600" />
+                <span>کپی فقط رمز</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const msg = `همکار گرامی (${issuedCredentials.fullName})،\nاطلاعات ورود به سامانه صنایع سفال طبرستان:\nنام کاربری: ${issuedCredentials.username}\nرمز عبور موقت: ${issuedCredentials.tempPassword}\n\n⚠️ توجه: لطفاً پس از اولین ورود، حتماً نسبت به تغییر کلمه عبور اختصاصی خود اقدام فرمایید.`;
+                  copyToClipboard(msg, 'متن کامل پیام ورود در حافظه کپی شد.');
+                }}
+                className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 shadow-2xs"
+                title="کپی پیام آماده جهت ارسال در پیامک، ایتا، بله یا تلگرام"
+              >
+                <Copy className="w-3.5 h-3.5 text-slate-600" />
+                <span>کپی پیام کامل به کاربر</span>
+              </button>
+            </div>
+
+            {/* Critical Security Warning */}
+            <div className="bg-amber-50/90 border border-amber-300 rounded-xl p-3 text-[11px] text-amber-900 space-y-1.5 leading-relaxed">
+              <p className="font-bold flex items-center gap-1 text-amber-950">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>پیام مهم امنیتی:</span>
+              </p>
+              <p className="text-[10px] text-amber-800 font-sans">
+                این کلمه عبور موقت به دلایل امنیتی <strong>فقط در این پنجره نمایش داده می‌شود</strong> و پس از بستن آن، در هیچ بخش دیگری از سامانه قابل مشاهده نخواهد بود. لطفاً آن را یادداشت کرده یا کپی نمایید و به کاربر تحویل دهید.
+              </p>
+              <p className="text-[10px] text-amber-800 font-sans">
+                کاربر پس از اولین ورود با این رمز موقت، به صورت خودکار توسط سامانه ملزم به تعریف کلمه عبور اختصاصی خواهد شد.
+              </p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setIssuedCredentials(null)}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-2.5 px-4 rounded-xl text-xs transition-colors cursor-pointer shadow flex items-center justify-center gap-2"
+              >
+                <span>رمز را کپی و یادداشت نمودم (تأیید و بستن)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

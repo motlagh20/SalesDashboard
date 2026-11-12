@@ -150,6 +150,7 @@ export interface Agent {
   economicCode?: string; // شماره اقتصادی (مشترک)
   nationalId?: string; // شناسه ملی (برای اشخاص حقوقی)
   nationalCode?: string; // کد ملی نماینده (برای اشخاص حقیقی)
+  userId?: string; // شناسه حساب کاربری متناظر
 }
 
 export interface ShippingCompany {
@@ -163,6 +164,7 @@ export interface ShippingCompany {
   password?: string;
   nationalId?: string; // شناسه ملی (برای شرکت‌های حمل و نقل)
   economicCode?: string; // شماره اقتصادی (برای شرکت‌های حمل و نقل)
+  userId?: string; // شناسه حساب کاربری متناظر
 }
 
 export interface PermanentDriver {
@@ -193,6 +195,7 @@ export interface AppUser {
   username: string;
   fullName: string;
   phoneNumber: string;
+  email?: string | null;
   role: UserRole;
   agentCode?: string | null;
   shippingCompanyId?: string | null;
@@ -201,4 +204,28 @@ export interface AppUser {
   lastSeenAt?: string | null;
   mustChangePassword?: boolean;
   token?: string;
+}
+
+export type EmailProviderType = 'SMTP' | 'WEBHOOK_API';
+
+export interface EmailSettings {
+  providerType: EmailProviderType;
+  isEnabled: boolean;
+  senderName: string;
+  senderEmail: string;
+  allowPasswordReset: boolean;
+  allowNotifications: boolean;
+  // SMTP
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpSecure?: boolean;
+  smtpUser?: string;
+  smtpPassword?: string;
+  hasSmtpPassword?: boolean;
+  // Webhook / API
+  apiUrl?: string;
+  apiKey?: string;
+  hasApiKey?: boolean;
+  apiMethod?: 'POST' | 'PUT';
+  customHeaders?: string;
 }
