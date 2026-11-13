@@ -25,6 +25,7 @@ import {
   authorize,
   generateToken,
   verifyToken,
+  verifyRecoveryToken,
   hasRole,
   extractToken,
   assertJwtSecretConfiguration,
@@ -54,23 +55,36 @@ import {
   checkAndRecordOtpRequest,
   checkVerificationRateLimit,
   recordFailedVerification,
-  getClientIp
+  getClientIp,
+  EMAIL_OTP_EXPIRY_SECONDS,
+  checkAndRecordEmailIdentifierRateLimit,
+  checkAndRecordEmailAccountRateLimit,
+  checkEmailVerificationRateLimit,
+  recordEmailFailedVerification,
+  issueEmailOtp,
+  verifyEmailOtp,
+  deleteEmailOtp,
+  issueRecoveryToken,
+  consumeRecoveryToken,
+  checkEmailSettingsTestRateLimit
 } from "./server/otp";
 import { sendOtpSms, isSmsConfigured } from "./server/sms";
 import {
   getEmailSettings,
+  getEmailPublicSettings,
   getMaskedEmailSettings,
   saveEmailSettings,
+  validateEmailSettingsInput,
   sendEmail,
   testEmailConnection,
   generatePasswordResetEmailHtml,
-  checkEmailOtpRateLimit,
-  issueEmailOtp,
-  verifyEmailOtp,
+  generateEmailVerificationHtml,
   isValidEmail,
   normalizeEmail,
   maskEmail,
-  EMAIL_OTP_EXPIRY_SECONDS
+  sanitizeEmailLogText,
+  EmailEncryptionError,
+  EmailValidationError
 } from "./server/email";
 import { hashPassword, verifyPassword, isDefaultPassword, isDefaultPasswordOrMatches, DEFAULT_PASSWORD_BCRYPT_HASH, generateTemporaryPassword } from "./server/password";
 import { sanitizeUser, sanitizeUsers } from "./server/sanitizer";
@@ -2958,7 +2972,12 @@ function compactItemsJson(itemsInput: any): string | null {
       // Check if user has default password or mustChangePassword
       const isDefault = isDefaultPasswordOrMatches(user.password) || Boolean(user.mustChangePassword);
 
-      const token = generateToken({ id: user.id, username: user.username, role: user.role });
+      const token = generateToken({
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        tokenVersion: Number(user.tokenVersion ?? 0)
+      });
       setAuthCookie(res, token, req);
 
       res.json({
@@ -3045,7 +3064,12 @@ function compactItemsJson(itemsInput: any): string | null {
         }
       }
 
-      const token = generateToken({ id: user.id, username: user.username, role: user.role });
+      const token = generateToken({
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        tokenVersion: Number(user.tokenVersion ?? 0)
+      });
       setAuthCookie(res, token, req);
 
       res.json({
@@ -3206,6 +3230,8 @@ function compactItemsJson(itemsInput: any): string | null {
 
       const hashedPassword = await hashPassword(trimmedPass);
       await db.query("UPDATE app_users SET password = ?, mustChangePassword = 0 WHERE id = ?", [hashedPassword, user.id]);
+      await db.query("UPDATE app_users SET tokenVersion = COALESCE(tokenVersion, 0) + 1 WHERE id = ?", [user.id]).catch(() => {});
+      clearAuthCookie(res, req);
 
       await logUserActivity({
         userId: user.id,
@@ -3225,18 +3251,25 @@ function compactItemsJson(itemsInput: any): string | null {
     }
   });
 
-  // SEND FORGOT PASSWORD EMAIL OTP
+  // PUBLIC PASSWORD RECOVERY OPTIONS (Exposes only availability flags; zero secrets)
+  app.get("/api/auth/recovery-options", (_req, res) => {
+    const publicSettings = getEmailPublicSettings();
+    res.json({
+      success: true,
+      smsEnabled: true,
+      emailEnabled: Boolean(publicSettings.isEnabled && publicSettings.allowPasswordReset)
+    });
+  });
+
+  // SEND FORGOT PASSWORD EMAIL OTP (Zero Enumeration, Verified Email Only, Redis Fail-Closed)
   app.post("/api/auth/forgot-password-email-send", async (req, res) => {
     try {
-      const emailSettings = getEmailSettings();
-      if (!emailSettings.isEnabled) {
-        return sendApiError(res, 400, "سرویس ارسال ایمیل در حال حاضر غیرفعال است. لطفاً از بازیابی پیامکی استفاده فرمایید.");
-      }
-      if (!emailSettings.allowPasswordReset) {
-        return sendApiError(res, 403, "امکان بازیابی رمز عبور از طریق ایمیل توسط مدیر سیستم مسدود شده است.");
+      const publicSettings = getEmailPublicSettings();
+      if (!publicSettings.isEnabled || !publicSettings.allowPasswordReset) {
+        return sendApiError(res, 403, "بازیابی رمز عبور از طریق ایمیل در حال حاضر توسط مدیر سیستم غیرفعال است.");
       }
 
-      const rawInput = sanitizeString(req.body.identifier || req.body.email || req.body.username, {
+      const rawInput = sanitizeString(req.body.identifier ?? req.body.email ?? req.body.username, {
         allowEmpty: false,
         maxLength: 150,
         fieldName: "شناسه کاربری یا آدرس ایمیل"
@@ -3244,157 +3277,456 @@ function compactItemsJson(itemsInput: any): string | null {
       const cleanInput = rawInput.trim();
       const clientIp = getClientIp(req);
 
-      // Check IP rate limit
-      const ipVerifyCheck = await checkVerificationRateLimit(clientIp);
-      if (!ipVerifyCheck.allowed) {
-        return sendApiError(res, 429, ipVerifyCheck.error || "تعداد درخواست‌های بیش از حد مجاز از این آدرس IP.");
+      const genericSuccessPayload = {
+        success: true,
+        message: "در صورت تایید بودن حساب کاربری و آدرس ایمیل ثبت‌شده، کد یکبار مصرف بازیابی به ایمیل شما ارسال گردید.",
+        expiresIn: EMAIL_OTP_EXPIRY_SECONDS
+      };
+
+      // Enforce IP and identifier cooldown/sliding-window quota BEFORE DB lookup (prevents timing/quota user enumeration)
+      const identRateCheck = await checkAndRecordEmailIdentifierRateLimit({
+        identifier: cleanInput,
+        ip: clientIp,
+        purpose: "PASSWORD_RESET"
+      });
+      if (!identRateCheck.allowed) {
+        if (identRateCheck.isServiceUnavailable) {
+          return sendApiError(res, 503, identRateCheck.error || "سرویس ارسال کد ایمیل موقتاً در دسترس نیست.");
+        }
+        if (identRateCheck.retryAfter) {
+          res.setHeader("Retry-After", String(identRateCheck.retryAfter));
+        }
+        return sendApiError(res, 429, identRateCheck.error || "تعداد درخواست‌های بازیابی بیش از حد مجاز است.");
       }
 
       const db = getDbPool();
       const [rows] = await db.query(
-        "SELECT * FROM app_users WHERE email = ? OR username = ? OR phoneNumber = ?",
+        "SELECT * FROM app_users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR phoneNumber = ?",
         [cleanInput, cleanInput, cleanInput]
       );
       const matched = rows as any[];
 
-      // Prevent account enumeration with consistent response
       if (matched.length === 0) {
-        return res.json({
-          success: true,
-          message: "در صورت ثبت بودن حساب کاربری و ایمیل متناظر، کد یکبار مصرف ارسال گردید.",
-          expiresIn: EMAIL_OTP_EXPIRY_SECONDS
-        });
+        return res.json(genericSuccessPayload);
       }
 
       const user = matched[0];
-      if (!user.isEnabled) {
-        return sendApiError(res, 403, "حساب کاربری غیرفعال است و امکان بازیابی رمز وجود ندارد.");
-      }
-
-      if (!user.email || !isValidEmail(user.email)) {
-        return sendApiError(res, 400, "برای این حساب کاربری آدرس ایمیل معتبر ثبت نشده است. لطفاً از طریق شماره همراه (پیامک) یا تماس با مدیر سیستم اقدام نمایید.");
+      if (!user.isEnabled || !user.email || !isValidEmail(user.email) || !Boolean(user.emailVerified)) {
+        // Uniform neutral 200 response: never disclose disabled accounts, missing emails, or unverified emails
+        return res.json(genericSuccessPayload);
       }
 
       const targetEmail = normalizeEmail(user.email);
 
-      // Check email-specific rate limit and cooldown
-      const rateCheck = checkEmailOtpRateLimit(targetEmail);
-      if (!rateCheck.allowed) {
-        if (rateCheck.retryAfter) {
-          res.setHeader("Retry-After", String(rateCheck.retryAfter));
+      // Account & verified-email quota check across all login aliases
+      const acctRateCheck = await checkAndRecordEmailAccountRateLimit({
+        userId: user.id,
+        email: targetEmail,
+        purpose: "PASSWORD_RESET"
+      });
+      if (!acctRateCheck.allowed) {
+        if (acctRateCheck.isServiceUnavailable) {
+          return sendApiError(res, 503, acctRateCheck.error || "سرویس ارسال کد ایمیل موقتاً در دسترس نیست.");
         }
-        return sendApiError(res, 429, rateCheck.error || "لطفاً چند لحظه بعد تلاش فرمایید.");
+        if (acctRateCheck.retryAfter) {
+          res.setHeader("Retry-After", String(acctRateCheck.retryAfter));
+        }
+        return sendApiError(res, 429, acctRateCheck.error || "تعداد درخواست‌های بازیابی بیش از حد مجاز است.");
       }
 
-      // Generate secure OTP
-      const { code: otpCode, expiresIn } = issueEmailOtp(targetEmail, "PASSWORD_RESET");
+      // Issue cryptographically random OTP stored ONLY as HMAC-SHA256 hash in Redis
+      const issued = await issueEmailOtp(user.id, targetEmail, "PASSWORD_RESET");
+      if (!issued.success || !issued.code) {
+        return sendApiError(res, 503, issued.error || "سرویس نگهداری کدهای امنیتی موقتاً در دسترس نیست.");
+      }
 
-      // Generate HTML email and send
-      const emailHtml = generatePasswordResetEmailHtml(otpCode, user.fullName || user.username);
+      // Dispatch strictly to the DB-stored verified user.email
+      const emailHtml = generatePasswordResetEmailHtml(issued.code, user.fullName || user.username);
       const sendResult = await sendEmail({
         to: targetEmail,
         subject: "کد تایید بازیابی کلمه عبور - سامانه جامع مدیریت فروش",
         html: emailHtml,
-        text: `کد تایید بازیابی کلمه عبور شما در سامانه مدیریت فروش: ${otpCode} (اعتبار ۵ دقیقه)`
+        text: `کد تایید بازیابی کلمه عبور شما در سامانه مدیریت فروش: ${issued.code} (اعتبار ۵ دقیقه)`
       });
 
       if (!sendResult.success) {
-        console.error(`[Email Auth] Recovery email dispatch failed for ${maskEmail(targetEmail)}:`, sendResult.error);
-        return sendApiError(res, 502, sendResult.error || "خطا در ارسال ایمیل بازیابی رمز عبور.");
+        await deleteEmailOtp(user.id, "PASSWORD_RESET");
+        const safeErr = sanitizeEmailLogText(sendResult.error || "send failure", [issued.code]);
+        console.error(`[Email Auth] Recovery email dispatch failed for ${maskEmail(targetEmail)}:`, safeErr);
+        return sendApiError(res, 502, "خطا در ارسال ایمیل بازیابی رمز عبور. لطفاً دقایقی دیگر تلاش نمایید.");
       }
 
-      const isProd = isProductionEnvironment();
-      const responsePayload: any = {
-        success: true,
-        message: `کد تایید بازیابی کلمه عبور به ایمیل ${maskEmail(targetEmail)} ارسال گردید.`,
-        maskedEmail: maskEmail(targetEmail),
-        expiresIn
-      };
-
-      if (!isProd) {
-        responsePayload.devOtp = otpCode;
-      }
-
-      res.json(responsePayload);
+      // NEVER return devOtp, plaintext OTP, or maskedEmail in response
+      res.json(genericSuccessPayload);
     } catch (err: any) {
-      console.error("Error in /api/auth/forgot-password-email-send:", err);
+      console.error("Error in /api/auth/forgot-password-email-send:", sanitizeEmailLogText(err?.message || "error"));
       return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
-  // VERIFY AND RESET PASSWORD VIA EMAIL OTP
-  app.post("/api/auth/forgot-password-email-reset", async (req, res) => {
+  // VERIFY EMAIL OTP AND ISSUE SINGLE-USE SCOPED RECOVERY TOKEN
+  app.post("/api/auth/forgot-password-email-verify", async (req, res) => {
     try {
-      const rawInput = sanitizeString(req.body.identifier || req.body.email || req.body.username, {
+      const publicSettings = getEmailPublicSettings();
+      if (!publicSettings.isEnabled || !publicSettings.allowPasswordReset) {
+        return sendApiError(res, 403, "بازیابی رمز عبور از طریق ایمیل در حال حاضر غیرفعال است.");
+      }
+
+      const rawInput = sanitizeString(req.body.identifier ?? req.body.email ?? req.body.username, {
         allowEmpty: false,
         maxLength: 150,
         fieldName: "شناسه کاربری یا آدرس ایمیل"
       });
       const cleanCode = sanitizeString(req.body.code, { allowEmpty: false, maxLength: 20, fieldName: "کد تایید" });
-      const safeNewPassword = sanitizeString(req.body.newPassword, { allowEmpty: false, maxLength: 200, fieldName: "رمز عبور جدید" });
+      const cleanInput = rawInput.trim();
       const clientIp = getClientIp(req);
 
-      // Rate limit IP attempts
-      const ipVerifyCheck = await checkVerificationRateLimit(clientIp);
+      const ipVerifyCheck = await checkEmailVerificationRateLimit(clientIp);
       if (!ipVerifyCheck.allowed) {
+        if (ipVerifyCheck.isServiceUnavailable) {
+          return sendApiError(res, 503, ipVerifyCheck.error || "سرویس اعتبارسنجی موقتاً در دسترس نیست.");
+        }
         return sendApiError(res, 429, ipVerifyCheck.error || "تعداد دفعات تلاش اشتباه بیش از حد مجاز است.");
       }
 
+      const genericInvalidMsg = "کد تایید وارد شده نادرست است یا منقضی شده است.";
       const db = getDbPool();
-      const cleanInput = rawInput.trim();
       const [rows] = await db.query(
-        "SELECT * FROM app_users WHERE email = ? OR username = ? OR phoneNumber = ?",
+        "SELECT * FROM app_users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR phoneNumber = ?",
         [cleanInput, cleanInput, cleanInput]
       );
       const matched = rows as any[];
 
       if (matched.length === 0) {
-        await recordFailedVerification(clientIp);
-        return sendApiError(res, 400, "کد تایید وارد شده نادرست است یا منقضی شده است.");
+        const rec = await recordEmailFailedVerification(clientIp);
+        if (rec.isServiceUnavailable) {
+          return sendApiError(res, 503, "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است.");
+        }
+        return sendApiError(res, 400, genericInvalidMsg);
       }
 
       const user = matched[0];
-      if (!user.isEnabled) {
-        return sendApiError(res, 403, "حساب کاربری غیرفعال است.");
+      if (!user.isEnabled || !user.email || !isValidEmail(user.email) || !Boolean(user.emailVerified)) {
+        const rec = await recordEmailFailedVerification(clientIp);
+        if (rec.isServiceUnavailable) {
+          return sendApiError(res, 503, "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است.");
+        }
+        return sendApiError(res, 400, genericInvalidMsg);
       }
 
-      if (!user.email || !isValidEmail(user.email)) {
-        return sendApiError(res, 400, "حساب کاربری فاقد آدرس ایمیل معتبر است.");
+      const targetEmail = normalizeEmail(user.email);
+      const verifyResult = await verifyEmailOtp(user.id, targetEmail, cleanCode, "PASSWORD_RESET");
+      if (!verifyResult.success) {
+        if (verifyResult.reason === "REDIS_UNAVAILABLE") {
+          return sendApiError(res, 503, verifyResult.error);
+        }
+        const rec = await recordEmailFailedVerification(clientIp);
+        if (rec.isServiceUnavailable) {
+          return sendApiError(res, 503, "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است.");
+        }
+        return sendApiError(res, 400, genericInvalidMsg);
       }
 
+      const tokenRes = await issueRecoveryToken(
+        {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          tokenVersion: Number(user.tokenVersion ?? 0)
+        },
+        targetEmail
+      );
+
+      if (!tokenRes.success || !tokenRes.recoveryToken) {
+        return sendApiError(res, 503, tokenRes.error || "سرویس صدور توکن بازیابی موقتاً در دسترس نیست.");
+      }
+
+      res.json({
+        success: true,
+        recoveryToken: tokenRes.recoveryToken,
+        expiresIn: tokenRes.expiresIn,
+        message: "کد تایید با موفقیت احراز شد. لطفاً کلمه عبور جدید خود را ثبت نمایید."
+      });
+    } catch (err: any) {
+      console.error("Error in /api/auth/forgot-password-email-verify:", sanitizeEmailLogText(err?.message || "error"));
+      return handleServerError(res, err, req.originalUrl || req.url);
+    }
+  });
+
+  // RESET PASSWORD VIA SINGLE-USE RECOVERY TOKEN OR EMAIL OTP
+  app.post("/api/auth/forgot-password-email-reset", async (req, res) => {
+    try {
+      const publicSettings = getEmailPublicSettings();
+      if (!publicSettings.isEnabled || !publicSettings.allowPasswordReset) {
+        return sendApiError(res, 403, "بازیابی رمز عبور از طریق ایمیل در حال حاضر غیرفعال است.");
+      }
+
+      const safeNewPassword = sanitizeString(req.body.newPassword, { allowEmpty: false, maxLength: 200, fieldName: "رمز عبور جدید" });
       const trimmedPass = safeNewPassword.trim();
       if (trimmedPass.length < 6) {
         return sendApiError(res, 400, "رمز عبور جدید باید حداقل ۶ کاراکتر باشد.");
       }
-
       if (isDefaultPassword(trimmedPass)) {
         return sendApiError(res, 400, "استفاده از کلمه عبور پیش‌فرض (مانند 123456) مجاز نیست. لطفاً یک رمز عبور امن و اختصاصی انتخاب فرمایید.");
       }
 
-      const targetEmail = normalizeEmail(user.email);
-      const verifyResult = verifyEmailOtp(targetEmail, cleanCode, "PASSWORD_RESET");
-      if (!verifyResult.success) {
-        await recordFailedVerification(clientIp);
-        return sendApiError(res, 400, verifyResult.error || "کد تایید نامعتبر است.");
+      const clientIp = getClientIp(req);
+      const db = getDbPool();
+      const rawRecoveryToken = typeof req.body.recoveryToken === "string" ? req.body.recoveryToken.trim() : "";
+
+      let targetUser: any = null;
+      let targetEmail = "";
+
+      if (rawRecoveryToken) {
+        const genericTokenErr = "توکن بازیابی نامعتبر، منقضی یا قبلاً استفاده شده است.";
+        const payload = verifyRecoveryToken(rawRecoveryToken);
+        if (!payload || !payload.jti || !payload.recoveryEmail) {
+          return sendApiError(res, 400, genericTokenErr);
+        }
+
+        const [rows] = await db.query("SELECT * FROM app_users WHERE id = ?", [payload.userId]);
+        const matched = rows as any[];
+        if (matched.length === 0) {
+          return sendApiError(res, 400, genericTokenErr);
+        }
+
+        const candidate = matched[0];
+        if (!candidate.isEnabled || !candidate.email || !isValidEmail(candidate.email) || !Boolean(candidate.emailVerified)) {
+          return sendApiError(res, 400, genericTokenErr);
+        }
+        const candEmail = normalizeEmail(candidate.email);
+        if (candEmail !== normalizeEmail(payload.recoveryEmail)) {
+          return sendApiError(res, 400, genericTokenErr);
+        }
+        if (Number(candidate.tokenVersion ?? 0) !== Number(payload.tv ?? 0)) {
+          return sendApiError(res, 400, genericTokenErr);
+        }
+
+        const consumeRes = await consumeRecoveryToken(payload.jti, candidate.id, candEmail);
+        if (!consumeRes.valid) {
+          if (consumeRes.isServiceUnavailable) {
+            return sendApiError(res, 503, consumeRes.error || "سرویس تایید توکن بازیابی موقتاً در دسترس نیست.");
+          }
+          return sendApiError(res, 400, consumeRes.error || genericTokenErr);
+        }
+
+        targetUser = candidate;
+        targetEmail = candEmail;
+      } else {
+        const rawInput = sanitizeString(req.body.identifier ?? req.body.email ?? req.body.username, {
+          allowEmpty: false,
+          maxLength: 150,
+          fieldName: "شناسه کاربری یا آدرس ایمیل"
+        });
+        const cleanCode = sanitizeString(req.body.code, { allowEmpty: false, maxLength: 20, fieldName: "کد تایید" });
+        const cleanInput = rawInput.trim();
+
+        const ipVerifyCheck = await checkEmailVerificationRateLimit(clientIp);
+        if (!ipVerifyCheck.allowed) {
+          if (ipVerifyCheck.isServiceUnavailable) {
+            return sendApiError(res, 503, ipVerifyCheck.error || "سرویس اعتبارسنجی موقتاً در دسترس نیست.");
+          }
+          return sendApiError(res, 429, ipVerifyCheck.error || "تعداد دفعات تلاش اشتباه بیش از حد مجاز است.");
+        }
+
+        const genericInvalidMsg = "کد تایید وارد شده نادرست است یا منقضی شده است.";
+        const [rows] = await db.query(
+          "SELECT * FROM app_users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR phoneNumber = ?",
+          [cleanInput, cleanInput, cleanInput]
+        );
+        const matched = rows as any[];
+        if (matched.length === 0) {
+          const rec = await recordEmailFailedVerification(clientIp);
+          if (rec.isServiceUnavailable) {
+            return sendApiError(res, 503, "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است.");
+          }
+          return sendApiError(res, 400, genericInvalidMsg);
+        }
+
+        const candidate = matched[0];
+        if (!candidate.isEnabled || !candidate.email || !isValidEmail(candidate.email) || !Boolean(candidate.emailVerified)) {
+          const rec = await recordEmailFailedVerification(clientIp);
+          if (rec.isServiceUnavailable) {
+            return sendApiError(res, 503, "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است.");
+          }
+          return sendApiError(res, 400, genericInvalidMsg);
+        }
+
+        const candEmail = normalizeEmail(candidate.email);
+        const verifyResult = await verifyEmailOtp(candidate.id, candEmail, cleanCode, "PASSWORD_RESET");
+        if (!verifyResult.success) {
+          if (verifyResult.reason === "REDIS_UNAVAILABLE") {
+            return sendApiError(res, 503, verifyResult.error);
+          }
+          const rec = await recordEmailFailedVerification(clientIp);
+          if (rec.isServiceUnavailable) {
+            return sendApiError(res, 503, "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است.");
+          }
+          return sendApiError(res, 400, genericInvalidMsg);
+        }
+
+        targetUser = candidate;
+        targetEmail = candEmail;
       }
 
       const hashedPassword = await hashPassword(trimmedPass);
-      await db.query("UPDATE app_users SET password = ?, mustChangePassword = 0 WHERE id = ?", [hashedPassword, user.id]);
+      await db.query("UPDATE app_users SET password = ?, mustChangePassword = 0 WHERE id = ?", [hashedPassword, targetUser.id]);
+      await db.query("UPDATE app_users SET tokenVersion = COALESCE(tokenVersion, 0) + 1 WHERE id = ?", [targetUser.id]).catch(() => {});
+      await deleteEmailOtp(targetUser.id, "PASSWORD_RESET");
+      clearAuthCookie(res, req);
 
       await logUserActivity({
-        userId: user.id,
-        userName: user.fullName || user.username,
-        userRole: user.role,
+        userId: targetUser.id,
+        userName: targetUser.fullName || targetUser.username,
+        userRole: targetUser.role,
         action: "بازیابی کلمه عبور از طریق ایمیل",
-        details: `رمز عبور کاربر از طریق کد یکبار مصرف ایمیلی (${maskEmail(targetEmail)}) با موفقیت بازنشانی شد.`,
+        details: `رمز عبور کاربر از طریق کد یکبار مصرف ایمیلی (${maskEmail(targetEmail)}) بازنشانی شد و تمام نشست‌های قبلی لغو گردید.`,
         module: "AUTH",
-        ipAddress: req.ip || "127.0.0.1",
+        ipAddress: clientIp,
         status: "SUCCESS"
       }).catch(() => {});
 
       res.json({ success: true, message: "رمز عبور با موفقیت بازنشانی شد. اکنون می‌توانید با رمز عبور جدید وارد شوید." });
     } catch (err: any) {
-      console.error("Error in /api/auth/forgot-password-email-reset:", err);
+      console.error("Error in /api/auth/forgot-password-email-reset:", sanitizeEmailLogText(err?.message || "error"));
+      return handleServerError(res, err, req.originalUrl || req.url);
+    }
+  });
+
+  // SELF-SERVICE AUTHENTICATED EMAIL OWNERSHIP VERIFICATION (SEND & VERIFY)
+  app.post("/api/auth/email-verification/send", authenticate, async (req, res) => {
+    try {
+      const publicSettings = getEmailPublicSettings();
+      if (!publicSettings.isEnabled) {
+        return sendApiError(res, 403, "سرویس ارسال ایمیل در سامانه غیرفعال است.");
+      }
+
+      const db = getDbPool();
+      const [rows] = await db.query("SELECT * FROM app_users WHERE id = ?", [req.user!.id]);
+      const matched = rows as any[];
+      if (matched.length === 0) {
+        return sendApiError(res, 404, "کاربر یافت نشد.");
+      }
+      const user = matched[0];
+      if (!user.email || !isValidEmail(user.email)) {
+        return sendApiError(res, 400, "آدرس ایمیل معتبری برای حساب کاربری شما ثبت نشده است.");
+      }
+
+      const targetEmail = normalizeEmail(user.email);
+      const clientIp = getClientIp(req);
+
+      const identRate = await checkAndRecordEmailIdentifierRateLimit({
+        identifier: `verify:${user.id}:${targetEmail}`,
+        ip: clientIp,
+        purpose: "EMAIL_VERIFICATION"
+      });
+      if (!identRate.allowed) {
+        if (identRate.isServiceUnavailable) {
+          return sendApiError(res, 503, identRate.error || "سرویس ارسال کد تایید ایمیل موقتاً در دسترس نیست.");
+        }
+        if (identRate.retryAfter) res.setHeader("Retry-After", String(identRate.retryAfter));
+        return sendApiError(res, 429, identRate.error || "تعداد درخواست‌ها بیش از حد مجاز است.");
+      }
+
+      const acctRate = await checkAndRecordEmailAccountRateLimit({
+        userId: user.id,
+        email: targetEmail,
+        purpose: "EMAIL_VERIFICATION"
+      });
+      if (!acctRate.allowed) {
+        if (acctRate.isServiceUnavailable) {
+          return sendApiError(res, 503, acctRate.error || "سرویس ارسال کد تایید ایمیل موقتاً در دسترس نیست.");
+        }
+        if (acctRate.retryAfter) res.setHeader("Retry-After", String(acctRate.retryAfter));
+        return sendApiError(res, 429, acctRate.error || "تعداد درخواست‌ها بیش از حد مجاز است.");
+      }
+
+      const issued = await issueEmailOtp(user.id, targetEmail, "EMAIL_VERIFICATION");
+      if (!issued.success || !issued.code) {
+        return sendApiError(res, 503, issued.error || "سرویس نگهداری کدهای امنیتی موقتاً در دسترس نیست.");
+      }
+
+      const emailHtml = generateEmailVerificationHtml(issued.code, user.fullName || user.username);
+      const sendResult = await sendEmail({
+        to: targetEmail,
+        subject: "تایید آدرس ایمیل حساب کاربری - سامانه مدیریت فروش",
+        html: emailHtml,
+        text: `کد تایید آدرس ایمیل شما: ${issued.code} (اعتبار ۵ دقیقه)`
+      });
+
+      if (!sendResult.success) {
+        await deleteEmailOtp(user.id, "EMAIL_VERIFICATION");
+        return sendApiError(res, 502, "خطا در ارسال ایمیل تایید. لطفاً دقایقی دیگر تلاش نمایید.");
+      }
+
+      res.json({
+        success: true,
+        message: "کد تایید مالکیت ایمیل با موفقیت ارسال گردید.",
+        expiresIn: EMAIL_OTP_EXPIRY_SECONDS
+      });
+    } catch (err: any) {
+      return handleServerError(res, err, req.originalUrl || req.url);
+    }
+  });
+
+  app.post("/api/auth/email-verification/verify", authenticate, async (req, res) => {
+    try {
+      const cleanCode = sanitizeString(req.body.code, { allowEmpty: false, maxLength: 20, fieldName: "کد تایید" });
+      const clientIp = getClientIp(req);
+
+      const ipCheck = await checkEmailVerificationRateLimit(clientIp);
+      if (!ipCheck.allowed) {
+        if (ipCheck.isServiceUnavailable) {
+          return sendApiError(res, 503, ipCheck.error || "سرویس اعتبارسنجی موقتاً در دسترس نیست.");
+        }
+        return sendApiError(res, 429, ipCheck.error || "تعداد دفعات تلاش اشتباه بیش از حد مجاز است.");
+      }
+
+      const db = getDbPool();
+      const [rows] = await db.query("SELECT * FROM app_users WHERE id = ?", [req.user!.id]);
+      const matched = rows as any[];
+      if (matched.length === 0) {
+        return sendApiError(res, 404, "کاربر یافت نشد.");
+      }
+      const user = matched[0];
+      if (!user.email || !isValidEmail(user.email)) {
+        return sendApiError(res, 400, "آدرس ایمیل معتبری برای حساب کاربری شما ثبت نشده است.");
+      }
+
+      const targetEmail = normalizeEmail(user.email);
+      const verifyRes = await verifyEmailOtp(user.id, targetEmail, cleanCode, "EMAIL_VERIFICATION");
+      if (!verifyRes.success) {
+        if (verifyRes.reason === "REDIS_UNAVAILABLE") {
+          return sendApiError(res, 503, verifyRes.error);
+        }
+        const rec = await recordEmailFailedVerification(clientIp);
+        if (rec.isServiceUnavailable) {
+          return sendApiError(res, 503, "سرویس اعتبارسنجی موقتاً در دسترس نیست.");
+        }
+        return sendApiError(res, 400, verifyRes.error || "کد تایید وارد شده نادرست است یا منقضی شده است.");
+      }
+
+      const nowIso = new Date().toISOString();
+      await db.query("UPDATE app_users SET emailVerified = 1, emailVerifiedAt = ? WHERE id = ?", [nowIso, user.id]);
+
+      await logUserActivity({
+        userId: user.id,
+        userName: user.fullName || user.username,
+        userRole: user.role,
+        action: "تایید آدرس ایمیل",
+        details: `آدرس ایمیل (${maskEmail(targetEmail)}) توسط کاربر تایید شد.`,
+        module: "AUTH",
+        ipAddress: clientIp,
+        status: "SUCCESS"
+      }).catch(() => {});
+
+      res.json({
+        success: true,
+        emailVerified: true,
+        emailVerifiedAt: nowIso,
+        message: "آدرس ایمیل شما با موفقیت تایید شد."
+      });
+    } catch (err: any) {
       return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
@@ -3474,6 +3806,7 @@ function compactItemsJson(itemsInput: any): string | null {
       // Administrative reset sets mustChangePassword = 1 so the target must change it before gaining full access
       const mustChangeVal = isSelf ? 0 : 1;
       await db.query("UPDATE app_users SET password = ?, mustChangePassword = ? WHERE id = ?", [hashedNew, mustChangeVal, safeId]);
+      await db.query("UPDATE app_users SET tokenVersion = COALESCE(tokenVersion, 0) + 1 WHERE id = ?", [safeId]).catch(() => {});
 
       await logUserActivity({
         userId: req.user.id,
@@ -3497,8 +3830,14 @@ function compactItemsJson(itemsInput: any): string | null {
         });
       }
 
-      // When user changes their own password, issue a fresh token for their session
-      const freshToken = generateToken({ id: user.id, username: user.username, role: user.role });
+      // When user changes their own password, issue a fresh token with incremented tokenVersion
+      const updatedTokenVersion = Number(user.tokenVersion ?? 0) + 1;
+      const freshToken = generateToken({
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        tokenVersion: updatedTokenVersion
+      });
       setAuthCookie(res, freshToken, req);
 
       res.json({
@@ -3852,7 +4191,7 @@ function compactItemsJson(itemsInput: any): string | null {
 
       const db = getDbPool();
 
-      // Check unique constraint on username and phoneNumber
+      // Check unique constraint on username, phoneNumber, and email
       const [existingUsers] = await db.query(
         "SELECT id, username, phoneNumber FROM app_users WHERE username = ? OR phoneNumber = ?",
         [username, phoneNumber]
@@ -3860,6 +4199,19 @@ function compactItemsJson(itemsInput: any): string | null {
       if (existingUsers && existingUsers.length > 0) {
         return sendApiError(res, 409, "نام کاربری یا شماره همراه قبلاً در سیستم ثبت شده است.");
       }
+
+      if (email) {
+        const [existingEmail] = await db.query(
+          "SELECT id FROM app_users WHERE email = ? AND id != ?",
+          [email, "__none__"]
+        ) as any[];
+        if (existingEmail && existingEmail.length > 0) {
+          return sendApiError(res, 409, "این آدرس ایمیل قبلاً برای کاربر دیگری در سیستم ثبت شده است.");
+        }
+      }
+
+      const emailVerified = email && req.body.emailVerified === true ? 1 : 0;
+      const emailVerifiedAt = emailVerified ? new Date().toISOString() : null;
 
       const id = `usr-${Date.now()}`;
       
@@ -3872,9 +4224,9 @@ function compactItemsJson(itemsInput: any): string | null {
       const hashedPassword = await hashPassword(rawPassword);
 
       await db.query(`
-        INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, email, password, mustChangePassword)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-      `, [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, email, hashedPassword, mustChange]);
+        INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, email, emailVerified, emailVerifiedAt, password, mustChangePassword, tokenVersion)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0)
+      `, [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, email, emailVerified, emailVerifiedAt, hashedPassword, mustChange]);
 
       await recordActivity(
         req,
@@ -3895,6 +4247,8 @@ function compactItemsJson(itemsInput: any): string | null {
           shippingCompanyId,
           isEnabled: 1,
           email,
+          emailVerified: Boolean(emailVerified),
+          emailVerifiedAt,
           mustChangePassword: Boolean(mustChange)
         }),
         tempPassword: rawPassword,
@@ -4017,7 +4371,7 @@ function compactItemsJson(itemsInput: any): string | null {
         }
       }
 
-      let email = targetUser.email || null;
+      let email: string | null = targetUser.email ? normalizeEmail(targetUser.email) : null;
       if (req.body.email !== undefined) {
         if (req.body.email === null || req.body.email === "") {
           email = null;
@@ -4035,6 +4389,34 @@ function compactItemsJson(itemsInput: any): string | null {
         }
       }
 
+      const prevEmail = targetUser.email ? normalizeEmail(targetUser.email) : null;
+      const emailChanged = email !== prevEmail;
+      if (email && emailChanged) {
+        const [dupEmail] = await db.query("SELECT id FROM app_users WHERE email = ? AND id != ?", [email, id]) as any[];
+        if (dupEmail && dupEmail.length > 0) {
+          return sendApiError(res, 409, "این آدرس ایمیل قبلاً توسط کاربر دیگری ثبت شده است.");
+        }
+      }
+
+      let emailVerified = Boolean(targetUser.emailVerified) ? 1 : 0;
+      let emailVerifiedAt: string | null = targetUser.emailVerifiedAt || null;
+      if (!email) {
+        emailVerified = 0;
+        emailVerifiedAt = null;
+      } else if (emailChanged) {
+        // Any email modification automatically resets verified status unless admin explicitly sets emailVerified: true
+        if (req.body.emailVerified === true) {
+          emailVerified = 1;
+          emailVerifiedAt = new Date().toISOString();
+        } else {
+          emailVerified = 0;
+          emailVerifiedAt = null;
+        }
+      } else if (typeof req.body.emailVerified === "boolean") {
+        emailVerified = req.body.emailVerified ? 1 : 0;
+        emailVerifiedAt = req.body.emailVerified ? (emailVerifiedAt || new Date().toISOString()) : null;
+      }
+
       const rawPassword = req.body.password ? sanitizeString(req.body.password, { fieldName: "کلمه عبور", maxLength: 100, required: false }) : "";
       if (rawPassword) {
         if (rawPassword.length < 6) {
@@ -4045,15 +4427,19 @@ function compactItemsJson(itemsInput: any): string | null {
         const mustChange = (req.user.id !== id) ? 1 : (isDefault ? 1 : 0);
         await db.query(`
           UPDATE app_users 
-          SET username = ?, fullName = ?, phoneNumber = ?, role = ?, agentCode = ?, shippingCompanyId = ?, isEnabled = ?, email = ?, password = ?, mustChangePassword = ?
+          SET username = ?, fullName = ?, phoneNumber = ?, role = ?, agentCode = ?, shippingCompanyId = ?, isEnabled = ?, email = ?, emailVerified = ?, emailVerifiedAt = ?, password = ?, mustChangePassword = ?
           WHERE id = ?
-        `, [username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, email, hashedPassword, mustChange, id]);
+        `, [username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, email, emailVerified, emailVerifiedAt, hashedPassword, mustChange, id]);
+        await db.query("UPDATE app_users SET tokenVersion = COALESCE(tokenVersion, 0) + 1 WHERE id = ?", [id]).catch(() => {});
       } else {
         await db.query(`
           UPDATE app_users 
-          SET username = ?, fullName = ?, phoneNumber = ?, role = ?, agentCode = ?, shippingCompanyId = ?, isEnabled = ?, email = ?
+          SET username = ?, fullName = ?, phoneNumber = ?, role = ?, agentCode = ?, shippingCompanyId = ?, isEnabled = ?, email = ?, emailVerified = ?, emailVerifiedAt = ?
           WHERE id = ?
-        `, [username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, email, id]);
+        `, [username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, email, emailVerified, emailVerifiedAt, id]);
+        if (!isEnabled) {
+          await db.query("UPDATE app_users SET tokenVersion = COALESCE(tokenVersion, 0) + 1 WHERE id = ?", [id]).catch(() => {});
+        }
       }
 
       await recordActivity(
@@ -4109,6 +4495,7 @@ function compactItemsJson(itemsInput: any): string | null {
         SET password = ?, mustChangePassword = 1
         WHERE id = ?
       `, [hashedPassword, id]);
+      await db.query("UPDATE app_users SET tokenVersion = COALESCE(tokenVersion, 0) + 1 WHERE id = ?", [id]).catch(() => {});
 
       await recordActivity(
         req,
@@ -4133,23 +4520,62 @@ function compactItemsJson(itemsInput: any): string | null {
     }
   });
 
-  // --- EMAIL SERVICE MANAGEMENT (Admin only) ---
+  // --- EMAIL SERVICE MANAGEMENT (Admin/SalesManager only) ---
+  const extractAllowedEmailSettingsPayload = (rawBody: any) => {
+    if (!rawBody || typeof rawBody !== "object") {
+      throw new EmailValidationError("ساختار تنظیمات ایمیل نامعتبر است.");
+    }
+    if (
+      rawBody.rejectUnauthorized === false ||
+      rawBody.ignoreTlsErrors === true ||
+      (rawBody.tls && typeof rawBody.tls === "object" && rawBody.tls.rejectUnauthorized === false)
+    ) {
+      throw new EmailValidationError("غیرفعال‌سازی اعتبارسنجی گواهی TLS به دلایل امنیتی مجاز نمی‌باشد.");
+    }
+
+    const sanitized: any = {};
+    if (rawBody.providerType !== undefined) sanitized.providerType = rawBody.providerType === "WEBHOOK_API" ? "WEBHOOK_API" : "SMTP";
+    if (rawBody.isEnabled !== undefined) sanitized.isEnabled = Boolean(rawBody.isEnabled);
+    if (rawBody.senderName !== undefined) sanitized.senderName = sanitizeString(rawBody.senderName, { maxLength: 120, allowEmpty: true });
+    if (rawBody.senderEmail !== undefined) sanitized.senderEmail = sanitizeString(rawBody.senderEmail, { maxLength: 150, allowEmpty: false, fieldName: "ایمیل فرستنده" });
+    if (rawBody.allowPasswordReset !== undefined) sanitized.allowPasswordReset = Boolean(rawBody.allowPasswordReset);
+    if (rawBody.allowNotifications !== undefined) sanitized.allowNotifications = Boolean(rawBody.allowNotifications);
+    if (rawBody.smtpHost !== undefined) sanitized.smtpHost = sanitizeString(rawBody.smtpHost, { maxLength: 255, allowEmpty: true });
+    if (rawBody.smtpPort !== undefined) sanitized.smtpPort = Number(rawBody.smtpPort);
+    if (rawBody.smtpSecure !== undefined) sanitized.smtpSecure = Boolean(rawBody.smtpSecure);
+    if (rawBody.smtpUser !== undefined) sanitized.smtpUser = sanitizeString(rawBody.smtpUser, { maxLength: 150, allowEmpty: true });
+    if (typeof rawBody.smtpPassword === "string" && rawBody.smtpPassword.length > 0) sanitized.smtpPassword = rawBody.smtpPassword;
+    if (rawBody.clearSmtpPassword === true) sanitized.clearSmtpPassword = true;
+    if (rawBody.webhookProvider !== undefined) {
+      sanitized.webhookProvider =
+        rawBody.webhookProvider === "RESEND" || rawBody.webhookProvider === "POSTMARK"
+          ? rawBody.webhookProvider
+          : "GENERIC";
+    }
+    if (rawBody.apiUrl !== undefined) sanitized.apiUrl = sanitizeString(rawBody.apiUrl, { maxLength: 500, allowEmpty: true });
+    if (typeof rawBody.apiKey === "string" && rawBody.apiKey.length > 0) sanitized.apiKey = rawBody.apiKey;
+    if (rawBody.clearApiKey === true) sanitized.clearApiKey = true;
+    if (rawBody.apiMethod !== undefined) sanitized.apiMethod = rawBody.apiMethod === "PUT" ? "PUT" : "POST";
+    if (rawBody.customHeaders !== undefined) sanitized.customHeaders = String(rawBody.customHeaders || "");
+    return sanitized;
+  };
+
   app.get("/api/system/email-settings", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
       const masked = getMaskedEmailSettings();
       res.json({ success: true, settings: masked });
     } catch (err: any) {
-      console.error("Error in GET /api/system/email-settings:", err);
+      console.error("Error in GET /api/system/email-settings:", sanitizeEmailLogText(err?.message || "error"));
       return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   app.put("/api/system/email-settings", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
-      const callerRole = normalizeRole(req.user!.role);
-      const callerName = req.user!.fullName || req.user!.username || "مدیر سیستم";
+      const sanitizedPayload = extractAllowedEmailSettingsPayload(req.body);
+      await validateEmailSettingsInput(sanitizedPayload);
 
-      const updated = saveEmailSettings(req.body);
+      const updated = saveEmailSettings(sanitizedPayload);
 
       await recordActivity(
         req,
@@ -4161,31 +4587,109 @@ function compactItemsJson(itemsInput: any): string | null {
       res.json({
         success: true,
         settings: getMaskedEmailSettings(),
-        message: "تنظیمات سرویس ایمیل با موفقیت ذخیره گردید."
+        message: "تنظیمات سرویس ایمیل با موفقیت ذخیره و رمزگذاری گردید."
       });
     } catch (err: any) {
-      console.error("Error in PUT /api/system/email-settings:", err);
+      if (err instanceof EmailValidationError || (err instanceof ApiError && err.statusCode < 500)) {
+        return sendApiError(res, err.statusCode || 400, err.message);
+      }
+      if (err instanceof EmailEncryptionError) {
+        return sendApiError(res, err.statusCode || 500, err.message);
+      }
+      console.error("Error in PUT /api/system/email-settings:", sanitizeEmailLogText(err?.message || "error"));
       return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
 
   app.post("/api/system/email-settings/test", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), async (req, res) => {
     try {
-      const recipient = req.body.recipient ? sanitizeString(req.body.recipient, { fieldName: "ایمیل گیرنده آزمایشی", maxLength: 150, required: false }) : undefined;
-      const configOverride = req.body.settings ? req.body.settings : undefined;
+      const clientIp = getClientIp(req);
+      const testRateCheck = await checkEmailSettingsTestRateLimit(req.user!.id, clientIp);
+      if (!testRateCheck.allowed) {
+        if (testRateCheck.isServiceUnavailable) {
+          return sendApiError(res, 503, testRateCheck.error || "سرویس کنترل نرخ ارسال تست موقتاً در دسترس نیست.");
+        }
+        if (testRateCheck.retryAfter) {
+          res.setHeader("Retry-After", String(testRateCheck.retryAfter));
+        }
+        return sendApiError(res, 429, testRateCheck.error || "تعداد تست‌های ارسال ایمیل بیش از حد مجاز است.");
+      }
 
-      const diagnosticResult = await testEmailConnection(configOverride, recipient);
+      const recipientRaw = req.body.recipient
+        ? sanitizeString(req.body.recipient, { fieldName: "ایمیل گیرنده آزمایشی", maxLength: 150, required: false })
+        : undefined;
+      const recipient = recipientRaw ? normalizeEmail(recipientRaw) : undefined;
+      if (recipient && !isValidEmail(recipient)) {
+        return sendApiError(res, 400, "آدرس ایمیل گیرنده آزمایشی نامعتبر است.");
+      }
+
+      let effectiveConfig: any = undefined;
+      const secretsToScrub: string[] = [];
+
+      if (req.body.settings) {
+        const override = extractAllowedEmailSettingsPayload(req.body.settings);
+        await validateEmailSettingsInput(override);
+        if (override.smtpPassword) secretsToScrub.push(override.smtpPassword);
+        if (override.apiKey) secretsToScrub.push(override.apiKey);
+
+        // Load saved secrets ONLY if needed and ONLY if target host/user or webhook URL still matches saved settings (prevents credential exfiltration)
+        const publicSaved = getEmailPublicSettings();
+        const needsSavedSmtpPass = override.providerType !== "WEBHOOK_API" && !override.smtpPassword && override.clearSmtpPassword !== true && publicSaved.passwordConfigured;
+        const needsSavedApiKey = override.providerType === "WEBHOOK_API" && !override.apiKey && override.clearApiKey !== true && publicSaved.apiKeyConfigured;
+
+        let savedDecrypted: any = null;
+        if (needsSavedSmtpPass || needsSavedApiKey) {
+          savedDecrypted = getEmailSettings();
+          if (savedDecrypted.smtpPassword) secretsToScrub.push(savedDecrypted.smtpPassword);
+          if (savedDecrypted.apiKey) secretsToScrub.push(savedDecrypted.apiKey);
+        }
+
+        if (needsSavedSmtpPass && savedDecrypted) {
+          const sameHost = String(override.smtpHost ?? "").trim().toLowerCase() === String(savedDecrypted.smtpHost || "").trim().toLowerCase();
+          const samePort = Number(override.smtpPort ?? savedDecrypted.smtpPort) === Number(savedDecrypted.smtpPort);
+          const sameUser = String(override.smtpUser ?? "").trim() === String(savedDecrypted.smtpUser || "").trim();
+          if (!sameHost || !samePort || !sameUser) {
+            return sendApiError(res, 400, "در صورت تغییر آدرس سرور، پورت یا نام کاربری SMTP، وارد کردن مجدد رمز عبور جهت امنیت الزامی است.");
+          }
+          override.smtpPassword = savedDecrypted.smtpPassword;
+        }
+
+        if (needsSavedApiKey && savedDecrypted) {
+          const sameUrl = String(override.apiUrl ?? "").trim() === String(savedDecrypted.apiUrl || "").trim();
+          if (!sameUrl) {
+            return sendApiError(res, 400, "در صورت تغییر آدرس وب‌هوک، وارد کردن مجدد کلید API جهت جلوگیری از افشای کلید قبلی الزامی است.");
+          }
+          override.apiKey = savedDecrypted.apiKey;
+        }
+
+        effectiveConfig = override;
+      }
+
+      const diagnosticResult = await testEmailConnection(effectiveConfig, recipient);
+      const safeDiagnostic = {
+        ...diagnosticResult,
+        message: sanitizeEmailLogText(diagnosticResult.message, secretsToScrub),
+        logs: Array.isArray(diagnosticResult.logs)
+          ? diagnosticResult.logs.map((line) => sanitizeEmailLogText(line, secretsToScrub))
+          : []
+      };
 
       await recordActivity(
         req,
         "تست تشخیصی اتصال ایمیل",
-        `اجرای تست ارسال ایمیل و ارزیابی اتصال (${diagnosticResult.provider}): ${diagnosticResult.success ? 'موفق' : 'ناموفق'}`,
+        `اجرای تست ارسال ایمیل و ارزیابی اتصال (${safeDiagnostic.provider}): ${safeDiagnostic.success ? 'موفق' : 'ناموفق'}`,
         "SYSTEM"
       );
 
-      res.json(diagnosticResult);
+      res.json(safeDiagnostic);
     } catch (err: any) {
-      console.error("Error in POST /api/system/email-settings/test:", err);
+      if (err instanceof EmailValidationError || (err instanceof ApiError && err.statusCode < 500)) {
+        return sendApiError(res, err.statusCode || 400, err.message);
+      }
+      if (err instanceof EmailEncryptionError) {
+        return sendApiError(res, err.statusCode || 500, err.message);
+      }
+      console.error("Error in POST /api/system/email-settings/test:", sanitizeEmailLogText(err?.message || "error"));
       return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
@@ -4218,6 +4722,9 @@ function compactItemsJson(itemsInput: any): string | null {
 
       const newStatus = userObj.isEnabled ? 0 : 1;
       await db.query("UPDATE app_users SET isEnabled = ? WHERE id = ?", [newStatus, id]);
+      if (!newStatus) {
+        await db.query("UPDATE app_users SET tokenVersion = COALESCE(tokenVersion, 0) + 1 WHERE id = ?", [id]).catch(() => {});
+      }
 
       await recordActivity(
         req,

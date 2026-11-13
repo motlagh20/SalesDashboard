@@ -196,6 +196,8 @@ export interface AppUser {
   fullName: string;
   phoneNumber: string;
   email?: string | null;
+  emailVerified?: boolean;
+  emailVerifiedAt?: string | null;
   role: UserRole;
   agentCode?: string | null;
   shippingCompanyId?: string | null;
@@ -207,6 +209,7 @@ export interface AppUser {
 }
 
 export type EmailProviderType = 'SMTP' | 'WEBHOOK_API';
+export type WebhookProviderAdapter = 'GENERIC' | 'RESEND' | 'POSTMARK';
 
 export interface EmailSettings {
   providerType: EmailProviderType;
@@ -221,11 +224,15 @@ export interface EmailSettings {
   smtpSecure?: boolean;
   smtpUser?: string;
   smtpPassword?: string;
-  hasSmtpPassword?: boolean;
+  passwordConfigured?: boolean;
+  clearSmtpPassword?: boolean;
   // Webhook / API
+  webhookProvider?: WebhookProviderAdapter;
   apiUrl?: string;
   apiKey?: string;
-  hasApiKey?: boolean;
+  apiKeyConfigured?: boolean;
+  clearApiKey?: boolean;
   apiMethod?: 'POST' | 'PUT';
   customHeaders?: string;
+  encryptionKeyConfigured?: boolean;
 }

@@ -664,7 +664,7 @@ export function checkOtpRateLimit(
 
   const syncResult = checkOtpRateLimitInMemory(cleanPhone, cleanIp, purpose, now, cooldownSeconds);
 
-  return Object.assign(syncResult, {
+  return Object.assign({ ...syncResult }, {
     then<TResult1 = RateLimitResult, TResult2 = never>(
       onfulfilled?: ((value: RateLimitResult) => TResult1 | PromiseLike<TResult1>) | null,
       onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
@@ -984,6 +984,7 @@ export function resetOtpRateLimitsForTesting(): void {
   otpStore.clear();
   verifyingKeys.clear();
   testCooldownOverride = null;
+  resetEmailOtpStateForTesting();
 }
 
 /**
@@ -1260,3 +1261,890 @@ export function getDevOtp(phone: string, purpose: "LOGIN" | "PASSWORD_RESET"): s
   if (!record || Date.now() > record.expiresAt) return null;
   return record.code;
 }
+
+// ============================================================================
+// HARDENED REDIS-BACKED EMAIL OTP & PASSWORD RECOVERY TOKENS (FAIL CLOSED)
+// ============================================================================
+
+import { generateRecoveryToken, getJwtSecret } from "./auth";
+
+export type EmailOtpPurpose = "PASSWORD_RESET" | "EMAIL_VERIFICATION";
+
+export const EMAIL_OTP_EXPIRY_SECONDS = 300; // 5 minutes
+export const EMAIL_OTP_MAX_ATTEMPTS = 5;
+export const EMAIL_OTP_ACCOUNT_MAX_REQUESTS = 5;
+export const EMAIL_OTP_IP_MAX_REQUESTS = 10;
+export const EMAIL_OTP_WINDOW_MS = 15 * 60 * 1000;
+export const RECOVERY_TOKEN_EXPIRY_SECONDS = 300; // 5 minutes
+export const EMAIL_TEST_RATE_WINDOW_MS = 60 * 1000; // 60 seconds
+export const EMAIL_TEST_MAX_REQUESTS = 5;
+
+let emailOtpCooldownOverride: number | null = null;
+export function getEmailOtpCooldownSeconds(): number {
+  if (emailOtpCooldownOverride !== null) return emailOtpCooldownOverride;
+  return parseInt(process.env.EMAIL_OTP_COOLDOWN_SECONDS || "60", 10);
+}
+
+export function setEmailOtpCooldownSecondsForTesting(seconds: number | null): void {
+  emailOtpCooldownOverride = seconds;
+}
+
+// In-memory rate-limit fallback strictly for non-OTP admin /test endpoint when dev has no Redis
+const adminTestEmailTimestamps = new Map<string, number[]>();
+
+export function resetEmailOtpStateForTesting(): void {
+  emailOtpCooldownOverride = null;
+  adminTestEmailTimestamps.clear();
+}
+
+function getEmailOtpHmacSecret(): string {
+  const dedicated = process.env.OTP_HMAC_SECRET?.trim();
+  if (dedicated && dedicated.length >= 16) {
+    return dedicated;
+  }
+  const encKey = process.env.EMAIL_SETTINGS_ENCRYPTION_KEY?.trim();
+  if (encKey && encKey.length >= 16) {
+    return encKey;
+  }
+  // Falls back cleanly to validated JWT_SECRET (getJwtSecret fails closed in production if missing)
+  return getJwtSecret();
+}
+
+export function hashEmailIdentifier(value: string): string {
+  const secret = getEmailOtpHmacSecret();
+  return crypto
+    .createHmac("sha256", secret)
+    .update(`salesdashboard:email-id:v1|${String(value || "").trim().toLowerCase()}`, "utf8")
+    .digest("hex");
+}
+
+export function hashEmailOtp(
+  purpose: EmailOtpPurpose,
+  userId: string,
+  email: string,
+  code: string
+): string {
+  const secret = getEmailOtpHmacSecret();
+  const normEmail = String(email || "").trim().toLowerCase();
+  const cleanCode = String(code || "").trim();
+  return crypto
+    .createHmac("sha256", secret)
+    .update(`salesdashboard:email-otp:v1|${purpose}|${userId}|${normEmail}|${cleanCode}`, "utf8")
+    .digest("hex");
+}
+
+export function getRedisEmailOtpKey(purpose: EmailOtpPurpose, userId: string): string {
+  return `${REDIS_NAMESPACE}email_otp:${purpose}:${userId}`;
+}
+
+export function getRedisEmailCooldownKey(purpose: EmailOtpPurpose, keyHash: string): string {
+  return `${REDIS_NAMESPACE}email_cooldown:${purpose}:${keyHash}`;
+}
+
+export function getRedisEmailAccountRateKey(userId: string): string {
+  return `${REDIS_NAMESPACE}email_rate:acct:${userId}`;
+}
+
+export function getRedisEmailAddressRateKey(emailHash: string): string {
+  return `${REDIS_NAMESPACE}email_rate:addr:${emailHash}`;
+}
+
+export function getRedisEmailIpRateKey(ip: string): string {
+  return `${REDIS_NAMESPACE}email_rate:ip:${ip}`;
+}
+
+export function getRedisEmailIdentifierRateKey(identifierHash: string): string {
+  return `${REDIS_NAMESPACE}email_rate:ident:${identifierHash}`;
+}
+
+export function getRedisEmailVerifyIpKey(ip: string): string {
+  return `${REDIS_NAMESPACE}email_verify:ip:${ip}`;
+}
+
+export function getRedisRecoveryTokenKey(jti: string): string {
+  return `${REDIS_NAMESPACE}recovery_token:${jti}`;
+}
+
+const ATOMIC_CHECK_AND_RECORD_EMAIL_IDENTIFIER_LUA = `
+local cooldownTtl = redis.call('TTL', KEYS[1])
+if cooldownTtl > 0 then
+  return { 0, cooldownTtl, 'COOLDOWN' }
+end
+
+local now = tonumber(ARGV[1])
+local windowMs = tonumber(ARGV[2])
+local identMax = tonumber(ARGV[3])
+local ipMax = tonumber(ARGV[4])
+local cooldownSec = tonumber(ARGV[5])
+local memberId = tostring(ARGV[6])
+local windowStart = now - windowMs
+local windowSec = math.ceil(windowMs / 1000)
+
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', windowStart)
+local identCount = redis.call('ZCARD', KEYS[2])
+if identCount >= identMax then
+  local oldest = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+  local retryAfter = windowSec
+  if oldest and #oldest >= 2 then
+    retryAfter = math.max(1, math.ceil((tonumber(oldest[2]) + windowMs - now) / 1000))
+  end
+  return { 0, retryAfter, 'ACCOUNT_LIMIT' }
+end
+
+redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', windowStart)
+local ipCount = redis.call('ZCARD', KEYS[3])
+if ipCount >= ipMax then
+  local oldest = redis.call('ZRANGE', KEYS[3], 0, 0, 'WITHSCORES')
+  local retryAfter = windowSec
+  if oldest and #oldest >= 2 then
+    retryAfter = math.max(1, math.ceil((tonumber(oldest[2]) + windowMs - now) / 1000))
+  end
+  return { 0, retryAfter, 'IP_LIMIT' }
+end
+
+if cooldownSec > 0 then
+  redis.call('SET', KEYS[1], '1', 'EX', cooldownSec)
+end
+
+redis.call('ZADD', KEYS[2], now, memberId)
+redis.call('EXPIRE', KEYS[2], windowSec)
+
+redis.call('ZADD', KEYS[3], now, memberId)
+redis.call('EXPIRE', KEYS[3], windowSec)
+
+return { 1, 0, 'OK' }
+`;
+
+const ATOMIC_CHECK_AND_RECORD_EMAIL_ACCOUNT_LUA = `
+local cooldownTtl = redis.call('TTL', KEYS[1])
+if cooldownTtl > 0 then
+  return { 0, cooldownTtl, 'COOLDOWN' }
+end
+
+local now = tonumber(ARGV[1])
+local windowMs = tonumber(ARGV[2])
+local acctMax = tonumber(ARGV[3])
+local emailMax = tonumber(ARGV[4])
+local cooldownSec = tonumber(ARGV[5])
+local memberId = tostring(ARGV[6])
+local windowStart = now - windowMs
+local windowSec = math.ceil(windowMs / 1000)
+
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', windowStart)
+if redis.call('ZCARD', KEYS[2]) >= acctMax then
+  local oldest = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+  local retryAfter = windowSec
+  if oldest and #oldest >= 2 then
+    retryAfter = math.max(1, math.ceil((tonumber(oldest[2]) + windowMs - now) / 1000))
+  end
+  return { 0, retryAfter, 'ACCOUNT_LIMIT' }
+end
+
+redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', windowStart)
+if redis.call('ZCARD', KEYS[3]) >= emailMax then
+  local oldest = redis.call('ZRANGE', KEYS[3], 0, 0, 'WITHSCORES')
+  local retryAfter = windowSec
+  if oldest and #oldest >= 2 then
+    retryAfter = math.max(1, math.ceil((tonumber(oldest[2]) + windowMs - now) / 1000))
+  end
+  return { 0, retryAfter, 'ACCOUNT_LIMIT' }
+end
+
+if cooldownSec > 0 then
+  redis.call('SET', KEYS[1], '1', 'EX', cooldownSec)
+end
+
+redis.call('ZADD', KEYS[2], now, memberId)
+redis.call('EXPIRE', KEYS[2], windowSec)
+
+redis.call('ZADD', KEYS[3], now, memberId)
+redis.call('EXPIRE', KEYS[3], windowSec)
+
+return { 1, 0, 'OK' }
+`;
+
+const VERIFY_HASHED_EMAIL_OTP_ATOMIC_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return { 0, 'NOT_FOUND', 'کد تایید یافت نشد یا منقضی شده است.' }
+end
+
+local ok, record = pcall(cjson.decode, raw)
+if not ok or not record then
+  redis.call('DEL', KEYS[1])
+  return { 0, 'NOT_FOUND', 'کد تایید یافت نشد یا منقضی شده است.' }
+end
+
+local now = tonumber(ARGV[2])
+if record.expiresAt and now > tonumber(record.expiresAt) then
+  redis.call('DEL', KEYS[1])
+  return { 0, 'EXPIRED', 'کد تایید منقضی شده است. لطفاً مجدداً درخواست ارسال کد نمایید.' }
+end
+
+local expectedPurpose = tostring(ARGV[4])
+local expectedEmailHash = tostring(ARGV[5])
+local maxAttempts = tonumber(ARGV[3])
+
+local attempts = tonumber(record.attempts or 0) + 1
+record.attempts = attempts
+
+if attempts > maxAttempts then
+  redis.call('DEL', KEYS[1])
+  return { 0, 'TOO_MANY_ATTEMPTS', 'تعداد دفعات تلاش اشتباه بیش از حد مجاز است. کد تایید باطل گردید.' }
+end
+
+if tostring(record.purpose or '') ~= expectedPurpose or tostring(record.emailHash or '') ~= expectedEmailHash then
+  local ttl = redis.call('TTL', KEYS[1])
+  if ttl > 0 then
+    redis.call('SET', KEYS[1], cjson.encode(record), 'EX', ttl)
+  end
+  return { 0, 'INVALID', 'کد تایید وارد شده نادرست است یا منقضی شده است.' }
+end
+
+local candidateHash = tostring(ARGV[1])
+local storedHash = tostring(record.codeHash or '')
+
+local isMatch = (#candidateHash == #storedHash) and (#candidateHash == 64)
+if isMatch then
+  local diff = 0
+  for i = 1, #candidateHash do
+    if string.byte(candidateHash, i) ~= string.byte(storedHash, i) then
+      diff = 1
+    end
+  end
+  if diff ~= 0 then
+    isMatch = false
+  end
+end
+
+if not isMatch then
+  local ttl = redis.call('TTL', KEYS[1])
+  if ttl > 0 then
+    redis.call('SET', KEYS[1], cjson.encode(record), 'EX', ttl)
+  end
+  local remaining = maxAttempts - attempts
+  if remaining <= 0 then
+    redis.call('DEL', KEYS[1])
+    return { 0, 'TOO_MANY_ATTEMPTS', 'تعداد دفعات تلاش اشتباه بیش از حد مجاز است. کد تایید باطل گردید.' }
+  end
+  return { 0, 'INVALID', 'کد تایید وارد شده نادرست است. (' .. tostring(remaining) .. ' تلاش باقی‌مانده)' }
+end
+
+-- Atomic single-use deletion
+redis.call('DEL', KEYS[1])
+return { 1, 'OK', '' }
+`;
+
+const CONSUME_RECOVERY_TOKEN_ATOMIC_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return { 0, 'NOT_FOUND', 'توکن بازیابی نامعتبر، منقضی یا قبلاً استفاده شده است.' }
+end
+
+local ok, record = pcall(cjson.decode, raw)
+if not ok or not record then
+  redis.call('DEL', KEYS[1])
+  return { 0, 'INVALID', 'ساختار توکن بازیابی نامعتبر است.' }
+end
+
+if tostring(record.userId or '') ~= tostring(ARGV[1]) or tostring(record.emailHash or '') ~= tostring(ARGV[2]) then
+  return { 0, 'MISMATCH', 'توکن بازیابی با حساب کاربری یا ایمیل مطابقت ندارد.' }
+end
+
+redis.call('DEL', KEYS[1])
+return { 1, 'OK', '' }
+`;
+
+const CHECK_AND_RECORD_TEST_EMAIL_RATE_LUA = `
+local now = tonumber(ARGV[1])
+local windowMs = tonumber(ARGV[2])
+local maxReq = tonumber(ARGV[3])
+local memberId = tostring(ARGV[4])
+local windowStart = now - windowMs
+local windowSec = math.ceil(windowMs / 1000)
+
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', windowStart)
+local count = redis.call('ZCARD', KEYS[1])
+if count >= maxReq then
+  local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+  local retryAfter = windowSec
+  if oldest and #oldest >= 2 then
+    retryAfter = math.max(1, math.ceil((tonumber(oldest[2]) + windowMs - now) / 1000))
+  end
+  return { 0, retryAfter }
+end
+
+redis.call('ZADD', KEYS[1], now, memberId)
+redis.call('EXPIRE', KEYS[1], windowSec)
+return { 1, 0 }
+`;
+
+function formatRateLimitError(reason: string, retryAfter: number): string {
+  if (reason === "COOLDOWN") {
+    return `لطفاً پیش از درخواست مجدد کد تایید، ${retryAfter} ثانیه صبر نمایید.`;
+  }
+  if (reason === "ACCOUNT_LIMIT") {
+    return "تعداد درخواست‌های کد تایید برای این حساب کاربری بیش از حد مجاز است. لطفاً پس از ۱۵ دقیقه مجدداً تلاش فرمایید.";
+  }
+  return "تعداد درخواست‌ها از آدرس شبکه شما بیش از حد مجاز است. لطفاً دقایقی دیگر تلاش فرمایید.";
+}
+
+/**
+ * Checks and records IP + raw identifier cooldown/rate-limit BEFORE looking up whether user exists.
+ * Ensures zero timing/rate-limit differences between existent, unverified, and non-existent accounts.
+ * Strictly fails closed (503) if Redis is unavailable or failing.
+ */
+export async function checkAndRecordEmailIdentifierRateLimit(params: {
+  identifier: string;
+  ip: string;
+  purpose: EmailOtpPurpose;
+}): Promise<RateLimitResult> {
+  const redis = getRedisClient();
+  if (!redis || typeof redis.eval !== "function") {
+    return {
+      allowed: false,
+      isServiceUnavailable: true,
+      error: "سرویس ارسال کد ایمیل به دلیل عدم دسترسی به زیرساخت امنیتی موقتاً در دسترس نیست."
+    };
+  }
+
+  const now = Date.now();
+  const cleanIp = String(params.ip || "127.0.0.1").trim();
+  const identHash = hashEmailIdentifier(params.identifier);
+  const cooldownSec = getEmailOtpCooldownSeconds();
+  const memberId = `${now}:${crypto.randomBytes(6).toString("hex")}`;
+
+  try {
+    const res = await redis.eval(
+      ATOMIC_CHECK_AND_RECORD_EMAIL_IDENTIFIER_LUA,
+      3,
+      getRedisEmailCooldownKey(params.purpose, `id:${identHash}`),
+      getRedisEmailIdentifierRateKey(identHash),
+      getRedisEmailIpRateKey(cleanIp),
+      now,
+      EMAIL_OTP_WINDOW_MS,
+      EMAIL_OTP_ACCOUNT_MAX_REQUESTS,
+      EMAIL_OTP_IP_MAX_REQUESTS,
+      cooldownSec,
+      memberId
+    );
+
+    if (!Array.isArray(res)) {
+      return {
+        allowed: false,
+        isServiceUnavailable: true,
+        error: "سرویس ارسال کد ایمیل موقتاً با اختلال مواجه شده است."
+      };
+    }
+
+    const allowed = Number(res[0]) === 1;
+    const retryAfter = Number(res[1]) || 0;
+    const reason = String(res[2] || "");
+
+    if (!allowed) {
+      return {
+        allowed: false,
+        retryAfter,
+        error: formatRateLimitError(reason, retryAfter)
+      };
+    }
+
+    return { allowed: true };
+  } catch {
+    return {
+      allowed: false,
+      isServiceUnavailable: true,
+      error: "سرویس ارسال کد ایمیل موقتاً با اختلال مواجه شده است."
+    };
+  }
+}
+
+/**
+ * Enforces cooldown and sliding-window rate limits per account userId and normalized verified email.
+ * Prevents inbox flooding by switching between aliases (username/phone/email) for the same account.
+ * Strictly fails closed if Redis is unavailable.
+ */
+export async function checkAndRecordEmailAccountRateLimit(params: {
+  userId: string;
+  email: string;
+  purpose: EmailOtpPurpose;
+}): Promise<RateLimitResult> {
+  const redis = getRedisClient();
+  if (!redis || typeof redis.eval !== "function") {
+    return {
+      allowed: false,
+      isServiceUnavailable: true,
+      error: "سرویس ارسال کد ایمیل به دلیل عدم دسترسی به زیرساخت امنیتی موقتاً در دسترس نیست."
+    };
+  }
+
+  const now = Date.now();
+  const emailHash = hashEmailIdentifier(params.email);
+  const cooldownSec = getEmailOtpCooldownSeconds();
+  const memberId = `${now}:${crypto.randomBytes(6).toString("hex")}`;
+
+  try {
+    const res = await redis.eval(
+      ATOMIC_CHECK_AND_RECORD_EMAIL_ACCOUNT_LUA,
+      3,
+      getRedisEmailCooldownKey(params.purpose, `acct:${params.userId}`),
+      getRedisEmailAccountRateKey(params.userId),
+      getRedisEmailAddressRateKey(emailHash),
+      now,
+      EMAIL_OTP_WINDOW_MS,
+      EMAIL_OTP_ACCOUNT_MAX_REQUESTS,
+      EMAIL_OTP_ACCOUNT_MAX_REQUESTS,
+      cooldownSec,
+      memberId
+    );
+
+    if (!Array.isArray(res)) {
+      return {
+        allowed: false,
+        isServiceUnavailable: true,
+        error: "سرویس ارسال کد ایمیل موقتاً با اختلال مواجه شده است."
+      };
+    }
+
+    const allowed = Number(res[0]) === 1;
+    const retryAfter = Number(res[1]) || 0;
+    const reason = String(res[2] || "");
+
+    if (!allowed) {
+      return {
+        allowed: false,
+        retryAfter,
+        error: formatRateLimitError(reason, retryAfter)
+      };
+    }
+
+    return { allowed: true };
+  } catch {
+    return {
+      allowed: false,
+      isServiceUnavailable: true,
+      error: "سرویس ارسال کد ایمیل موقتاً با اختلال مواجه شده است."
+    };
+  }
+}
+
+/**
+ * Checks verification attempt IP rate limit strictly backed by Redis (fails closed when Redis unavailable).
+ */
+export async function checkEmailVerificationRateLimit(ip: string): Promise<RateLimitResult> {
+  const redis = getRedisClient();
+  if (!redis || typeof redis.eval !== "function") {
+    return {
+      allowed: false,
+      isServiceUnavailable: true,
+      error: "سرویس اعتبارسنجی موقتاً در دسترس نیست."
+    };
+  }
+
+  const cleanIp = String(ip || "127.0.0.1").trim();
+  const now = Date.now();
+  try {
+    const res = await redis.eval(
+      CHECK_VERIFY_RATE_LUA,
+      1,
+      getRedisEmailVerifyIpKey(cleanIp),
+      now,
+      EMAIL_OTP_WINDOW_MS,
+      VERIFY_IP_MAX_ATTEMPTS
+    );
+
+    if (!Array.isArray(res)) {
+      return {
+        allowed: false,
+        isServiceUnavailable: true,
+        error: "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است."
+      };
+    }
+
+    const allowed = Number(res[0]) === 1;
+    const retryAfter = Number(res[1]) || 0;
+    if (!allowed) {
+      return {
+        allowed: false,
+        retryAfter,
+        error: "تعداد دفعات تلاش اشتباه بیش از حد مجاز است. لطفاً پس از ۱۵ دقیقه مجدداً تلاش فرمایید."
+      };
+    }
+    return { allowed: true };
+  } catch {
+    return {
+      allowed: false,
+      isServiceUnavailable: true,
+      error: "سرویس اعتبارسنجی موقتاً با اختلال مواجه شده است."
+    };
+  }
+}
+
+/**
+ * Records a failed Email OTP verification attempt against client IP strictly in Redis (fails closed).
+ */
+export async function recordEmailFailedVerification(
+  ip: string
+): Promise<{ recorded: boolean; count?: number; isServiceUnavailable?: boolean }> {
+  const redis = getRedisClient();
+  if (!redis || typeof redis.eval !== "function") {
+    return { recorded: false, isServiceUnavailable: true };
+  }
+
+  const cleanIp = String(ip || "127.0.0.1").trim();
+  const now = Date.now();
+  const memberId = `${now}:${crypto.randomBytes(6).toString("hex")}`;
+
+  try {
+    const res = await redis.eval(
+      RECORD_FAILED_VERIFY_LUA,
+      1,
+      getRedisEmailVerifyIpKey(cleanIp),
+      now,
+      EMAIL_OTP_WINDOW_MS,
+      VERIFY_IP_MAX_ATTEMPTS,
+      memberId
+    );
+    if (!Array.isArray(res)) {
+      return { recorded: false, isServiceUnavailable: true };
+    }
+    return { recorded: true, count: Number(res[0]) || 0 };
+  } catch {
+    return { recorded: false, isServiceUnavailable: true };
+  }
+}
+
+/**
+ * Issues a cryptographically random 6-digit Email OTP and persists ONLY its HMAC-SHA256 hash in Redis.
+ * Automatically overwrites/invalidates any prior active OTP for the same user & purpose.
+ * Strictly fails closed if Redis is unavailable or write fails.
+ */
+export async function issueEmailOtp(
+  userId: string,
+  email: string,
+  purpose: EmailOtpPurpose = "PASSWORD_RESET"
+): Promise<{
+  success: boolean;
+  code?: string;
+  otpId?: string;
+  expiresIn?: number;
+  isServiceUnavailable?: boolean;
+  error?: string;
+}> {
+  const redis = getRedisClient();
+  if (!redis || typeof redis.set !== "function") {
+    return {
+      success: false,
+      isServiceUnavailable: true,
+      error: "سرویس نگهداری کدهای امنیتی (Redis) در دسترس نیست."
+    };
+  }
+
+  const code = generateSecureOtp(6);
+  const otpId = crypto.randomBytes(12).toString("hex");
+  const now = Date.now();
+  const expiresAt = now + EMAIL_OTP_EXPIRY_SECONDS * 1000;
+  const emailHash = hashEmailIdentifier(email);
+  const codeHash = hashEmailOtp(purpose, userId, email, code);
+
+  const recordPayload = JSON.stringify({
+    otpId,
+    userId,
+    purpose,
+    emailHash,
+    codeHash,
+    createdAt: now,
+    expiresAt,
+    attempts: 0
+  });
+
+  try {
+    const key = getRedisEmailOtpKey(purpose, userId);
+    const setRes = await redis.set(key, recordPayload, "EX", EMAIL_OTP_EXPIRY_SECONDS);
+    if (setRes !== "OK") {
+      return {
+        success: false,
+        isServiceUnavailable: true,
+        error: "خطا در ثبت امن کد یکبار مصرف در حافظه موقت."
+      };
+    }
+
+    return {
+      success: true,
+      code,
+      otpId,
+      expiresIn: EMAIL_OTP_EXPIRY_SECONDS
+    };
+  } catch {
+    return {
+      success: false,
+      isServiceUnavailable: true,
+      error: "خطا در ثبت امن کد یکبار مصرف در حافظه موقت."
+    };
+  }
+}
+
+/**
+ * Atomically verifies a user's Email OTP using HMAC-SHA256 comparison inside Redis Lua.
+ * Single-use guaranteed even under concurrent requests; expires after 5 min or 5 wrong attempts.
+ * Fails closed when Redis is unavailable or throws/returns null.
+ */
+export async function verifyEmailOtp(
+  userId: string,
+  email: string,
+  inputCode: string,
+  purpose: EmailOtpPurpose = "PASSWORD_RESET"
+): Promise<VerifyResult> {
+  const redis = getRedisClient();
+  if (!redis || typeof redis.eval !== "function") {
+    return {
+      success: false,
+      reason: "REDIS_UNAVAILABLE",
+      error: "سرویس اعتبارسنجی ایمیل موقتاً در دسترس نیست."
+    };
+  }
+
+  const cleanCode = String(inputCode || "").trim();
+  const emailHash = hashEmailIdentifier(email);
+  const candidateHash = hashEmailOtp(purpose, userId, email, cleanCode);
+  const now = Date.now();
+
+  try {
+    const key = getRedisEmailOtpKey(purpose, userId);
+    const res = await redis.eval(
+      VERIFY_HASHED_EMAIL_OTP_ATOMIC_LUA,
+      1,
+      key,
+      candidateHash,
+      now,
+      EMAIL_OTP_MAX_ATTEMPTS,
+      purpose,
+      emailHash
+    );
+
+    if (!Array.isArray(res)) {
+      return {
+        success: false,
+        reason: "REDIS_UNAVAILABLE",
+        error: "سرویس اعتبارسنجی ایمیل موقتاً با اختلال مواجه شده است."
+      };
+    }
+
+    const success = Number(res[0]) === 1;
+    const reason = String(res[1]) as any;
+    const error = String(res[2] || "");
+
+    if (success) {
+      return { success: true };
+    }
+    return { success: false, reason, error };
+  } catch {
+    return {
+      success: false,
+      reason: "REDIS_UNAVAILABLE",
+      error: "سرویس اعتبارسنجی ایمیل موقتاً با اختلال مواجه شده است."
+    };
+  }
+}
+
+/**
+ * Deletes an active Email OTP (e.g. rollback on SMTP/webhook failure or after password reset).
+ */
+export async function deleteEmailOtp(userId: string, purpose: EmailOtpPurpose = "PASSWORD_RESET"): Promise<void> {
+  try {
+    const redis = getRedisClient();
+    if (redis && typeof redis.del === "function") {
+      await redis.del(getRedisEmailOtpKey(purpose, userId));
+    }
+  } catch {}
+}
+
+/**
+ * Issues a single-use, short-lived (5 min) PASSWORD_RESET recovery token backed by Redis JTI.
+ * Strictly fails closed when Redis is unavailable.
+ */
+export async function issueRecoveryToken(
+  user: { id: string; username: string; role: string; tokenVersion?: number },
+  email: string
+): Promise<{
+  success: boolean;
+  recoveryToken?: string;
+  jti?: string;
+  expiresIn?: number;
+  isServiceUnavailable?: boolean;
+  error?: string;
+}> {
+  const redis = getRedisClient();
+  if (!redis || typeof redis.set !== "function") {
+    return {
+      success: false,
+      isServiceUnavailable: true,
+      error: "سرویس صدور توکن بازیابی موقتاً در دسترس نیست."
+    };
+  }
+
+  const jti = crypto.randomBytes(16).toString("hex");
+  const emailHash = hashEmailIdentifier(email);
+  const tokenPayload = JSON.stringify({
+    jti,
+    userId: user.id,
+    emailHash,
+    createdAt: Date.now()
+  });
+
+  try {
+    const setRes = await redis.set(
+      getRedisRecoveryTokenKey(jti),
+      tokenPayload,
+      "EX",
+      RECOVERY_TOKEN_EXPIRY_SECONDS
+    );
+    if (setRes !== "OK") {
+      return {
+        success: false,
+        isServiceUnavailable: true,
+        error: "خطا در ثبت امن توکن بازیابی."
+      };
+    }
+
+    const recoveryToken = generateRecoveryToken(user, email, jti, RECOVERY_TOKEN_EXPIRY_SECONDS);
+    return {
+      success: true,
+      recoveryToken,
+      jti,
+      expiresIn: RECOVERY_TOKEN_EXPIRY_SECONDS
+    };
+  } catch {
+    return {
+      success: false,
+      isServiceUnavailable: true,
+      error: "خطا در ثبت امن توکن بازیابی."
+    };
+  }
+}
+
+/**
+ * Atomically verifies and consumes a single-use recovery token JTI from Redis.
+ * Strictly fails closed on Redis outage or replay.
+ */
+export async function consumeRecoveryToken(
+  jti: string,
+  expectedUserId: string,
+  expectedEmail: string
+): Promise<{
+  valid: boolean;
+  reason?: string;
+  isServiceUnavailable?: boolean;
+  error?: string;
+}> {
+  const redis = getRedisClient();
+  if (!redis || typeof redis.eval !== "function") {
+    return {
+      valid: false,
+      isServiceUnavailable: true,
+      error: "سرویس تایید توکن بازیابی موقتاً در دسترس نیست."
+    };
+  }
+
+  const emailHash = hashEmailIdentifier(expectedEmail);
+  try {
+    const res = await redis.eval(
+      CONSUME_RECOVERY_TOKEN_ATOMIC_LUA,
+      1,
+      getRedisRecoveryTokenKey(jti),
+      expectedUserId,
+      emailHash
+    );
+    if (!Array.isArray(res)) {
+      return {
+        valid: false,
+        isServiceUnavailable: true,
+        error: "سرویس تایید توکن بازیابی موقتاً با اختلال مواجه شده است."
+      };
+    }
+
+    const ok = Number(res[0]) === 1;
+    if (!ok) {
+      return {
+        valid: false,
+        reason: String(res[1] || "INVALID"),
+        error: String(res[2] || "توکن بازیابی نامعتبر، منقضی یا قبلاً استفاده شده است.")
+      };
+    }
+
+    return { valid: true };
+  } catch {
+    return {
+      valid: false,
+      isServiceUnavailable: true,
+      error: "سرویس تایید توکن بازیابی موقتاً با اختلال مواجه شده است."
+    };
+  }
+}
+
+/**
+ * Sliding-window rate limit for admin email connection test endpoint (max 5/60s per admin+IP).
+ */
+export async function checkEmailSettingsTestRateLimit(userId: string, ip: string): Promise<RateLimitResult> {
+  const cleanIp = String(ip || "127.0.0.1").trim();
+  const bucketKey = `${userId}:${cleanIp}`;
+  const now = Date.now();
+  const redis = getRedisClient();
+
+  if (redis && typeof redis.eval === "function") {
+    try {
+      const memberId = `${now}:${crypto.randomBytes(6).toString("hex")}`;
+      const res = await redis.eval(
+        CHECK_AND_RECORD_TEST_EMAIL_RATE_LUA,
+        1,
+        `${REDIS_NAMESPACE}rate:email_test:${bucketKey}`,
+        now,
+        EMAIL_TEST_RATE_WINDOW_MS,
+        EMAIL_TEST_MAX_REQUESTS,
+        memberId
+      );
+      if (Array.isArray(res)) {
+        const allowed = Number(res[0]) === 1;
+        const retryAfter = Number(res[1]) || 60;
+        if (!allowed) {
+          return {
+            allowed: false,
+            retryAfter,
+            error: `تعداد تست‌های ارسال ایمیل بیش از حد مجاز است. لطفاً ${retryAfter} ثانیه صبر نمایید.`
+          };
+        }
+        return { allowed: true };
+      }
+    } catch {
+      if (isProductionEnvironment()) {
+        return {
+          allowed: false,
+          isServiceUnavailable: true,
+          error: "سرویس کنترل نرخ ارسال تست موقتاً در دسترس نیست."
+        };
+      }
+    }
+  } else if (isProductionEnvironment()) {
+    return {
+      allowed: false,
+      isServiceUnavailable: true,
+      error: "سرویس کنترل نرخ ارسال تست موقتاً در دسترس نیست."
+    };
+  }
+
+  const windowStart = now - EMAIL_TEST_RATE_WINDOW_MS;
+  const history = (adminTestEmailTimestamps.get(bucketKey) || []).filter((t) => t > windowStart);
+  if (history.length >= EMAIL_TEST_MAX_REQUESTS) {
+    const retryAfter = Math.max(1, Math.ceil((history[0] + EMAIL_TEST_RATE_WINDOW_MS - now) / 1000));
+    adminTestEmailTimestamps.set(bucketKey, history);
+    return {
+      allowed: false,
+      retryAfter,
+      error: `تعداد تست‌های ارسال ایمیل بیش از حد مجاز است. لطفاً ${retryAfter} ثانیه صبر نمایید.`
+    };
+  }
+  history.push(now);
+  adminTestEmailTimestamps.set(bucketKey, history);
+  return { allowed: true };
+}
+

@@ -39,6 +39,32 @@ export function rotateLogFileIfNeeded(filePath: string = LOG_FILE_PATH, maxBytes
   return false;
 }
 
+const SENSITIVE_LOG_KEY_REGEX = /pass(word)?|pwd|secret|api[-_]?key|token|otp|code|auth(orization)?|cookie|credential/i;
+
+function redactSensitiveData(value: any, depth = 0): any {
+  if (depth > 8 || value === null || value === undefined) return value;
+  if (typeof value === "string") {
+    return value
+      .replace(/(Bearer\s+)[A-Za-z0-9._\-+/=]+/gi, "$1[REDACTED]")
+      .replace(/((?:smtpPassword|apiKey|password|recoveryToken|token|otp|code)["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, "$1[REDACTED]");
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSensitiveData(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (SENSITIVE_LOG_KEY_REGEX.test(k)) {
+        out[k] = "[REDACTED]";
+      } else {
+        out[k] = redactSensitiveData(v, depth + 1);
+      }
+    }
+    return out;
+  }
+  return value;
+}
+
 /**
  * Writes detailed database/server errors to a persistent log file in the workspace
  * with bounded log rotation to prevent unbounded disk growth.
@@ -53,16 +79,19 @@ export function writeServerErrorLog(operation: string, error: any, reqBody?: any
     rotateLogFileIfNeeded(LOG_FILE_PATH, MAX_LOG_SIZE_BYTES);
 
     const timestamp = new Date().toISOString();
+    const safeReqBody = reqBody !== undefined ? redactSensitiveData(reqBody) : undefined;
+    const safeMessage = redactSensitiveData(error?.message || "No message");
+    const safeStack = redactSensitiveData(error?.stack || "No stack trace available");
     const errorDetails = {
       timestamp,
       operation,
-      message: error?.message || "No message",
+      message: safeMessage,
       code: error?.code || null,
       errno: error?.errno || null,
       sql: error?.sql || null,
       sqlState: error?.sqlState || null,
-      stack: error?.stack || "No stack trace available",
-      requestBody: reqBody ? JSON.stringify(reqBody) : "None"
+      stack: safeStack,
+      requestBody: safeReqBody !== undefined ? JSON.stringify(safeReqBody) : "None"
     };
 
     const logLine = `[${timestamp}] [${operation}]
@@ -528,6 +557,19 @@ function executeQuery(sql: string, values: any[] = []): any {
       return [matched, []];
     }
 
+    // 2b. WHERE (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR phoneNumber = ?)
+    if (/WHERE\s+\(?\s*(?:LOWER\()?email\)?\s*=\s*(?:LOWER\()?\?\)?\s*OR\s*(?:LOWER\()?username\)?\s*=\s*(?:LOWER\()?\?\)?\s*OR\s*phoneNumber\s*=\s*\?/i.test(cleanSql)) {
+      const targetEmail = values[0] ? String(values[0]).trim().toLowerCase() : "";
+      const targetUser = values[1] ? String(values[1]).trim().toLowerCase() : "";
+      const targetPhone = values[2] ? String(values[2]).trim().toLowerCase() : "";
+      const matched = allUsers.filter((u: any) =>
+        (u.email && String(u.email).trim().toLowerCase() === targetEmail) ||
+        (u.username && String(u.username).trim().toLowerCase() === targetUser) ||
+        (u.phoneNumber && String(u.phoneNumber).trim().toLowerCase() === targetPhone)
+      );
+      return [matched, []];
+    }
+
     // 3. WHERE username = ? OR phoneNumber = ?
     if (/WHERE\s+username\s*=\s*\?\s*OR\s*phoneNumber\s*=\s*\?/i.test(cleanSql)) {
       const uName = values[0] ? String(values[0]).trim().toLowerCase() : "";
@@ -560,6 +602,16 @@ function executeQuery(sql: string, values: any[] = []): any {
       return [matched, []];
     }
 
+    // 6b. WHERE email = ? AND id != ?
+    if (/WHERE\s+(?:LOWER\()?email\)?\s*=\s*(?:LOWER\()?\?\)?\s*AND\s*id\s*(?:!=|<>)\s*\?/i.test(cleanSql)) {
+      const email = values[0] ? String(values[0]).trim().toLowerCase() : "";
+      const excludeId = values[1] ? String(values[1]).trim() : "";
+      const matched = allUsers.filter((u: any) =>
+        u.email && String(u.email).trim().toLowerCase() === email && String(u.id).trim() !== excludeId
+      );
+      return [matched, []];
+    }
+
     // 7. General search / fallback
     if (values && values.length > 0) {
       const searchTerms = values.map((v) => (v ? String(v).trim().toLowerCase() : ""));
@@ -569,6 +621,7 @@ function executeQuery(sql: string, values: any[] = []): any {
           return (
             (u.username && String(u.username).trim().toLowerCase() === term) ||
             (u.phoneNumber && String(u.phoneNumber).trim().toLowerCase() === term) ||
+            (u.email && String(u.email).trim().toLowerCase() === term) ||
             (u.agentCode && String(u.agentCode).trim().toLowerCase() === term) ||
             (u.id && String(u.id).trim().toLowerCase() === term)
           );
@@ -580,8 +633,40 @@ function executeQuery(sql: string, values: any[] = []): any {
   }
 
   if (/INSERT\s+INTO\s+app_users/i.test(cleanSql)) {
-    let id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled = 1, email: string | null = null, password, mustChangePassword = 0;
-    if (values.length === 11) {
+    let id, username, fullName, phoneNumber, role, agentCode: any = null, shippingCompanyId: any = null, isEnabled: any = 1, email: string | null = null, emailVerified: any = 0, emailVerifiedAt: string | null = null, password: any, mustChangePassword: any = 0, tokenVersion: any = 0;
+    const colsMatch = cleanSql.match(/INSERT\s+INTO\s+app_users\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
+    if (colsMatch) {
+      const colNames = colsMatch[1].split(",").map((c) => c.trim().replace(/[`"']/g, ""));
+      const valTokens = colsMatch[2].split(",").map((t) => t.trim());
+      let vIdx = 0;
+      const mapped: Record<string, any> = {};
+      colNames.forEach((col, i) => {
+        const tok = valTokens[i];
+        if (tok === "?") {
+          mapped[col] = values[vIdx++];
+        } else if (tok === "NULL" || tok === "null") {
+          mapped[col] = null;
+        } else if (tok === "0" || tok === "1") {
+          mapped[col] = Number(tok);
+        } else if (tok) {
+          mapped[col] = tok.replace(/^['"]|['"]$/g, "");
+        }
+      });
+      id = mapped.id;
+      username = mapped.username;
+      fullName = mapped.fullName;
+      phoneNumber = mapped.phoneNumber;
+      role = mapped.role || (/REPRESENTATIVE/i.test(cleanSql) ? "REPRESENTATIVE" : (/SHIPPING_COMPANY/i.test(cleanSql) ? "SHIPPING_COMPANY" : "USER"));
+      agentCode = mapped.agentCode ?? null;
+      shippingCompanyId = mapped.shippingCompanyId ?? null;
+      isEnabled = mapped.isEnabled !== undefined ? mapped.isEnabled : 1;
+      email = mapped.email ?? null;
+      emailVerified = mapped.emailVerified !== undefined ? mapped.emailVerified : 0;
+      emailVerifiedAt = mapped.emailVerifiedAt ?? null;
+      password = mapped.password;
+      mustChangePassword = mapped.mustChangePassword !== undefined ? mapped.mustChangePassword : 0;
+      tokenVersion = mapped.tokenVersion !== undefined ? mapped.tokenVersion : 0;
+    } else if (values.length === 11) {
       [id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, email, password, mustChangePassword] = values;
     } else if (values.length === 10) {
       if (/email/i.test(cleanSql)) {
@@ -632,15 +717,33 @@ function executeQuery(sql: string, values: any[] = []): any {
       shippingCompanyId: shippingCompanyId || null,
       isEnabled: Number(isEnabled ?? 1),
       email: email || null,
+      emailVerified: email ? (emailVerified ? 1 : 0) : 0,
+      emailVerifiedAt: email && emailVerified ? (emailVerifiedAt || new Date().toISOString()) : null,
       password: finalPassword,
-      mustChangePassword: finalMustChange
+      mustChangePassword: finalMustChange,
+      tokenVersion: Number(tokenVersion ?? 0)
     });
     saveJsonData(jsonData);
     return [{ affectedRows: 1 }];
   }
 
   if (/UPDATE\s+app_users\s+SET/i.test(cleanSql)) {
-    if (/^\s*UPDATE\s+app_users\s+SET\s+isEnabled\s*=/i.test(cleanSql)) {
+    if (/^\s*UPDATE\s+app_users\s+SET\s+tokenVersion\s*=\s*COALESCE\(\s*tokenVersion\s*,\s*0\s*\)\s*\+\s*1\s+WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
+      const id = values[0];
+      const usr = jsonData.app_users.find((u: any) => u.id === id);
+      if (usr) {
+        usr.tokenVersion = (Number(usr.tokenVersion) || 0) + 1;
+        saveJsonData(jsonData);
+      }
+    } else if (/^\s*UPDATE\s+app_users\s+SET\s+emailVerified\s*=\s*1\s*,\s*emailVerifiedAt\s*=\s*\?\s+WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
+      const [verifiedAt, id] = values;
+      const usr = jsonData.app_users.find((u: any) => u.id === id);
+      if (usr) {
+        usr.emailVerified = 1;
+        usr.emailVerifiedAt = verifiedAt;
+        saveJsonData(jsonData);
+      }
+    } else if (/^\s*UPDATE\s+app_users\s+SET\s+isEnabled\s*=/i.test(cleanSql)) {
       const isEnabledValue = /isEnabled\s*=\s*\?/i.test(cleanSql) ? values[0] : null;
       const id = /isEnabled\s*=\s*\?/i.test(cleanSql) ? (isEnabledValue !== null ? values[1] : values[0]) : values[0];
       const usr = jsonData.app_users.find((u: any) => u.id === id);
@@ -650,9 +753,12 @@ function executeQuery(sql: string, values: any[] = []): any {
         } else {
           usr.isEnabled = usr.isEnabled === 1 ? 0 : 1;
         }
+        if (usr.isEnabled === 0) {
+          usr.tokenVersion = (Number(usr.tokenVersion) || 0) + 1;
+        }
         saveJsonData(jsonData);
       }
-    } else if (/password\s*=\s*\?/i.test(cleanSql) && /WHERE\s+id\s*=\s*\?/i.test(cleanSql) && values.length <= 3) {
+    } else if (/password\s*=\s*\?/i.test(cleanSql) && /WHERE\s+id\s*=\s*\?/i.test(cleanSql) && !/username\s*=\s*\?/i.test(cleanSql) && values.length <= 3) {
       const newPassword = values[0];
       const id = values[values.length - 1];
       const usr = jsonData.app_users.find((u: any) => u.id === id);
@@ -665,6 +771,9 @@ function executeQuery(sql: string, values: any[] = []): any {
         } else if (/mustChangePassword\s*=\s*\?/i.test(cleanSql) && values.length === 3) {
           usr.mustChangePassword = Number(values[1]);
         }
+        if (/tokenVersion\s*=\s*COALESCE\(\s*tokenVersion\s*,\s*0\s*\)\s*\+\s*1/i.test(cleanSql)) {
+          usr.tokenVersion = (Number(usr.tokenVersion) || 0) + 1;
+        }
         saveJsonData(jsonData);
       }
     } else if (/password\s*=\s*\?/i.test(cleanSql) && /WHERE\s+phoneNumber\s*=\s*\?/i.test(cleanSql) && values.length <= 3) {
@@ -675,6 +784,9 @@ function executeQuery(sql: string, values: any[] = []): any {
         usr.password = isBcryptHash(newPassword) ? newPassword : hashPasswordSync(newPassword);
         if (/mustChangePassword\s*=\s*0/i.test(cleanSql)) {
           usr.mustChangePassword = 0;
+        }
+        if (/tokenVersion\s*=\s*COALESCE\(\s*tokenVersion\s*,\s*0\s*\)\s*\+\s*1/i.test(cleanSql)) {
+          usr.tokenVersion = (Number(usr.tokenVersion) || 0) + 1;
         }
         saveJsonData(jsonData);
       }
@@ -714,6 +826,8 @@ function executeQuery(sql: string, values: any[] = []): any {
         if (/shippingCompanyId\s*=\s*\?/i.test(cleanSql)) usr.shippingCompanyId = values[idx++] || null;
         if (/isEnabled\s*=\s*\?/i.test(cleanSql)) usr.isEnabled = Number(values[idx++]);
         if (/email\s*=\s*\?/i.test(cleanSql)) usr.email = values[idx++] || null;
+        if (/emailVerified\s*=\s*\?/i.test(cleanSql)) usr.emailVerified = Number(values[idx++]);
+        if (/emailVerifiedAt\s*=\s*\?/i.test(cleanSql)) usr.emailVerifiedAt = values[idx++] || null;
         if (/password\s*=\s*\?/i.test(cleanSql)) {
           const rawPassword = values[idx++];
           usr.password = isBcryptHash(rawPassword) ? rawPassword : hashPasswordSync(rawPassword);
@@ -724,6 +838,9 @@ function executeQuery(sql: string, values: any[] = []): any {
           usr.mustChangePassword = 0;
         } else if (/mustChangePassword\s*=\s*1/i.test(cleanSql)) {
           usr.mustChangePassword = 1;
+        }
+        if (/tokenVersion\s*=\s*COALESCE\(\s*tokenVersion\s*,\s*0\s*\)\s*\+\s*1/i.test(cleanSql)) {
+          usr.tokenVersion = (Number(usr.tokenVersion) || 0) + 1;
         }
         saveJsonData(jsonData);
       }
@@ -1883,7 +2000,11 @@ export async function bootstrapDatabase() {
         role VARCHAR(50) NOT NULL,
         agentCode VARCHAR(50) NULL,
         shippingCompanyId VARCHAR(100) NULL,
-        isEnabled TINYINT(1) DEFAULT 1
+        isEnabled TINYINT(1) DEFAULT 1,
+        email VARCHAR(150) NULL,
+        emailVerified TINYINT(1) NOT NULL DEFAULT 0,
+        emailVerifiedAt VARCHAR(50) NULL,
+        tokenVersion INT NOT NULL DEFAULT 0
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
@@ -1937,6 +2058,9 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "app_users", "shippingCompanyId", "VARCHAR(100) NULL");
     await ensureColumnExists(db, "app_users", "isEnabled", "TINYINT(1) DEFAULT 1");
     await ensureColumnExists(db, "app_users", "email", "VARCHAR(150) NULL");
+    await ensureColumnExists(db, "app_users", "emailVerified", "TINYINT(1) NOT NULL DEFAULT 0");
+    await ensureColumnExists(db, "app_users", "emailVerifiedAt", "VARCHAR(50) NULL");
+    await ensureColumnExists(db, "app_users", "tokenVersion", "INT NOT NULL DEFAULT 0");
     await ensureColumnExists(db, "app_users", "password", `VARCHAR(255) DEFAULT '${DEFAULT_PASSWORD_BCRYPT_HASH}'`);
     await ensureColumnExists(db, "app_users", "mustChangePassword", "TINYINT(1) DEFAULT 0");
     await ensureColumnExists(db, "app_users", "lastSeenAt", "VARCHAR(50) NULL");
@@ -2010,6 +2134,7 @@ export async function bootstrapDatabase() {
     await ensureIndexExists(db, "order_history", "idx_oh_orderid", "orderId");
     await ensureIndexExists(db, "app_users", "idx_users_username", "username");
     await ensureIndexExists(db, "app_users", "idx_users_phone", "phoneNumber");
+    await ensureIndexExists(db, "app_users", "idx_users_email", "email");
 
     isDbHealthy = true;
     isFallbackMode = false;

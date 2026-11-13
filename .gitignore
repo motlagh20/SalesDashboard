@@ -13,3 +13,5 @@ coverage/
 data/.runtime_jwt_secret
 server/salesdashboard.json
 !server/salesdashboard.example.json
+server/email_settings.json
+data/email_settings.json

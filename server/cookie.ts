@@ -196,7 +196,10 @@ export function csrfProtectionMiddleware(
     req.path === "/api/auth/verify-otp" ||
     req.path === "/api/auth/send-otp" ||
     req.path === "/api/auth/forgot-password-send" ||
-    req.path === "/api/auth/forgot-password-reset"
+    req.path === "/api/auth/forgot-password-reset" ||
+    req.path === "/api/auth/forgot-password-email-send" ||
+    req.path === "/api/auth/forgot-password-email-verify" ||
+    req.path === "/api/auth/forgot-password-email-reset"
   ) {
     return next();
   }

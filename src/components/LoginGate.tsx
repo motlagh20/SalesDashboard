@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Smartphone, ShieldCheck, ArrowRight, Lock, Key, User, Mail } from 'lucide-react';
 import { AppUser } from '../types';
 import TabarestanLogo from './TabarestanLogo';
@@ -25,13 +25,34 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
   const [loginPassword, setLoginPassword] = useState('');
 
   // Password Recovery States
+  const [emailRecoveryEnabled, setEmailRecoveryEnabled] = useState(false);
   const [recoveryChannel, setRecoveryChannel] = useState<'SMS' | 'EMAIL'>('SMS');
   const [recoveryPhone, setRecoveryPhone] = useState('');
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
   const [recoveryNewPassword, setRecoveryNewPassword] = useState('');
   const [recoveryOtp, setRecoveryOtp] = useState<string | null>(null);
-  const [maskedTarget, setMaskedTarget] = useState<string | null>(null);
+  const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
+
+  const fetchRecoveryOptions = async () => {
+    try {
+      const res = await fetch('/api/auth/recovery-options');
+      if (res.ok) {
+        const data = await res.json();
+        const emailAvail = Boolean(data.emailEnabled);
+        setEmailRecoveryEnabled(emailAvail);
+        if (!emailAvail) {
+          setRecoveryChannel('SMS');
+        }
+      }
+    } catch {
+      setEmailRecoveryEnabled(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRecoveryOptions();
+  }, []);
 
   // Default seeded users for Sandbox quick-access: strictly excluded from production bundles
   const defaultAccounts = import.meta.env.DEV
@@ -179,6 +200,10 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
         return;
       }
     } else {
+      if (!emailRecoveryEnabled) {
+        showToast('بازیابی رمز عبور از طریق ایمیل در حال حاضر غیرفعال است.', 'error');
+        return;
+      }
       if (!recoveryEmail.trim()) {
         showToast('لطفا آدرس ایمیل یا نام کاربری حساب خود را وارد کنید.', 'error');
         return;
@@ -187,13 +212,13 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
 
     setLoading(true);
     setRecoveryOtp(null);
-    setMaskedTarget(null);
+    setRecoveryToken(null);
 
     try {
-      const endpoint = recoveryChannel === 'SMS' 
-        ? '/api/auth/forgot-password-send' 
+      const endpoint = recoveryChannel === 'SMS'
+        ? '/api/auth/forgot-password-send'
         : '/api/auth/forgot-password-email-send';
-      
+
       const payload = recoveryChannel === 'SMS'
         ? { phoneNumber: recoveryPhone.trim() }
         : { identifier: recoveryEmail.trim() };
@@ -206,26 +231,25 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
 
       if (res.ok) {
         const data = await res.json();
-        const received = data.devOtp || data.otp || null;
-        setRecoveryOtp(received);
-        if (received) {
-          setRecoveryCode(received);
+        if (recoveryChannel === 'SMS') {
+          const received = data.devOtp || data.otp || null;
+          setRecoveryOtp(received);
+          setRecoveryCode(received || '');
         } else {
+          setRecoveryOtp(null);
           setRecoveryCode('');
         }
-        if (data.maskedEmail) {
-          setMaskedTarget(data.maskedEmail);
-        }
+        setRecoveryNewPassword('');
         setLoginMode('RESET_PASS');
         showToast(
-          recoveryChannel === 'SMS' 
-            ? '🔑 کد تایید پیامکی بازیابی صادر گردید.' 
-            : `✉️ کد تایید بازیابی به ایمیل ارسال گردید.`, 
+          recoveryChannel === 'SMS'
+            ? '🔑 کد تایید پیامکی بازیابی صادر گردید.'
+            : (data.message || '✉️ در صورت تایید بودن حساب و ایمیل، کد بازیابی ارسال گردید.'),
           'success'
         );
       } else {
-        const errorData = await res.json();
-        showToast(errorData.message || errorData.error || 'کاربری با این مشخصات یافت نشد.', 'error');
+        const errorData = await res.json().catch(() => ({}));
+        showToast(errorData.message || errorData.error || 'خطا در درخواست بازیابی رمز عبور.', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -235,10 +259,46 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
     }
   };
 
-  // 5. Submit Recovery Reset (SMS or Email)
+  // 4b. Verify Email OTP to acquire single-use recoveryToken
+  const handleVerifyEmailRecoveryCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!recoveryCode.trim()) {
+      showToast('وارد کردن کد ۶ رقمی ایمیل الزامی است.', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/forgot-password-email-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: recoveryEmail.trim(),
+          code: recoveryCode.trim()
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.recoveryToken) {
+        setRecoveryToken(data.recoveryToken);
+        showToast('✅ کد تایید با موفقیت احراز شد. اکنون کلمه عبور جدید را ثبت نمایید.', 'success');
+      } else {
+        showToast(data.message || data.error || 'کد تایید وارد شده نادرست است یا منقضی شده است.', 'error');
+      }
+    } catch {
+      showToast('خطا در تایید کد بازیابی.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 5. Submit Recovery Reset (SMS or Email with recoveryToken)
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!recoveryCode.trim() || !recoveryNewPassword.trim()) {
+    if (recoveryChannel === 'EMAIL' && !recoveryToken) {
+      await handleVerifyEmailRecoveryCode(e);
+      return;
+    }
+    if ((recoveryChannel === 'SMS' && !recoveryCode.trim()) || !recoveryNewPassword.trim()) {
       showToast('وارد کردن کد تایید و کلمه عبور جدید الزامی است.', 'error');
       return;
     }
@@ -256,8 +316,7 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
             newPassword: recoveryNewPassword
           }
         : {
-            identifier: recoveryEmail.trim(),
-            code: recoveryCode.trim(),
+            recoveryToken,
             newPassword: recoveryNewPassword
           };
 
@@ -275,10 +334,10 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
         setRecoveryCode('');
         setRecoveryNewPassword('');
         setRecoveryOtp(null);
-        setMaskedTarget(null);
+        setRecoveryToken(null);
       } else {
-        const errorData = await res.json();
-        showToast(errorData.message || errorData.error || 'کد تایید وارد شده نادرست است.', 'error');
+        const errorData = await res.json().catch(() => ({}));
+        showToast(errorData.message || errorData.error || 'خطا در بازنشانی کلمه عبور.', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -406,8 +465,12 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                   <button
                     type="button"
                     onClick={() => {
+                      fetchRecoveryOptions();
                       setLoginMode('RECOVERY');
                       setRecoveryPhone('');
+                      setRecoveryEmail('');
+                      setRecoveryCode('');
+                      setRecoveryToken(null);
                     }}
                     className="text-[10px] text-amber-500 hover:underline cursor-pointer touch-manipulation"
                   >
@@ -534,7 +597,9 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
               <div className="bg-slate-900/50 p-3 rounded-lg text-slate-300 text-[10.5px] leading-relaxed border border-slate-700/50">
                 <span className="font-extrabold text-amber-500">کانال بازیابی کلمه عبور:</span>
                 <p className="mt-1">
-                  می‌توانید کلمه عبور خود را از طریق دریافت کد یکبار مصرف پیامکی (SMS OTP) یا ارسال به آدرس ایمیل ثبت شده بازیابی نمایید.
+                  {emailRecoveryEnabled
+                    ? 'می‌توانید کلمه عبور خود را از طریق دریافت کد یکبار مصرف پیامکی (SMS OTP) یا ارسال به آدرس ایمیل تایید شده بازیابی نمایید.'
+                    : 'بازیابی کلمه عبور از طریق دریافت کد یکبار مصرف پیامکی (SMS OTP) انجام می‌شود.'}
                 </p>
               </div>
 
@@ -554,15 +619,19 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                 </button>
                 <button
                   type="button"
-                  onClick={() => setRecoveryChannel('EMAIL')}
-                  className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                    recoveryChannel === 'EMAIL'
-                      ? 'bg-amber-500 text-slate-950 shadow-sm'
-                      : 'text-slate-400 hover:text-white'
+                  disabled={!emailRecoveryEnabled}
+                  onClick={() => emailRecoveryEnabled && setRecoveryChannel('EMAIL')}
+                  title={!emailRecoveryEnabled ? 'بازیابی ایمیلی توسط مدیر سیستم غیرفعال است' : undefined}
+                  className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                    !emailRecoveryEnabled
+                      ? 'text-slate-600 cursor-not-allowed opacity-60'
+                      : recoveryChannel === 'EMAIL'
+                        ? 'bg-amber-500 text-slate-950 shadow-sm cursor-pointer'
+                        : 'text-slate-400 hover:text-white cursor-pointer'
                   }`}
                 >
                   <Mail className="w-3.5 h-3.5" />
-                  <span>ایمیل (Email OTP)</span>
+                  <span>{emailRecoveryEnabled ? 'ایمیل (Email OTP)' : 'ایمیل (غیرفعال)'}</span>
                 </button>
               </div>
 
@@ -584,7 +653,7 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                 </div>
               ) : (
                 <div className="space-y-1">
-                  <label className="block text-slate-300 text-xs font-bold">آدرس ایمیل یا نام کاربری ثبت شده:</label>
+                  <label className="block text-slate-300 text-xs font-bold">آدرس ایمیل تایید شده یا نام کاربری:</label>
                   <div className="relative">
                     <input
                       type="text"
@@ -623,56 +692,62 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
           {/* E. Input Code & Set New Password */}
           {loginMode === 'RESET_PASS' && (
             <form onSubmit={handleResetPassword} className="space-y-4">
-              
-              {recoveryOtp && (
+              {recoveryChannel === 'SMS' && recoveryOtp && (
                 <div className="bg-slate-950 border-r-4 border-amber-500 rounded p-3 text-right text-xs animate-bounce">
                   <div className="flex items-center justify-between text-[10px] text-slate-400 border-b border-slate-800 pb-1 mb-1.5 font-sans">
                     <span>هم‌اکنون • ۱ دقیقه پیش</span>
-                    <span className="font-bold text-amber-500 flex items-center gap-1">
-                      {recoveryChannel === 'SMS' ? '📱 پیامک بازیابی کلمه عبور' : '✉️ ایمیل بازیابی کلمه عبور'}
-                    </span>
+                    <span className="font-bold text-amber-500 flex items-center gap-1">📱 پیامک بازیابی کلمه عبور</span>
                   </div>
                   <p className="text-slate-300 font-sans leading-relaxed">
                     کد یکبار مصرف جهت تغییر و بازیابی رمز عبور: <span className="font-mono font-black text-amber-500 text-sm tracking-widest px-1 bg-slate-900 rounded">{recoveryOtp}</span> ثبت گردید.
-                    {maskedTarget && <span className="block text-[11px] text-slate-400 mt-1">ارسال شده به: {maskedTarget}</span>}
                   </p>
                 </div>
               )}
 
-              <div className="space-y-1">
-                <label className="block text-slate-300 text-xs font-bold">
-                  {recoveryChannel === 'SMS' ? 'کد تایید پیامکی بازیابی:' : 'کد تایید ارسال شده به ایمیل:'}
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    maxLength={8}
-                    placeholder="کد ۶ رقمی را وارد کنید"
-                    value={recoveryCode}
-                    onChange={(e) => setRecoveryCode(e.target.value)}
-                    disabled={loading}
-                    className="w-full bg-slate-900/80 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-center font-mono text-sm tracking-widest text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    required
-                  />
-                  <Key className="w-4 h-4 text-slate-500 absolute right-3.5 top-3" />
+              {recoveryChannel === 'EMAIL' && !recoveryToken && (
+                <div className="bg-slate-900/70 border border-slate-700 rounded-lg p-3 text-xs text-slate-300 leading-relaxed">
+                  در صورت تایید بودن حساب کاربری و ایمیل ثبت‌شده، کد ۶ رقمی به آدرس ایمیل شما ارسال شده است (اعتبار ۵ دقیقه).
                 </div>
-              </div>
+              )}
 
-              <div className="space-y-1">
-                <label className="block text-slate-300 text-xs font-bold">کلمه عبور جدید دلخواه شما:</label>
-                <div className="relative">
-                  <input
-                    type="password"
-                    placeholder="رمز جدید عبور را وارد کنید"
-                    value={recoveryNewPassword}
-                    onChange={(e) => setRecoveryNewPassword(e.target.value)}
-                    disabled={loading}
-                    className="w-full bg-slate-900/80 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    required
-                  />
-                  <Lock className="w-4 h-4 text-slate-500 absolute right-3.5 top-3.5" />
+              {(recoveryChannel === 'SMS' || !recoveryToken) && (
+                <div className="space-y-1">
+                  <label className="block text-slate-300 text-xs font-bold">
+                    {recoveryChannel === 'SMS' ? 'کد تایید پیامکی بازیابی:' : 'کد تایید ارسال شده به ایمیل:'}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      maxLength={8}
+                      placeholder="کد ۶ رقمی را وارد کنید"
+                      value={recoveryCode}
+                      onChange={(e) => setRecoveryCode(e.target.value)}
+                      disabled={loading}
+                      className="w-full bg-slate-900/80 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-center font-mono text-sm tracking-widest text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      required
+                    />
+                    <Key className="w-4 h-4 text-slate-500 absolute right-3.5 top-3" />
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {(recoveryChannel === 'SMS' || Boolean(recoveryToken)) && (
+                <div className="space-y-1">
+                  <label className="block text-slate-300 text-xs font-bold">کلمه عبور جدید دلخواه شما:</label>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      placeholder="رمز جدید عبور (حداقل ۶ کاراکتر)"
+                      value={recoveryNewPassword}
+                      onChange={(e) => setRecoveryNewPassword(e.target.value)}
+                      disabled={loading}
+                      className="w-full bg-slate-900/80 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-xs text-white text-left font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      required
+                    />
+                    <Lock className="w-4 h-4 text-slate-500 absolute right-3.5 top-3.5" />
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-2">
                 <button
@@ -680,12 +755,19 @@ export default function LoginGate({ onLoginSuccess, showToast, sandboxEnabled = 
                   disabled={loading}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2.5 px-3 rounded-lg text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow"
                 >
-                  {loading ? 'در حال تایید...' : 'تنظیم و ورود با رمز جدید'}
+                  {loading
+                    ? 'در حال بررسی...'
+                    : recoveryChannel === 'EMAIL' && !recoveryToken
+                      ? 'تایید کد و ادامه'
+                      : 'تنظیم و ورود با رمز جدید'}
                   <ShieldCheck className="w-3.5 h-3.5" />
                 </button>
                 <button
                   type="button"
-                  onClick={() => setLoginMode('PASSWORD')}
+                  onClick={() => {
+                    setRecoveryToken(null);
+                    setLoginMode('PASSWORD');
+                  }}
                   className="bg-slate-700 hover:bg-slate-600 text-white font-black py-2 px-3 rounded-lg text-xs transition-all cursor-pointer"
                 >
                   بازگشت

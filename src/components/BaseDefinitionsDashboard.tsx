@@ -330,6 +330,7 @@ export function BaseDefinitionsDashboard({
   const [newUserFullName, setNewUserFullName] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserEmailVerified, setNewUserEmailVerified] = useState(false);
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<UserRole>('REPRESENTATIVE');
   const [newUserAgentCode, setNewUserAgentCode] = useState('');
@@ -341,6 +342,7 @@ export function BaseDefinitionsDashboard({
     setNewUserFullName(u.fullName || '');
     setNewUserPhone(u.phoneNumber || '');
     setNewUserEmail(u.email || '');
+    setNewUserEmailVerified(Boolean(u.emailVerified));
     setNewUserPassword('');
     setNewUserRole(u.role);
     setNewUserAgentCode(u.agentCode || '');
@@ -402,6 +404,7 @@ export function BaseDefinitionsDashboard({
     setNewUserFullName('');
     setNewUserPhone('');
     setNewUserEmail('');
+    setNewUserEmailVerified(false);
     setNewUserPassword('');
     setShowUserPassword(false);
     setNewUserRole('REPRESENTATIVE');
@@ -422,11 +425,13 @@ export function BaseDefinitionsDashboard({
     }
 
     try {
+      const cleanedEmail = newUserEmail.trim() || null;
       const payload: any = {
         username: newUsername.trim(),
         fullName: newUserFullName.trim(),
         phoneNumber: newUserPhone.trim(),
-        email: newUserEmail.trim() || null,
+        email: cleanedEmail,
+        emailVerified: cleanedEmail ? Boolean(newUserEmailVerified) : false,
         role: newUserRole || 'REPRESENTATIVE',
         agentCode: newUserRole === 'REPRESENTATIVE' ? newUserAgentCode : undefined,
         shippingCompanyId: newUserRole === 'SHIPPING_COMPANY' ? newUserSCId : undefined,
@@ -442,12 +447,13 @@ export function BaseDefinitionsDashboard({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
+        const resData = await res.json().catch(() => ({}));
         if (res.ok) {
           showToast('اطلاعات کاربر با موفقیت ویرایش شد.', 'success');
           fetchUsers();
           cancelEditingUser();
         } else {
-          showToast('خطا در به‌روزرسانی اطلاعات کاربر.', 'error');
+          showToast(resData.message || resData.error || 'خطا در به‌روزرسانی اطلاعات کاربر.', 'error');
         }
       } else {
         const res = await fetch('/api/users', {
@@ -713,12 +719,14 @@ export function BaseDefinitionsDashboard({
     smtpSecure: false,
     smtpUser: '',
     smtpPassword: '',
-    hasSmtpPassword: false,
+    passwordConfigured: false,
+    webhookProvider: 'GENERIC',
     apiUrl: '',
     apiKey: '',
-    hasApiKey: false,
+    apiKeyConfigured: false,
     apiMethod: 'POST',
-    customHeaders: ''
+    customHeaders: '',
+    encryptionKeyConfigured: true
   });
 
   const [isLoadingEmailSettings, setIsLoadingEmailSettings] = useState(false);
@@ -741,7 +749,11 @@ export function BaseDefinitionsDashboard({
       if (res.ok) {
         const data = await res.json();
         if (data.settings) {
-          setEmailSettings(data.settings);
+          setEmailSettings({
+            ...data.settings,
+            smtpPassword: '',
+            apiKey: ''
+          });
         }
       }
     } catch {
@@ -757,6 +769,32 @@ export function BaseDefinitionsDashboard({
     }
   }, [activeTab]);
 
+  const buildEmailSettingsRequestBody = (source: EmailSettings) => {
+    const body: any = {
+      providerType: source.providerType,
+      isEnabled: source.isEnabled,
+      senderName: source.senderName,
+      senderEmail: source.senderEmail,
+      allowPasswordReset: source.allowPasswordReset,
+      allowNotifications: source.allowNotifications,
+      smtpHost: source.smtpHost,
+      smtpPort: Number(source.smtpPort) || 587,
+      smtpSecure: Number(source.smtpPort) === 465 ? true : Number(source.smtpPort) === 587 ? false : Boolean(source.smtpSecure),
+      smtpUser: source.smtpUser,
+      webhookProvider: source.webhookProvider || 'GENERIC',
+      apiUrl: source.apiUrl,
+      apiMethod: source.apiMethod || 'POST',
+      customHeaders: source.customHeaders || ''
+    };
+    if (source.smtpPassword && source.smtpPassword.length > 0) {
+      body.smtpPassword = source.smtpPassword;
+    }
+    if (source.apiKey && source.apiKey.length > 0) {
+      body.apiKey = source.apiKey;
+    }
+    return body;
+  };
+
   const handleSaveEmailSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingEmailSettings(true);
@@ -764,22 +802,60 @@ export function BaseDefinitionsDashboard({
       const res = await fetch('/api/system/email-settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(emailSettings)
+        body: JSON.stringify(buildEmailSettingsRequestBody(emailSettings))
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         if (data.settings) {
-          setEmailSettings(data.settings);
+          setEmailSettings({
+            ...data.settings,
+            smtpPassword: '',
+            apiKey: ''
+          });
         }
-        showToast('تنظیمات سرویس ایمیل با موفقیت ذخیره شد.', 'success');
+        showToast('تنظیمات سرویس ایمیل با موفقیت رمزگذاری و ذخیره شد.', 'success');
       } else {
-        showToast(data.error || 'خطا در ذخیره تنظیمات ایمیل.', 'error');
+        showToast(data.message || data.error || 'خطا در ذخیره تنظیمات ایمیل.', 'error');
       }
     } catch {
       showToast('خطای شبکه در ذخیره تنظیمات ایمیل.', 'error');
     } finally {
       setIsSavingEmailSettings(false);
     }
+  };
+
+  const handleClearEmailSecret = (type: 'smtpPassword' | 'apiKey') => {
+    const label = type === 'smtpPassword' ? 'رمز عبور SMTP' : 'کلید API وب‌هوک';
+    askConfirm(
+      `حذف ${label}`,
+      `آیا از حذف دائمی ${label} ذخیره شده اطمینان دارید؟`,
+      async () => {
+        setIsSavingEmailSettings(true);
+        try {
+          const payload = type === 'smtpPassword' ? { clearSmtpPassword: true } : { clearApiKey: true };
+          const res = await fetch('/api/system/email-settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.settings) {
+            setEmailSettings({
+              ...data.settings,
+              smtpPassword: '',
+              apiKey: ''
+            });
+            showToast(`${label} با موفقیت حذف شد.`, 'success');
+          } else {
+            showToast(data.message || data.error || `خطا در حذف ${label}.`, 'error');
+          }
+        } catch {
+          showToast('خطای شبکه در حذف اطلاعات محرمانه.', 'error');
+        } finally {
+          setIsSavingEmailSettings(false);
+        }
+      }
+    );
   };
 
   const handleRunEmailDiagnostic = async () => {
@@ -791,17 +867,19 @@ export function BaseDefinitionsDashboard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           recipient: testRecipientEmail.trim() || undefined,
-          settings: emailSettings
+          settings: buildEmailSettingsRequestBody(emailSettings)
         })
       });
-      const data = await res.json();
-      setDiagnosticResult(data);
-      if (data.success) {
+      const data = await res.json().catch(() => ({}));
+      if (data && Array.isArray(data.logs)) {
+        setDiagnosticResult(data);
+      }
+      if (res.ok && data.success) {
         showToast('تست اتصال و ارسال ایمیل با موفقیت انجام شد.', 'success');
       } else {
-        showToast(data.message || 'تست اتصال با خطا مواجه شد.', 'error');
+        showToast(data.message || data.error || 'تست اتصال با خطا مواجه شد.', 'error');
       }
-    } catch (err: any) {
+    } catch {
       showToast('خطا در برقراری ارتباط با سرور برای تست.', 'error');
     } finally {
       setIsTestingEmailConnection(false);
@@ -1447,10 +1525,21 @@ export function BaseDefinitionsDashboard({
                             <td className="p-3 font-mono text-slate-600 text-left">{u.phoneNumber || '-'}</td>
                             <td className="p-3 font-mono text-[11px] text-slate-600 text-left">
                               {u.email ? (
-                                <span className="inline-flex items-center gap-1 text-slate-700 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
-                                  <Mail className="w-3 h-3 text-indigo-500 shrink-0" />
-                                  <span className="truncate max-w-[140px]" title={u.email}>{u.email}</span>
-                                </span>
+                                <div className="flex flex-col items-start gap-0.5">
+                                  <span className="inline-flex items-center gap-1 text-slate-700 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
+                                    <Mail className="w-3 h-3 text-indigo-500 shrink-0" />
+                                    <span className="truncate max-w-[140px]" title={u.email}>{u.email}</span>
+                                  </span>
+                                  {u.emailVerified ? (
+                                    <span className="text-[9px] font-sans font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 rounded-full">
+                                      تایید شده
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-sans font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 rounded-full">
+                                      تایید نشده
+                                    </span>
+                                  )}
+                                </div>
                               ) : (
                                 <span className="text-slate-400 text-[10px]">ثبت نشده</span>
                               )}
@@ -1565,9 +1654,25 @@ export function BaseDefinitionsDashboard({
                     type="email"
                     placeholder="example@company.com"
                     value={newUserEmail}
-                    onChange={(e) => setNewUserEmail(e.target.value)}
+                    onChange={(e) => {
+                      setNewUserEmail(e.target.value);
+                      if (editingUser && e.target.value.trim().toLowerCase() !== (editingUser.email || '').trim().toLowerCase()) {
+                        setNewUserEmailVerified(false);
+                      }
+                    }}
                     className="w-full bg-white border border-slate-200 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
                   />
+                  {newUserEmail.trim() && (
+                    <label className="mt-1.5 flex items-center gap-1.5 text-[10px] text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newUserEmailVerified}
+                        onChange={(e) => setNewUserEmailVerified(e.target.checked)}
+                        className="w-3.5 h-3.5 text-emerald-600 rounded focus:ring-emerald-500"
+                      />
+                      <span>ایمیل متعلق به این کاربر تایید شده است (مجاز برای بازیابی رمز عبور)</span>
+                    </label>
+                  )}
                 </div>
 
                 <div>
@@ -2238,6 +2343,18 @@ export function BaseDefinitionsDashboard({
               </div>
             </div>
 
+            {emailSettings.encryptionKeyConfigured === false && (
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-start gap-3 text-xs text-rose-900">
+                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-1 leading-relaxed">
+                  <div className="font-black text-rose-950">کلید رمزگذاری اطلاعات محرمانه ایمیل (EMAIL_SETTINGS_ENCRYPTION_KEY) روی سرور تنظیم نشده است</div>
+                  <p className="text-[11px] text-rose-800">
+                    جهت رعایت الزامات امنیتی، ذخیره یا رمزگشایی رمز عبور SMTP و کلید API بدون تنظیم این متغیر محیطی مسدود می‌باشد. لطفاً یک کلید ۳۲ بایتی امن در تنظیمات محیطی سرور تعریف نمایید.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Form Column */}
               <div className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
@@ -2305,7 +2422,7 @@ export function BaseDefinitionsDashboard({
                           <span>پروتکل SMTP استاندارد</span>
                           <span className={`w-3 h-3 rounded-full border ${emailSettings.providerType === 'SMTP' ? 'border-4 border-indigo-600' : 'border-slate-300'}`}></span>
                         </div>
-                        <p className="text-[11px] text-slate-500 mt-1">اتصال مستقیم به سرورهای ایمیل سازمانی، جیمیل، میل‌گان یا هاست</p>
+                        <p className="text-[11px] text-slate-500 mt-1">اتصال مستقیم رمزنگاری‌شده به سرورهای ایمیل سازمانی با اعتبارسنجی گواهی TLS</p>
                       </button>
 
                       <button
@@ -2318,10 +2435,10 @@ export function BaseDefinitionsDashboard({
                         }`}
                       >
                         <div className="font-bold text-xs text-slate-900 flex items-center justify-between">
-                          <span>وب‌سرویس REST API / Webhook</span>
+                          <span>وب‌سرویس HTTPS API / Webhook</span>
                           <span className={`w-3 h-3 rounded-full border ${emailSettings.providerType === 'WEBHOOK_API' ? 'border-4 border-indigo-600' : 'border-slate-300'}`}></span>
                         </div>
-                        <p className="text-[11px] text-slate-500 mt-1">ارسال پیام از طریق وب‌هوک، سرویس‌های ابری یا پنل‌های پیام‌رسان</p>
+                        <p className="text-[11px] text-slate-500 mt-1">ارسال امن از طریق HTTPS (Resend، Postmark یا Webhook اختصاصی)</p>
                       </button>
                     </div>
                   </div>
@@ -2373,23 +2490,27 @@ export function BaseDefinitionsDashboard({
                             type="number"
                             placeholder="587 یا 465"
                             value={emailSettings.smtpPort || 587}
-                            onChange={(e) => setEmailSettings({ ...emailSettings, smtpPort: Number(e.target.value) })}
+                            onChange={(e) => {
+                              const nextPort = Number(e.target.value);
+                              setEmailSettings({
+                                ...emailSettings,
+                                smtpPort: nextPort,
+                                smtpSecure: nextPort === 465 ? true : nextPort === 587 ? false : emailSettings.smtpSecure
+                              });
+                            }}
                             className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
                             required
                           />
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 pt-1">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(emailSettings.smtpSecure)}
-                            onChange={(e) => setEmailSettings({ ...emailSettings, smtpSecure: e.target.checked })}
-                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                          />
-                          <span className="text-xs text-slate-700">استفاده از پروتکل امن SSL/TLS (برای پورت ۴۶۵)</span>
-                        </label>
+                      <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-lg px-3 py-2 text-[11px] text-indigo-950 flex items-center justify-between gap-2">
+                        <span>
+                          حالت امنیتی فعال: <strong>{Number(emailSettings.smtpPort) === 465 ? 'TLS مستقیم (پورت ۴۶۵)' : 'STARTTLS الزامی (پورت ۵۸۷)'}</strong>
+                        </span>
+                        <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                          اعتبارسنجی گواهی TLS فعال
+                        </span>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200">
@@ -2404,12 +2525,23 @@ export function BaseDefinitionsDashboard({
                           />
                         </div>
                         <div>
-                          <label className="text-xs font-bold text-slate-700 block mb-1">
-                            رمز عبور SMTP {emailSettings.hasSmtpPassword && <span className="text-[10px] text-emerald-600 font-normal">(ذخیره شده - بدون تغییر بماند)</span>}
-                          </label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-xs font-bold text-slate-700">
+                              رمز عبور SMTP {emailSettings.passwordConfigured && <span className="text-[10px] text-emerald-600 font-normal">(ذخیره شده)</span>}
+                            </label>
+                            {emailSettings.passwordConfigured && (
+                              <button
+                                type="button"
+                                onClick={() => handleClearEmailSecret('smtpPassword')}
+                                className="text-[10px] text-rose-600 hover:text-rose-800 font-bold cursor-pointer"
+                              >
+                                حذف رمز ذخیره شده
+                              </button>
+                            )}
+                          </div>
                           <input
                             type="password"
-                            placeholder={emailSettings.hasSmtpPassword ? '••••••••' : 'رمز عبور سرور ایمیل'}
+                            placeholder={emailSettings.passwordConfigured ? '•••••••• (خالی = بدون تغییر)' : 'رمز عبور سرور ایمیل'}
                             value={emailSettings.smtpPassword || ''}
                             onChange={(e) => setEmailSettings({ ...emailSettings, smtpPassword: e.target.value })}
                             className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
@@ -2423,16 +2555,28 @@ export function BaseDefinitionsDashboard({
                   {emailSettings.providerType === 'WEBHOOK_API' && (
                     <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-4 space-y-3">
                       <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                        <div className="sm:col-span-3">
-                          <label className="text-xs font-bold text-slate-700 block mb-1">آدرس وب‌سرویس / Webhook URL *</label>
+                        <div className="sm:col-span-2">
+                          <label className="text-xs font-bold text-slate-700 block mb-1">آدرس وب‌سرویس / HTTPS URL *</label>
                           <input
                             type="url"
-                            placeholder="https://api.mailservice.com/v1/send"
+                            placeholder="https://api.resend.com/emails"
                             value={emailSettings.apiUrl || ''}
                             onChange={(e) => setEmailSettings({ ...emailSettings, apiUrl: e.target.value })}
                             className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"
                             required
                           />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">نوع سرویس</label>
+                          <select
+                            value={emailSettings.webhookProvider || 'GENERIC'}
+                            onChange={(e) => setEmailSettings({ ...emailSettings, webhookProvider: e.target.value as any })}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                          >
+                            <option value="GENERIC">Webhook عمومی</option>
+                            <option value="RESEND">Resend API</option>
+                            <option value="POSTMARK">Postmark API</option>
+                          </select>
                         </div>
                         <div>
                           <label className="text-xs font-bold text-slate-700 block mb-1">متد HTTP</label>
@@ -2448,12 +2592,23 @@ export function BaseDefinitionsDashboard({
                       </div>
 
                       <div>
-                        <label className="text-xs font-bold text-slate-700 block mb-1">
-                          کلید احراز هویت (API Key / Bearer Token) {emailSettings.hasApiKey && <span className="text-[10px] text-emerald-600 font-normal">(ذخیره شده)</span>}
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-bold text-slate-700">
+                            کلید احراز هویت (API Key) {emailSettings.apiKeyConfigured && <span className="text-[10px] text-emerald-600 font-normal">(ذخیره شده)</span>}
+                          </label>
+                          {emailSettings.apiKeyConfigured && (
+                            <button
+                              type="button"
+                              onClick={() => handleClearEmailSecret('apiKey')}
+                              className="text-[10px] text-rose-600 hover:text-rose-800 font-bold cursor-pointer"
+                            >
+                              حذف کلید ذخیره شده
+                            </button>
+                          )}
+                        </div>
                         <input
                           type="password"
-                          placeholder={emailSettings.hasApiKey ? '••••••••' : 'Bearer token یا کلید دسترسی'}
+                          placeholder={emailSettings.apiKeyConfigured ? '•••••••• (خالی = بدون تغییر)' : 'Bearer token یا کلید API'}
                           value={emailSettings.apiKey || ''}
                           onChange={(e) => setEmailSettings({ ...emailSettings, apiKey: e.target.value })}
                           className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-left"

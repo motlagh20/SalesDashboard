@@ -215,15 +215,20 @@ declare global {
         username: string;
         fullName?: string;
         phoneNumber?: string;
+        email?: string | null;
+        emailVerified?: boolean;
         role: string;
         agentCode?: string | null;
         shippingCompanyId?: string | null;
         isEnabled?: boolean;
         mustChangePassword?: boolean;
+        tokenVersion?: number;
       };
     }
   }
 }
+
+export type JwtTokenUse = "ACCESS" | "PASSWORD_RESET";
 
 export interface TokenPayload {
   userId: string;
@@ -231,6 +236,10 @@ export interface TokenPayload {
   role: string;
   iat: number;
   exp: number;
+  tokenUse?: JwtTokenUse;
+  tv?: number;
+  jti?: string;
+  recoveryEmail?: string;
 }
 
 function base64UrlEncode(str: string): string {
@@ -242,10 +251,10 @@ function base64UrlDecode(str: string): string {
 }
 
 /**
- * Generates a signed tamper-proof JWT token using HMAC-SHA256
+ * Generates a signed tamper-proof ACCESS JWT token using HMAC-SHA256
  */
 export function generateToken(
-  user: { id: string; username: string; role: string },
+  user: { id: string; username: string; role: string; tokenVersion?: number },
   expiresInSeconds: number = 30 * 24 * 3600
 ): string {
   const secret = getJwtSecret();
@@ -255,6 +264,41 @@ export function generateToken(
     userId: String(user.id),
     username: String(user.username),
     role: String(user.role),
+    tokenUse: "ACCESS",
+    tv: Number(user.tokenVersion ?? 0),
+    iat: now,
+    exp: now + expiresInSeconds
+  };
+  const payloadEncoded = base64UrlEncode(JSON.stringify(payload));
+  const signature = crypto
+    .createHmac("sha256", secret)
+    .update(`${header}.${payloadEncoded}`)
+    .digest("base64url");
+
+  return `${header}.${payloadEncoded}.${signature}`;
+}
+
+/**
+ * Generates a short-lived, single-use scoped PASSWORD_RESET recovery token.
+ * Strictly rejected by authenticate() so it cannot be used as an API access token.
+ */
+export function generateRecoveryToken(
+  user: { id: string; username: string; role: string; tokenVersion?: number },
+  recoveryEmail: string,
+  jti: string,
+  expiresInSeconds: number = 300
+): string {
+  const secret = getJwtSecret();
+  const header = base64UrlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const now = Math.floor(Date.now() / 1000);
+  const payload: TokenPayload = {
+    userId: String(user.id),
+    username: String(user.username),
+    role: String(user.role),
+    tokenUse: "PASSWORD_RESET",
+    tv: Number(user.tokenVersion ?? 0),
+    jti,
+    recoveryEmail: String(recoveryEmail).trim().toLowerCase(),
     iat: now,
     exp: now + expiresInSeconds
   };
@@ -348,16 +392,46 @@ export function verifyToken(token: string): TokenPayload | null {
       return null;
     }
 
-    return {
+    const result: TokenPayload = {
       userId: payload.userId,
       username: payload.username,
       role: payload.role,
       iat,
       exp
     };
+    if (payload.tokenUse === "ACCESS" || payload.tokenUse === "PASSWORD_RESET") {
+      result.tokenUse = payload.tokenUse;
+    } else if (payload.tokenUse !== undefined) {
+      return null;
+    }
+    if (payload.tv !== undefined) {
+      const tvNum = Number(payload.tv);
+      if (!Number.isFinite(tvNum) || tvNum < 0) return null;
+      result.tv = tvNum;
+    }
+    if (typeof payload.jti === "string" && payload.jti.length > 0) {
+      result.jti = payload.jti;
+    }
+    if (typeof payload.recoveryEmail === "string" && payload.recoveryEmail.length > 0) {
+      result.recoveryEmail = payload.recoveryEmail;
+    }
+
+    return result;
   } catch {
     return null;
   }
+}
+
+/**
+ * Verifies a scoped PASSWORD_RESET recovery token.
+ * Rejects normal ACCESS tokens or tokens missing jti.
+ */
+export function verifyRecoveryToken(token: string): TokenPayload | null {
+  const payload = verifyToken(token);
+  if (!payload) return null;
+  if (payload.tokenUse !== "PASSWORD_RESET") return null;
+  if (!payload.jti || !payload.recoveryEmail) return null;
+  return payload;
 }
 
 /**
@@ -462,6 +536,14 @@ export async function authenticate(req: express.Request, res: express.Response, 
     return sendApiError(res, 401, "توکن نامعتبر یا منقضی شده است.");
   }
 
+  // Strictly reject recovery or non-ACCESS scoped tokens on general APIs
+  if (payload.tokenUse && payload.tokenUse !== "ACCESS") {
+    if (req.headers.cookie && req.headers.cookie.includes("auth_token")) {
+      clearAuthCookie(res, req);
+    }
+    return sendApiError(res, 401, "توکن نامعتبر یا خارج از محدوده دسترسی مجاز است.");
+  }
+
   try {
     const db = (req as any)._dbPool || testDbPoolOverride || getDbPool();
     const [rows] = await db.query("SELECT * FROM app_users WHERE id = ?", [payload.userId]);
@@ -484,6 +566,16 @@ export async function authenticate(req: express.Request, res: express.Response, 
       return sendApiError(res, 403, "حساب کاربری شما غیرفعال شده است. با مدیریت تماس بگیرید.");
     }
 
+    // Session revocation check via tokenVersion (invalidates old JWTs after password change/reset)
+    const userTokenVersion = Number(user.tokenVersion ?? 0);
+    const payloadTokenVersion = Number(payload.tv ?? 0);
+    if (payloadTokenVersion !== userTokenVersion) {
+      if (req.headers.cookie && req.headers.cookie.includes("auth_token")) {
+        clearAuthCookie(res, req);
+      }
+      return sendApiError(res, 401, "نشست کاربری منقضی یا ابطال شده است. لطفاً مجدداً وارد شوید.");
+    }
+
     const mustChange = Boolean(user.mustChangePassword) || (isProductionEnvironment() && isDefaultPasswordOrMatches(user.password));
 
     // Role and identity strictly come from verified database record
@@ -492,11 +584,14 @@ export async function authenticate(req: express.Request, res: express.Response, 
       username: String(user.username),
       fullName: user.fullName || user.username,
       phoneNumber: user.phoneNumber,
+      email: user.email || null,
+      emailVerified: Boolean(user.emailVerified),
       role: normalizeRole(user.role),
       agentCode: user.agentCode || null,
       shippingCompanyId: user.shippingCompanyId || null,
       isEnabled: !!user.isEnabled,
-      mustChangePassword: Boolean(mustChange)
+      mustChangePassword: Boolean(mustChange),
+      tokenVersion: userTokenVersion
     };
 
     // Mandatory Password Change Backend Enforcement:
