@@ -21,12 +21,13 @@ import {
 import { setSmsSendOverrideForTesting, sendOtpSms } from "../server/sms";
 import { createExpressApp } from "../server";
 
-import { setDbPoolForTesting, setDbHealthyForTesting } from "../server/database";
+import { setDbPoolForTesting, setDbHealthyForTesting, resetRedisStateForTesting } from "../server/database";
 import { setAuthDbPoolOverrideForTesting } from "../server/auth";
 
 describe("OTP Authentication & Password Recovery Security Hardening Tests", () => {
   let server: http.Server;
   let baseUrl: string;
+  let originalRedisHost: string | undefined;
 
   const mockDbPool: any = {
     query: async (sql: string, values: any[] = []) => {
@@ -62,6 +63,10 @@ describe("OTP Authentication & Password Recovery Security Hardening Tests", () =
   };
 
   before(async () => {
+    originalRedisHost = process.env.REDIS_HOST;
+    delete process.env.REDIS_HOST;
+    resetRedisStateForTesting();
+
     process.env.JWT_SECRET = "security-hardening-test-jwt-secret-minimum-32-chars";
     setDbPoolForTesting(mockDbPool);
     setAuthDbPoolOverrideForTesting(mockDbPool);
@@ -79,6 +84,13 @@ describe("OTP Authentication & Password Recovery Security Hardening Tests", () =
   });
 
   after(async () => {
+    resetRedisStateForTesting();
+    setAuthDbPoolOverrideForTesting(null);
+    if (originalRedisHost !== undefined) {
+      process.env.REDIS_HOST = originalRedisHost;
+    } else {
+      delete process.env.REDIS_HOST;
+    }
     if (server) {
       if (typeof (server as any).closeAllConnections === "function") {
         (server as any).closeAllConnections();
@@ -261,10 +273,10 @@ describe("OTP Authentication & Password Recovery Security Hardening Tests", () =
         headers: { "x-forwarded-for": "172.16.0.10" }
       });
 
-      // Must return 502 Bad Gateway and fail
+      // Must return 502 Bad Gateway and fail, forwarding gateway error detail
       assert.equal(res.status, 502);
       assert.equal(res.data?.success, false);
-      assert.ok(res.data?.message?.includes("خطا در ارسال پیامک"));
+      assert.ok(res.data?.message?.includes("درگاه پیامک در دسترس نمی‌باشد"));
 
       // Ensure the generated OTP was invalidated and deleted immediately
       const verifyRes = await apiRequest("/api/auth/verify-otp", {
@@ -290,6 +302,7 @@ describe("OTP Authentication & Password Recovery Security Hardening Tests", () =
 
       assert.equal(res.status, 502);
       assert.equal(res.data?.success, false);
+      assert.ok(res.data?.message?.includes("اعتبار پنل پیامک به اتمام رسیده است"));
     });
   });
 

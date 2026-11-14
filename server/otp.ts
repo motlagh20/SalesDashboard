@@ -1266,7 +1266,7 @@ export function getDevOtp(phone: string, purpose: "LOGIN" | "PASSWORD_RESET"): s
 // HARDENED REDIS-BACKED EMAIL OTP & PASSWORD RECOVERY TOKENS (FAIL CLOSED)
 // ============================================================================
 
-import { generateRecoveryToken, getJwtSecret } from "./auth";
+import { generateRecoveryToken, getJwtSecret, validateJwtSecret } from "./auth";
 
 export type EmailOtpPurpose = "PASSWORD_RESET" | "EMAIL_VERIFICATION";
 
@@ -1298,14 +1298,25 @@ export function resetEmailOtpStateForTesting(): void {
 }
 
 function getEmailOtpHmacSecret(): string {
-  const dedicated = process.env.OTP_HMAC_SECRET?.trim();
-  if (dedicated && dedicated.length >= 16) {
+  const isProd = isProductionEnvironment();
+  const dedicatedRaw = process.env.OTP_HMAC_SECRET;
+  if (dedicatedRaw && dedicatedRaw.trim().length > 0) {
+    const dedicated = dedicatedRaw.trim();
+    const validation = validateJwtSecret(dedicated, isProd);
+    if (!validation.valid) {
+      throw new Error(`[SECURITY FATAL] Invalid OTP_HMAC_SECRET: ${validation.error}`);
+    }
     return dedicated;
   }
-  const encKey = process.env.EMAIL_SETTINGS_ENCRYPTION_KEY?.trim();
-  if (encKey && encKey.length >= 16) {
-    return encKey;
+
+  const encKeyRaw = process.env.EMAIL_SETTINGS_ENCRYPTION_KEY;
+  if (encKeyRaw && encKeyRaw.trim().length > 0) {
+    const encKey = encKeyRaw.trim();
+    if (validateJwtSecret(encKey, isProd).valid) {
+      return encKey;
+    }
   }
+
   // Falls back cleanly to validated JWT_SECRET (getJwtSecret fails closed in production if missing)
   return getJwtSecret();
 }

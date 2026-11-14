@@ -171,17 +171,32 @@ function createMockRedis() {
 }
 
 describe("Cloud Run & Final Security Requirements Suite", () => {
-  const originalEnv = { ...process.env };
+  const savedNodeEnv = process.env.NODE_ENV;
+  const savedJwtSecret = process.env.JWT_SECRET;
+  const savedRequireRedis = process.env.REQUIRE_REDIS;
+  const savedRedisHost = process.env.REDIS_HOST;
   const validSecret = "production-cryptographic-jwt-secret-minimum-32-chars-high-entropy-2026!";
 
+  function restoreEnvVar(key: string, val: string | undefined) {
+    if (val === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = val;
+    }
+  }
+
   beforeEach(() => {
+    delete process.env.REDIS_HOST;
     resetRedisStateForTesting();
     resetOtpRateLimitsForTesting();
     setSmsSendOverrideForTesting(null);
   });
 
   afterEach(() => {
-    process.env = { ...originalEnv };
+    restoreEnvVar("NODE_ENV", savedNodeEnv);
+    restoreEnvVar("JWT_SECRET", savedJwtSecret);
+    restoreEnvVar("REQUIRE_REDIS", savedRequireRedis);
+    restoreEnvVar("REDIS_HOST", savedRedisHost);
     resetRedisStateForTesting();
     resetOtpRateLimitsForTesting();
     setSmsSendOverrideForTesting(null);
@@ -315,6 +330,8 @@ describe("Cloud Run & Final Security Requirements Suite", () => {
     });
 
     after(async () => {
+      setDbPoolForTesting(null);
+      setAuthDbPoolOverrideForTesting(null);
       if (server) {
         if (typeof (server as any).closeAllConnections === "function") {
           (server as any).closeAllConnections();

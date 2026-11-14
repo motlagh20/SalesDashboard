@@ -13,6 +13,7 @@ import {
 import {
   setDbPoolForTesting,
   resetDatabaseStateForTesting,
+  resetRedisStateForTesting,
   setDbHealthyForTesting,
   seedDatabaseIfEmpty,
   isProductionEnvironment
@@ -22,6 +23,7 @@ import { createExpressApp } from "../server";
 describe("Post-Sandbox Authentication Security Audit Suite (Real Backend Routes)", () => {
   let server: http.Server;
   let baseUrl: string;
+  let originalRedisHost: string | undefined;
 
   // In-memory isolated test database fixture
   let testUsers: any[] = [];
@@ -91,6 +93,9 @@ describe("Post-Sandbox Authentication Security Audit Suite (Real Backend Routes)
   };
 
   before(async () => {
+    originalRedisHost = process.env.REDIS_HOST;
+    delete process.env.REDIS_HOST;
+    resetRedisStateForTesting();
     process.env.JWT_SECRET = "post-sandbox-audit-secure-jwt-secret-min-32-chars!";
     process.env.NODE_ENV = "test";
 
@@ -114,7 +119,13 @@ describe("Post-Sandbox Authentication Security Audit Suite (Real Backend Routes)
 
   after(async () => {
     resetDatabaseStateForTesting();
+    resetRedisStateForTesting();
     setAuthDbPoolOverrideForTesting(null);
+    if (originalRedisHost !== undefined) {
+      process.env.REDIS_HOST = originalRedisHost;
+    } else {
+      delete process.env.REDIS_HOST;
+    }
     if (server) {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

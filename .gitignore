@@ -15,3 +15,8 @@ server/salesdashboard.json
 !server/salesdashboard.example.json
 server/email_settings.json
 data/email_settings.json
+*.bak
+*.sql
+*.dump
+backups/
+exports/

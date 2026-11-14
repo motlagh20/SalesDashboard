@@ -9,7 +9,9 @@
     "start": "NODE_OPTIONS='--max-old-space-size=2048' node dist/server.cjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test": "NODE_OPTIONS='--max-old-space-size=2048' tsx --test tests/**/*.test.ts"
+    "test:unit": "NODE_OPTIONS='--max-old-space-size=2048' tsx --test --test-concurrency=4 tests/auth_fail_closed_security.test.ts tests/auth_unit_security.test.ts tests/client_ip_spoofing_security.test.ts tests/database_failure_resilience.test.ts tests/email_otp_recovery_security.test.ts tests/email_security_comprehensive.test.ts tests/items_json_helper.test.ts tests/jwt_secret_security.test.ts tests/multi_instance_otp_verification.test.ts tests/otp_atomic_concurrency.test.ts tests/otp_comprehensive_api_security.test.ts tests/otp_security_hardening.test.ts tests/post_sandbox_auth_security.test.ts tests/redis_otp_rate_limit.test.ts tests/redis_targeted_flush.test.ts tests/reset_demo_transaction.test.ts tests/sandbox_production_security.test.ts && NODE_OPTIONS='--max-old-space-size=2048' tsx tests/cloud_run_final_security.test.ts",
+    "test:integration": "NODE_OPTIONS='--max-old-space-size=2048' tsx --test --test-concurrency=1 tests/auth_api_security.test.ts tests/cookie_security.test.ts tests/order_data_isolation.test.ts tests/order_mutation_bola_security.test.ts tests/user_privilege_escalation.test.ts",
+    "test": "npm run test:unit && npm run test:integration"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

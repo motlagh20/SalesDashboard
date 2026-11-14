@@ -13,14 +13,19 @@ import {
   OTP_IP_MAX_REQUESTS,
   VERIFY_IP_MAX_ATTEMPTS
 } from "../server/otp";
+import { resetRedisStateForTesting } from "../server/database";
 
 describe("Client IP Spoofing & Trusted Proxy Rate-Limiting Security Tests", () => {
   let app: express.Express;
   let server: http.Server;
   let serverPort: number;
   let baseUrl: string;
+  let originalRedisHost: string | undefined;
 
   before(async () => {
+    originalRedisHost = process.env.REDIS_HOST;
+    delete process.env.REDIS_HOST;
+    resetRedisStateForTesting();
     // Spin up an isolated, dedicated test Express application configured with production-standard `trust proxy: 1`
     app = express();
     app.set("trust proxy", 1);
@@ -80,6 +85,12 @@ describe("Client IP Spoofing & Trusted Proxy Rate-Limiting Security Tests", () =
   });
 
   after(async () => {
+    resetRedisStateForTesting();
+    if (originalRedisHost !== undefined) {
+      process.env.REDIS_HOST = originalRedisHost;
+    } else {
+      delete process.env.REDIS_HOST;
+    }
     await new Promise<void>((resolve) => {
       if (server) {
         server.close(() => resolve());

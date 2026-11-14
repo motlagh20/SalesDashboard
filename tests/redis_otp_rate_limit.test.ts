@@ -23,6 +23,7 @@ import { setRedisClientForTesting, resetRedisStateForTesting } from "../server/d
  */
 function createMockRedis() {
   const store = new Map<string, { value: string; expiresAt?: number }>();
+  const zsets = new Map<string, { members: Map<string, number>; expiresAt?: number }>();
 
   function cleanupExpired() {
     const now = Date.now();
@@ -31,6 +32,50 @@ function createMockRedis() {
         store.delete(k);
       }
     }
+    for (const [k, z] of zsets.entries()) {
+      if (z.expiresAt && now > z.expiresAt) {
+        zsets.delete(k);
+      }
+    }
+  }
+
+  function zremrangebyscore(key: string, minScore: number, maxScore: number) {
+    const z = zsets.get(key);
+    if (!z) return 0;
+    let removed = 0;
+    for (const [member, score] of z.members.entries()) {
+      if (score >= minScore && score <= maxScore) {
+        z.members.delete(member);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  function zcard(key: string): number {
+    const z = zsets.get(key);
+    return z ? z.members.size : 0;
+  }
+
+  function zadd(key: string, score: number, member: string): number {
+    let z = zsets.get(key);
+    if (!z) {
+      z = { members: new Map<string, number>() };
+      zsets.set(key, z);
+    }
+    const isNew = !z.members.has(member);
+    z.members.set(member, score);
+    return isNew ? 1 : 0;
+  }
+
+  function zrangeOldestScore(key: string): number | null {
+    const z = zsets.get(key);
+    if (!z || z.members.size === 0) return null;
+    let minScore = Infinity;
+    for (const score of z.members.values()) {
+      if (score < minScore) minScore = score;
+    }
+    return Number.isFinite(minScore) ? minScore : null;
   }
 
   const mockClient: any = {
@@ -41,14 +86,16 @@ function createMockRedis() {
     },
     set: async (key: string, value: string, mode?: string, duration?: number) => {
       cleanupExpired();
+      zsets.delete(key);
       const expiresAt = mode === "EX" && duration ? Date.now() + duration * 1000 : undefined;
       store.set(key, { value: String(value), expiresAt });
       return "OK";
     },
     del: async (key: string) => {
       cleanupExpired();
-      const existed = store.delete(key);
-      return existed ? 1 : 0;
+      const d1 = store.delete(key);
+      const d2 = zsets.delete(key);
+      return d1 || d2 ? 1 : 0;
     },
     incr: async (key: string) => {
       cleanupExpired();
@@ -59,114 +106,219 @@ function createMockRedis() {
     },
     expire: async (key: string, seconds: number) => {
       cleanupExpired();
-      const current = store.get(key);
-      if (current) {
-        current.expiresAt = Date.now() + seconds * 1000;
+      const item = store.get(key) || zsets.get(key);
+      if (item) {
+        item.expiresAt = Date.now() + seconds * 1000;
         return 1;
       }
       return 0;
     },
     ttl: async (key: string) => {
       cleanupExpired();
-      const item = store.get(key);
+      const item = store.get(key) || zsets.get(key);
       if (!item) return -2;
       if (!item.expiresAt) return -1;
       const remainingMs = item.expiresAt - Date.now();
       return Math.max(0, Math.ceil(remainingMs / 1000));
     },
+    type: async (key: string) => {
+      cleanupExpired();
+      if (zsets.has(key)) return "zset";
+      if (store.has(key)) return "string";
+      return "none";
+    },
     keys: async (pattern: string) => {
       cleanupExpired();
       const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
-      return Array.from(store.keys()).filter(k => regex.test(k));
+      const allKeys = new Set([...store.keys(), ...zsets.keys()]);
+      return Array.from(allKeys).filter(k => regex.test(k));
     },
     eval: async (script: string, numkeys: number, ...args: (string | number)[]) => {
       cleanupExpired();
       const keys = args.slice(0, numkeys) as string[];
       const argv = args.slice(numkeys);
 
-      // Lua simulation for CHECK_OTP_RATE_LIMIT_LUA
-      if (script.includes("CHECK_OTP_RATE_LIMIT_LUA") || script.includes("COOLDOWN")) {
-        const cooldownKey = keys[0];
-        const phoneRateKey = keys[1];
-        const ipRateKey = keys[2];
-        const phoneMax = Number(argv[0]);
-        const ipMax = Number(argv[1]);
+      // Lua simulation for ATOMIC_CHECK_AND_RECORD_OTP_LUA (3 keys, 6 argv)
+      if (keys.length === 3 && argv.length === 6) {
+        const [cooldownKey, phoneRateKey, ipRateKey] = keys;
+        const now = Number(argv[0]) || 0;
+        const windowMs = Number(argv[1]) || 900000;
+        const phoneMax = Number(argv[2]) || 5;
+        const ipMax = Number(argv[3]) || 10;
+        const cooldownSec = Number(argv[4]) || 0;
+        const memberId = String(argv[5] || "");
+        const windowSec = Math.ceil(windowMs / 1000);
+        const windowStart = now - windowMs;
 
         const cooldownTtl = await mockClient.ttl(cooldownKey);
         if (cooldownTtl > 0) {
           return [0, cooldownTtl, "COOLDOWN"];
         }
 
-        const phoneVal = await mockClient.get(phoneRateKey);
-        const phoneCount = Number(phoneVal || 0);
-        if (phoneCount >= phoneMax) {
-          const pTtl = await mockClient.ttl(phoneRateKey);
-          return [0, pTtl > 0 ? pTtl : 900, "PHONE_LIMIT"];
+        zremrangebyscore(phoneRateKey, -Infinity, windowStart);
+        if (zcard(phoneRateKey) >= phoneMax) {
+          const oldestScore = zrangeOldestScore(phoneRateKey);
+          const retryAfter = oldestScore !== null
+            ? Math.max(1, Math.ceil((oldestScore + windowMs - now) / 1000))
+            : windowSec;
+          return [0, retryAfter, "PHONE_LIMIT"];
         }
 
-        const ipVal = await mockClient.get(ipRateKey);
-        const ipCount = Number(ipVal || 0);
-        if (ipCount >= ipMax) {
-          const iTtl = await mockClient.ttl(ipRateKey);
-          return [0, iTtl > 0 ? iTtl : 900, "IP_LIMIT"];
+        zremrangebyscore(ipRateKey, -Infinity, windowStart);
+        if (zcard(ipRateKey) >= ipMax) {
+          const oldestScore = zrangeOldestScore(ipRateKey);
+          const retryAfter = oldestScore !== null
+            ? Math.max(1, Math.ceil((oldestScore + windowMs - now) / 1000))
+            : windowSec;
+          return [0, retryAfter, "IP_LIMIT"];
+        }
+
+        if (cooldownSec > 0) {
+          await mockClient.set(cooldownKey, "1", "EX", cooldownSec);
+        }
+        zadd(phoneRateKey, now, memberId);
+        await mockClient.expire(phoneRateKey, windowSec);
+        zadd(ipRateKey, now, memberId);
+        await mockClient.expire(ipRateKey, windowSec);
+        return [1, 0, "OK"];
+      }
+
+      // Lua simulation for CHECK_OTP_RATE_LIMIT_LUA (3 keys, 4 argv: [now, windowMs, phoneMax, ipMax])
+      if (keys.length === 3 && argv.length === 4 && script.includes("PHONE_LIMIT")) {
+        const [cooldownKey, phoneRateKey, ipRateKey] = keys;
+        const now = Number(argv[0]) || 0;
+        const windowMs = Number(argv[1]) || 900000;
+        const phoneMax = Number(argv[2]) || 5;
+        const ipMax = Number(argv[3]) || 10;
+        const windowStart = now - windowMs;
+
+        const cooldownTtl = await mockClient.ttl(cooldownKey);
+        if (cooldownTtl > 0) {
+          return [0, cooldownTtl, "COOLDOWN"];
+        }
+
+        if (zsets.has(phoneRateKey)) {
+          zremrangebyscore(phoneRateKey, -Infinity, windowStart);
+          if (zcard(phoneRateKey) >= phoneMax) {
+            const oldestScore = zrangeOldestScore(phoneRateKey);
+            const retryAfter = oldestScore !== null
+              ? Math.max(1, Math.ceil((oldestScore + windowMs - now) / 1000))
+              : Math.ceil(windowMs / 1000);
+            return [0, retryAfter, "PHONE_LIMIT"];
+          }
+        } else {
+          const phoneVal = await mockClient.get(phoneRateKey);
+          const phoneCount = Number(phoneVal || 0);
+          if (phoneCount >= phoneMax) {
+            const pTtl = await mockClient.ttl(phoneRateKey);
+            return [0, pTtl >= 0 ? pTtl : 900, "PHONE_LIMIT"];
+          }
+        }
+
+        if (zsets.has(ipRateKey)) {
+          zremrangebyscore(ipRateKey, -Infinity, windowStart);
+          if (zcard(ipRateKey) >= ipMax) {
+            const oldestScore = zrangeOldestScore(ipRateKey);
+            const retryAfter = oldestScore !== null
+              ? Math.max(1, Math.ceil((oldestScore + windowMs - now) / 1000))
+              : Math.ceil(windowMs / 1000);
+            return [0, retryAfter, "IP_LIMIT"];
+          }
+        } else {
+          const ipVal = await mockClient.get(ipRateKey);
+          const ipCount = Number(ipVal || 0);
+          if (ipCount >= ipMax) {
+            const iTtl = await mockClient.ttl(ipRateKey);
+            return [0, iTtl >= 0 ? iTtl : 900, "IP_LIMIT"];
+          }
         }
 
         return [1, 0, "OK"];
       }
 
-      // Lua simulation for RECORD_OTP_REQUEST_LUA
-      if (script.includes("RECORD_OTP_REQUEST_LUA") || (keys.length === 3 && argv.length === 2)) {
-        const cooldownKey = keys[0];
-        const phoneRateKey = keys[1];
-        const ipRateKey = keys[2];
-        const cooldownSec = Number(argv[0]);
-        const windowSec = Number(argv[1]);
+      // Lua simulation for RECORD_OTP_REQUEST_LUA (3 keys, 2 or 4 argv: [cooldownSec, windowSec, (now), (memberId)])
+      if (keys.length === 3 && (argv.length === 2 || argv.length === 4)) {
+        const [cooldownKey, phoneRateKey, ipRateKey] = keys;
+        const cooldownSec = Number(argv[0]) || 0;
+        const windowSec = Number(argv[1]) || 900;
+        const now = Number(argv[2]) || 0;
+        const memberId = String(argv[3] || "");
 
         if (cooldownSec > 0) {
           await mockClient.set(cooldownKey, "1", "EX", cooldownSec);
         }
 
-        const pCount = await mockClient.incr(phoneRateKey);
-        if (pCount === 1) {
+        if (now > 0 && memberId !== "") {
+          zadd(phoneRateKey, now, memberId);
           await mockClient.expire(phoneRateKey, windowSec);
-        }
-
-        const iCount = await mockClient.incr(ipRateKey);
-        if (iCount === 1) {
+          zadd(ipRateKey, now, memberId);
           await mockClient.expire(ipRateKey, windowSec);
+        } else {
+          const pCount = await mockClient.incr(phoneRateKey);
+          if (pCount === 1) {
+            await mockClient.expire(phoneRateKey, windowSec);
+          }
+
+          const iCount = await mockClient.incr(ipRateKey);
+          if (iCount === 1) {
+            await mockClient.expire(ipRateKey, windowSec);
+          }
         }
 
         return 1;
       }
 
-      // Lua simulation for CHECK_VERIFY_RATE_LUA
-      if (script.includes("CHECK_VERIFY_RATE_LUA") || keys.length === 1 && argv.length === 1) {
+      // Lua simulation for CHECK_VERIFY_RATE_LUA (1 key, 3 argv: [now, windowMs, maxAttempts])
+      if (keys.length === 1 && argv.length === 3) {
         const key = keys[0];
-        const max = Number(argv[0]);
-        const val = await mockClient.get(key);
-        const count = Number(val || 0);
-        if (count >= max) {
-          const ttl = await mockClient.ttl(key);
-          return [0, ttl > 0 ? ttl : 900];
+        const now = Number(argv[0]) || 0;
+        const windowMs = Number(argv[1]) || 900000;
+        const maxAttempts = Number(argv[2]) || 20;
+        const windowStart = now - windowMs;
+
+        if (zsets.has(key)) {
+          zremrangebyscore(key, -Infinity, windowStart);
+          if (zcard(key) >= maxAttempts) {
+            const oldestScore = zrangeOldestScore(key);
+            const retryAfter = oldestScore !== null
+              ? Math.max(1, Math.ceil((oldestScore + windowMs - now) / 1000))
+              : Math.ceil(windowMs / 1000);
+            return [0, retryAfter];
+          }
+        } else {
+          const val = await mockClient.get(key);
+          const count = Number(val || 0);
+          if (count >= maxAttempts) {
+            const ttl = await mockClient.ttl(key);
+            return [0, ttl >= 0 ? ttl : 900];
+          }
         }
         return [1, 0];
       }
 
-      // Lua simulation for RECORD_FAILED_VERIFY_LUA
-      if (script.includes("RECORD_FAILED_VERIFY_LUA") || keys.length === 1 && argv.length === 1) {
+      // Lua simulation for RECORD_FAILED_VERIFY_LUA (1 key, 4 argv: [now, windowMs, maxAttempts, memberId])
+      if (keys.length === 1 && argv.length === 4 && script.includes("ZREMRANGEBYSCORE")) {
         const key = keys[0];
-        const windowSec = Number(argv[0]);
-        const count = await mockClient.incr(key);
-        if (count === 1) {
-          await mockClient.expire(key, windowSec);
-        }
-        return count;
+        const now = Number(argv[0]) || 0;
+        const windowMs = Number(argv[1]) || 900000;
+        const maxAttempts = Number(argv[2]) || 20;
+        const memberId = String(argv[3] || "");
+        const windowSec = Math.ceil(windowMs / 1000);
+        const windowStart = now - windowMs;
+
+        zremrangebyscore(key, -Infinity, windowStart);
+        zadd(key, now, memberId);
+        await mockClient.expire(key, windowSec);
+
+        const count = zcard(key);
+        return [count, count >= maxAttempts ? 1 : 0];
       }
 
       return null;
     },
     // Expose raw internal store for test verification
-    _getStore: () => store
+    _getStore: () => store,
+    _getZsets: () => zsets
   };
 
   return mockClient;
