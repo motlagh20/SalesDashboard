@@ -125,16 +125,38 @@ describe("Cross-Representative & Cross-Shipping-Company Order Data Isolation Tes
       assert.deepEqual(managerAuth.params, []);
     });
 
-    it("preserves unconstrained operational access for FACTORY_TRANSPORT, PRODUCT_WAREHOUSE, and SECURITY_GATE", () => {
-      for (const role of ["FACTORY_TRANSPORT", "PRODUCT_WAREHOUSE", "SECURITY_GATE"]) {
-        const auth = buildOrderQueryForUser({
-          id: `usr-${role}`,
-          username: `user_${role}`,
-          role
-        });
-        assert.equal(auth.isRestricted, false);
-        assert.ok(!auth.sql.includes("WHERE"));
-      }
+    it("enforces workflow-stage SQL scoping for FACTORY_TRANSPORT, PRODUCT_WAREHOUSE, and SECURITY_GATE", () => {
+      const factoryAuth = buildOrderQueryForUser({ id: "usr-factory", username: "factory", role: "FACTORY_TRANSPORT" });
+      assert.equal(factoryAuth.isRestricted, true);
+      assert.equal(factoryAuth.filterType, "STAGE");
+      assert.ok(factoryAuth.sql.includes("WHERE status IN"));
+      assert.deepEqual(factoryAuth.allowedStatuses, [
+        "SENT_TO_FACTORY",
+        "VEHICLE_ASSIGNED",
+        "WAREHOUSE_LOADED",
+        "LOADED_AND_DISPATCHED"
+      ]);
+
+      const warehouseAuth = buildOrderQueryForUser({ id: "usr-wh", username: "warehouse", role: "PRODUCT_WAREHOUSE" });
+      assert.equal(warehouseAuth.isRestricted, true);
+      assert.equal(warehouseAuth.filterType, "STAGE");
+      assert.ok(warehouseAuth.sql.includes("WHERE status IN"));
+      assert.ok(!warehouseAuth.sql.includes("SENT_TO_FACTORY"));
+      assert.deepEqual(warehouseAuth.allowedStatuses, [
+        "VEHICLE_ASSIGNED",
+        "WAREHOUSE_LOADED",
+        "LOADED_AND_DISPATCHED"
+      ]);
+
+      const securityAuth = buildOrderQueryForUser({ id: "usr-sec", username: "security", role: "SECURITY_GATE" });
+      assert.equal(securityAuth.isRestricted, true);
+      assert.equal(securityAuth.filterType, "STAGE");
+      assert.ok(securityAuth.sql.includes("WHERE status IN"));
+      assert.ok(!securityAuth.sql.includes("VEHICLE_ASSIGNED"));
+      assert.deepEqual(securityAuth.allowedStatuses, [
+        "WAREHOUSE_LOADED",
+        "LOADED_AND_DISPATCHED"
+      ]);
     });
 
     it("strictly isolates order ownership in checkOrderOwnership", () => {

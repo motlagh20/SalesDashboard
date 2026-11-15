@@ -30,6 +30,14 @@ import {
   extractToken,
   assertJwtSecretConfiguration,
   buildOrderQueryForUser,
+  buildAgentQueryForUser,
+  buildShippingCompanyQueryForUser,
+  sanitizeOrderForRole,
+  sanitizeProductForRole,
+  sanitizeShippingCompanyForRole,
+  sanitizePermanentDriverForRole,
+  checkPermanentDriverOwnership,
+  checkOrderStageForMutation,
   checkOrderOwnership,
   normalizeRole,
   isPrimaryAdmin,
@@ -127,6 +135,59 @@ function clearCachedRoute(key: string) {
 
 function clearAllRouteCaches() {
   inMemoryRouteCache.clear();
+}
+
+function buildRoleScopedCacheKey(baseKey: string, user?: Express.Request['user']): string {
+  const role = user ? normalizeRole(user.role) : "ANON";
+  if (role === "REPRESENTATIVE") {
+    const agentCode = user?.agentCode ? String(user.agentCode).trim().toUpperCase() : "UNASSIGNED";
+    return `${baseKey}:role:${role}:agent:${agentCode}`;
+  }
+  if (role === "SHIPPING_COMPANY") {
+    const scId = user?.shippingCompanyId ? String(user.shippingCompanyId).trim().toLowerCase() : "UNASSIGNED";
+    return `${baseKey}:role:${role}:sc:${scId}`;
+  }
+  return `${baseKey}:role:${role}`;
+}
+
+async function invalidateScopedRedisCache(redis: any, baseKey: string): Promise<void> {
+  if (!redis) return;
+  try {
+    await redis.del(baseKey);
+    const pattern = `${baseKey}:*`;
+    if (typeof redis.scan === "function") {
+      let cursor = "0";
+      do {
+        const [nextCursor, keys] = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100);
+        cursor = nextCursor;
+        if (Array.isArray(keys) && keys.length > 0) {
+          for (const k of keys) {
+            await redis.del(k);
+          }
+        }
+      } while (cursor !== "0");
+    } else if (typeof redis.keys === "function") {
+      const matched = await redis.keys(pattern);
+      if (Array.isArray(matched)) {
+        for (const k of matched) {
+          await redis.del(k);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[Cache] Failed to invalidate scoped Redis cache for ${baseKey}:`, err);
+  }
+}
+
+async function resolveShippingCompanyName(db: any, scId?: string | null): Promise<string | null> {
+  if (!scId) return null;
+  try {
+    const [rows] = await db.query("SELECT name FROM shipping_companies WHERE id = ?", [scId]) as any[];
+    if (Array.isArray(rows) && rows.length > 0 && rows[0]?.name) {
+      return String(rows[0].name).trim();
+    }
+  } catch {}
+  return null;
 }
 
 // Load environment variables
@@ -405,22 +466,32 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
   app.get("/api/sync/bootstrap", authenticate, async (req, res) => {
     try {
       const db = getDbPool();
-      
-      // Enforce database-level order authorization based strictly on verified server-side user credentials
+      const callerRole = req.user ? normalizeRole(req.user.role) : "";
+
+      // Enforce database-level order & master-data authorization based strictly on verified server-side credentials
       const authQuery = buildOrderQueryForUser(req.user);
+      const agentAuth = buildAgentQueryForUser(req.user);
+      const scAuth = buildShippingCompanyQueryForUser(req.user);
+      const canReadDrivers =
+        callerRole === "SYSTEM_ADMIN" ||
+        callerRole === "SALES_MANAGER" ||
+        callerRole === "FACTORY_TRANSPORT" ||
+        callerRole === "SHIPPING_COMPANY";
 
       const [
         [prodRows],
         [agentRows],
         [scRows],
         [driverRows],
-        [orderRows]
+        [orderRows],
+        shippingCompanyName
       ] = await Promise.all([
         db.query("SELECT * FROM products"),
-        db.query("SELECT * FROM agents"),
-        db.query("SELECT * FROM shipping_companies"),
-        db.query("SELECT * FROM permanent_drivers"),
-        db.query(authQuery.sql, authQuery.params)
+        agentAuth.allowed ? db.query(agentAuth.sql, agentAuth.params) : Promise.resolve([[]]),
+        scAuth.allowed ? db.query(scAuth.sql, scAuth.params) : Promise.resolve([[]]),
+        canReadDrivers ? db.query("SELECT * FROM permanent_drivers") : Promise.resolve([[]]),
+        db.query(authQuery.sql, authQuery.params),
+        callerRole === "SHIPPING_COMPANY" ? resolveShippingCompanyName(db, req.user?.shippingCompanyId) : Promise.resolve(null)
       ]) as any[];
 
       // Only query order history for authorized orders to prevent any indirect data leakage
@@ -439,30 +510,31 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
         }
       }
 
-      const products = (prodRows || []).map((p: any) => ({
-        ...p,
-        isEnabled: !!p.isEnabled
-      }));
+      const products = (prodRows || [])
+        .map((p: any) => sanitizeProductForRole(p, req.user))
+        .filter(Boolean);
 
-      const agents = (agentRows || []).map((a: any) => {
-        const territories = parseServerTerritories(a.territories, a.area);
-        return {
-          ...a,
-          territories: Array.isArray(territories) ? territories : [],
-          isExportAgent: !!a.isExportAgent,
-          isEnabled: !!a.isEnabled
-        };
-      });
+      const agents = agentAuth.allowed
+        ? (agentRows || []).map((a: any) => {
+            const territories = parseServerTerritories(a.territories, a.area);
+            return {
+              ...a,
+              territories: Array.isArray(territories) ? territories : [],
+              isExportAgent: !!a.isExportAgent,
+              isEnabled: !!a.isEnabled
+            };
+          })
+        : [];
 
-      const shippingCompanies = (scRows || []).map((sc: any) => ({
-        ...sc,
-        isEnabled: !!sc.isEnabled
-      }));
+      const shippingCompanies = scAuth.allowed
+        ? (scRows || []).map((sc: any) => sanitizeShippingCompanyForRole(sc, req.user)).filter(Boolean)
+        : [];
 
-      const permanentDrivers = (driverRows || []).map((d: any) => ({
-        ...d,
-        isEnabled: !!d.isEnabled
-      }));
+      const permanentDrivers = canReadDrivers
+        ? (driverRows || [])
+            .map((d: any) => sanitizePermanentDriverForRole(d, req.user, shippingCompanyName))
+            .filter(Boolean)
+        : [];
 
       const historyMap: Record<string, any[]> = {};
       for (const h of historyRows || []) {
@@ -556,19 +628,22 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
           }
         }
 
-        return formatted;
-      });
+        return sanitizeOrderForRole(formatted, req.user);
+      }).filter(Boolean);
 
-      const payload = {
+      const includeSystemSettings = callerRole === "SYSTEM_ADMIN" || callerRole === "SALES_MANAGER";
+      const payload: any = {
         products,
         agents,
         shippingCompanies,
         permanentDrivers,
         orders,
-        systemSettings: getSystemSettings(),
         sandboxEnabled: isProductionEnvironment() ? false : globalSandboxEnabled,
         timestamp: Date.now()
       };
+      if (includeSystemSettings) {
+        payload.systemSettings = getSystemSettings();
+      }
 
       res.json(payload);
     } catch (err: any) {
@@ -588,11 +663,12 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
   });
 
   // 1. PRODUCTS API
-  app.get("/api/products", authenticate, async (req, res) => {
+  app.get("/api/products", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER", "REPRESENTATIVE", "FACTORY_TRANSPORT", "SHIPPING_COMPANY", "PRODUCT_WAREHOUSE", "SECURITY_GATE"), async (req, res) => {
     try {
+      const cacheKey = buildRoleScopedCacheKey(CACHE_KEY_PRODUCTS, req.user);
       const redis = getRedisClient();
       if (redis) {
-        const cached = await redis.get(CACHE_KEY_PRODUCTS);
+        const cached = await redis.get(cacheKey);
         if (cached) {
           return res.json(JSON.parse(cached));
         }
@@ -600,13 +676,12 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       
       const db = getDbPool();
       const [rows] = await db.query("SELECT * FROM products");
-      const products = (rows as any[]).map(p => ({
-        ...p,
-        isEnabled: !!p.isEnabled
-      }));
+      const products = (rows as any[])
+        .map(p => sanitizeProductForRole(p, req.user))
+        .filter(Boolean);
       
       if (redis) {
-        await redis.set(CACHE_KEY_PRODUCTS, JSON.stringify(products), "EX", 600); // 10 minutes cache
+        await redis.set(cacheKey, JSON.stringify(products), "EX", 600); // 10 minutes role-scoped cache
       }
       res.json(products);
     } catch (err: any) {
@@ -644,7 +719,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       
       // Invalidate cache
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_PRODUCTS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_PRODUCTS);
+      clearAllRouteCaches();
 
       await recordActivity(
         req,
@@ -670,7 +746,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       
       // Invalidate cache
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_PRODUCTS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_PRODUCTS);
+      clearAllRouteCaches();
 
       res.json({ success: true });
     } catch (err: any) {
@@ -711,7 +788,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       `, [safeName, safeCategory, safePrice, safeUnit, safeDescription || null, safeWeight, safeDimensions || null, safeCoverageInfo || null, safePrimaryUnit || null, safeSecondaryUnit || null, safeConversionRatio, safeDefaultQuantity, isEnabled, safeImageUrl || null, safeId]);
 
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_PRODUCTS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_PRODUCTS);
+      clearAllRouteCaches();
 
       await recordActivity(
         req,
@@ -735,7 +813,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       
       // Invalidate cache
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_PRODUCTS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_PRODUCTS);
+      clearAllRouteCaches();
 
       await recordActivity(
         req,
@@ -752,18 +831,23 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
   });
 
   // 2. AGENTS API
-  app.get("/api/agents", authenticate, async (req, res) => {
+  app.get("/api/agents", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER", "REPRESENTATIVE"), async (req, res) => {
     try {
+      const cacheKey = buildRoleScopedCacheKey(CACHE_KEY_AGENTS, req.user);
       const redis = getRedisClient();
       if (redis) {
-        const cached = await redis.get(CACHE_KEY_AGENTS);
+        const cached = await redis.get(cacheKey);
         if (cached) {
           return res.json(JSON.parse(cached));
         }
       }
       
       const db = getDbPool();
-      const [rows] = await db.query("SELECT * FROM agents");
+      const agentAuth = buildAgentQueryForUser(req.user);
+      if (!agentAuth.allowed) {
+        return sendApiError(res, 403, "دسترسی غیرمجاز. شما مجوز مشاهده لیست نمایندگان را ندارید.");
+      }
+      const [rows] = await db.query(agentAuth.sql, agentAuth.params);
       const agents = (rows as any[]).map(a => {
         const territories = parseServerTerritories(a.territories, a.area);
         return {
@@ -775,7 +859,7 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       });
       
       if (redis) {
-        await redis.set(CACHE_KEY_AGENTS, JSON.stringify(agents), "EX", 600);
+        await redis.set(cacheKey, JSON.stringify(agents), "EX", 600);
       }
       res.json(agents);
     } catch (err: any) {
@@ -849,7 +933,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       }
 
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_AGENTS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_AGENTS);
+      clearAllRouteCaches();
 
       await recordActivity(
         req,
@@ -875,7 +960,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       await db.query("UPDATE agents SET isEnabled = NOT isEnabled WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_AGENTS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_AGENTS);
+      clearAllRouteCaches();
 
       res.json({ success: true });
     } catch (err: any) {
@@ -929,7 +1015,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       }
 
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_AGENTS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_AGENTS);
+      clearAllRouteCaches();
 
       await recordActivity(
         req,
@@ -962,7 +1049,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       await db.query("DELETE FROM agents WHERE id = ?", [id]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_AGENTS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_AGENTS);
+      clearAllRouteCaches();
 
       await recordActivity(
         req,
@@ -980,25 +1068,29 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
   });
 
   // 3. SHIPPING COMPANIES API
-  app.get("/api/shipping-companies", authenticate, async (req, res) => {
+  app.get("/api/shipping-companies", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
+      const cacheKey = buildRoleScopedCacheKey(CACHE_KEY_SHIPPING_COMPANIES, req.user);
       const redis = getRedisClient();
       if (redis) {
-        const cached = await redis.get(CACHE_KEY_SHIPPING_COMPANIES);
+        const cached = await redis.get(cacheKey);
         if (cached) {
           return res.json(JSON.parse(cached));
         }
       }
       
       const db = getDbPool();
-      const [rows] = await db.query("SELECT * FROM shipping_companies");
-      const companies = (rows as any[]).map(sc => ({
-        ...sc,
-        isEnabled: !!sc.isEnabled
-      }));
+      const scAuth = buildShippingCompanyQueryForUser(req.user);
+      if (!scAuth.allowed) {
+        return sendApiError(res, 403, "دسترسی غیرمجاز. شما مجوز مشاهده اطلاعات شرکت‌های باربری را ندارید.");
+      }
+      const [rows] = await db.query(scAuth.sql, scAuth.params);
+      const companies = (rows as any[])
+        .map(sc => sanitizeShippingCompanyForRole(sc, req.user))
+        .filter(Boolean);
       
       if (redis) {
-        await redis.set(CACHE_KEY_SHIPPING_COMPANIES, JSON.stringify(companies), "EX", 600);
+        await redis.set(cacheKey, JSON.stringify(companies), "EX", 600);
       }
       res.json(companies);
     } catch (err: any) {
@@ -1063,7 +1155,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       }
       
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_SHIPPING_COMPANIES);
+      clearAllRouteCaches();
       
       res.status(201).json({ success: true, id: safeId });
     } catch (err: any) {
@@ -1114,7 +1207,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       }
 
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_SHIPPING_COMPANIES);
+      clearAllRouteCaches();
 
       res.json({ success: true });
     } catch (err: any) {
@@ -1130,7 +1224,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       await db.query("UPDATE shipping_companies SET isEnabled = NOT isEnabled WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_SHIPPING_COMPANIES);
+      clearAllRouteCaches();
       
       res.json({ success: true });
     } catch (err: any) {
@@ -1153,7 +1248,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
       await db.query("DELETE FROM shipping_companies WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_SHIPPING_COMPANIES);
+      clearAllRouteCaches();
       
       res.json({ success: true });
     } catch (err: any) {
@@ -1163,25 +1259,30 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
   });
 
   // 3b. PERMANENT DRIVERS API
-  app.get("/api/permanent-drivers", authenticate, async (req, res) => {
+  app.get("/api/permanent-drivers", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
+      const cacheKey = buildRoleScopedCacheKey(CACHE_KEY_PERMANENT_DRIVERS, req.user);
       const redis = getRedisClient();
       if (redis) {
-        const cached = await redis.get(CACHE_KEY_PERMANENT_DRIVERS);
+        const cached = await redis.get(cacheKey);
         if (cached) {
           return res.json(JSON.parse(cached));
         }
       }
       
       const db = getDbPool();
+      const callerRole = normalizeRole(req.user!.role);
+      const companyName = callerRole === "SHIPPING_COMPANY"
+        ? await resolveShippingCompanyName(db, req.user?.shippingCompanyId)
+        : null;
+
       const [rows] = await db.query("SELECT * FROM permanent_drivers");
-      const drivers = (rows as any[]).map(d => ({
-        ...d,
-        isEnabled: !!d.isEnabled
-      }));
+      const drivers = (rows as any[])
+        .map(d => sanitizePermanentDriverForRole(d, req.user, companyName))
+        .filter(Boolean);
       
       if (redis) {
-        await redis.set(CACHE_KEY_PERMANENT_DRIVERS, JSON.stringify(drivers), "EX", 600);
+        await redis.set(cacheKey, JSON.stringify(drivers), "EX", 600);
       }
       res.json(drivers);
     } catch (err: any) {
@@ -1193,22 +1294,39 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
   app.post("/api/permanent-drivers", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
       const db = getDbPool();
+      const callerRole = normalizeRole(req.user!.role);
       const safeId = req.body.id ? validateId(req.body.id, "شناسه راننده") : `drv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const safeName = sanitizeString(req.body.driverName, { allowEmpty: false, maxLength: 100, fieldName: "نام راننده" });
       const safePhone = validatePhoneNumber(req.body.driverPhone, "شماره تماس راننده");
       const safePlate = sanitizeString(req.body.licensePlate, { allowEmpty: false, maxLength: 50, fieldName: "شماره پلاک خودرو" });
       const safeVehicle = sanitizeString(req.body.vehicleType, { maxLength: 100, defaultValue: 'تریلی ۱۸ چرخ لبه‌دار' });
-      const safeAgency = sanitizeString(req.body.shippingAgency, { maxLength: 100, fieldName: "آژانس حمل بار" });
+      const rawAgency = sanitizeString(req.body.shippingAgency, { maxLength: 100, fieldName: "آژانس حمل بار" });
       const safeNationalCode = sanitizeString(req.body.nationalCode, { maxLength: 50, fieldName: "کد ملی" });
       const safeSmartCard = sanitizeString(req.body.smartCardNumber, { maxLength: 50, fieldName: "کارت هوشمند راننده" });
+      const reqScId = req.body.shippingCompanyId ? validateId(req.body.shippingCompanyId, "شناسه شرکت باربری") : null;
+
+      let effectiveScId: string | null = reqScId;
+      let effectiveAgency: string | null = rawAgency || null;
+
+      if (callerRole === "SHIPPING_COMPANY") {
+        if (!req.user?.shippingCompanyId) {
+          return sendApiError(res, 403, "شناسه شرکت باربری برای حساب شما تعیین نشده است.");
+        }
+        effectiveScId = req.user.shippingCompanyId;
+        const ownCompanyName = await resolveShippingCompanyName(db, effectiveScId);
+        if (ownCompanyName) {
+          effectiveAgency = ownCompanyName;
+        }
+      }
 
       await db.query(
-        "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
-        [safeId, safeName, safePhone, safePlate, safeVehicle || 'تریلی ۱۸ چرخ لبه‌دار', safeAgency || null, safeNationalCode || null, safeSmartCard || null]
+        "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, shippingCompanyId, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+        [safeId, safeName, safePhone, safePlate, safeVehicle || 'تریلی ۱۸ چرخ لبه‌دار', effectiveAgency, effectiveScId, safeNationalCode || null, safeSmartCard || null]
       );
       
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_PERMANENT_DRIVERS);
+      clearAllRouteCaches();
       
       res.status(201).json({ success: true, id: safeId });
     } catch (err: any) {
@@ -1220,7 +1338,18 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
   app.post("/api/permanent-drivers/bulk", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
       const db = getDbPool();
+      const callerRole = normalizeRole(req.user!.role);
       const safeDrivers = validateArray(req.body.drivers, "لیست رانندگان", { minLength: 1, maxLength: 500 });
+
+      let forcedScId: string | null = null;
+      let forcedAgency: string | null = null;
+      if (callerRole === "SHIPPING_COMPANY") {
+        if (!req.user?.shippingCompanyId) {
+          return sendApiError(res, 403, "شناسه شرکت باربری برای حساب شما تعیین نشده است.");
+        }
+        forcedScId = req.user.shippingCompanyId;
+        forcedAgency = await resolveShippingCompanyName(db, forcedScId);
+      }
 
       const connection = await db.getConnection();
       try {
@@ -1236,14 +1365,19 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
           const dPhone = validatePhoneNumber(d.driverPhone, "شماره تماس راننده");
           const dPlate = sanitizeString(d.licensePlate, { allowEmpty: false, maxLength: 50, fieldName: "شماره پلاک" });
           const dVehicle = sanitizeString(d.vehicleType, { maxLength: 100, defaultValue: 'تریلی ۱۸ چرخ لبه‌دار' });
-          const dAgency = sanitizeString(d.shippingAgency, { maxLength: 100 });
+          const dAgency = callerRole === "SHIPPING_COMPANY"
+            ? (forcedAgency || sanitizeString(d.shippingAgency, { maxLength: 100 }) || null)
+            : (sanitizeString(d.shippingAgency, { maxLength: 100 }) || null);
+          const dScId = callerRole === "SHIPPING_COMPANY"
+            ? forcedScId
+            : (d.shippingCompanyId ? validateId(d.shippingCompanyId, "شناسه شرکت باربری") : null);
           const dNatCode = sanitizeString(d.nationalCode, { maxLength: 50 });
           const dSmart = sanitizeString(d.smartCardNumber, { maxLength: 50 });
           
           const driverId = d.id ? validateId(d.id, "شناسه راننده") : `drv-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 5)}`;
           await connection.query(
-            "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
-            [driverId, dName, dPhone, dPlate, dVehicle || 'تریلی ۱۸ چرخ لبه‌دار', dAgency || null, dNatCode || null, dSmart || null]
+            "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, shippingCompanyId, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+            [driverId, dName, dPhone, dPlate, dVehicle || 'تریلی ۱۸ چرخ لبه‌دار', dAgency, dScId, dNatCode || null, dSmart || null]
           );
           insertedCount++;
         }
@@ -1251,7 +1385,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
         await connection.commit();
 
         const redis = getRedisClient();
-        if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
+        await invalidateScopedRedisCache(redis, CACHE_KEY_PERMANENT_DRIVERS);
+        clearAllRouteCaches();
 
         res.status(201).json({ success: true, count: insertedCount });
       } catch (txErr) {
@@ -1269,25 +1404,46 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
   app.put("/api/permanent-drivers/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
       const db = getDbPool();
+      const callerRole = normalizeRole(req.user!.role);
       const safeId = validateId(req.params.id, "شناسه راننده");
+
+      const [existingRows] = await db.query("SELECT * FROM permanent_drivers WHERE id = ?", [safeId]) as any[];
+      const companyName = callerRole === "SHIPPING_COMPANY"
+        ? await resolveShippingCompanyName(db, req.user?.shippingCompanyId)
+        : null;
+      const ownCheck = checkPermanentDriverOwnership(existingRows?.[0], req.user, companyName);
+      if (!ownCheck.allowed) {
+        return sendApiError(res, ownCheck.status, ownCheck.message);
+      }
+
       const safeName = sanitizeString(req.body.driverName, { allowEmpty: false, maxLength: 100, fieldName: "نام راننده" });
       const safePhone = validatePhoneNumber(req.body.driverPhone, "شماره تماس راننده");
       const safePlate = sanitizeString(req.body.licensePlate, { allowEmpty: false, maxLength: 50, fieldName: "شماره پلاک خودرو" });
       const safeVehicle = sanitizeString(req.body.vehicleType, { maxLength: 100, defaultValue: 'تریلی ۱۸ چرخ لبه‌دار' });
-      const safeAgency = sanitizeString(req.body.shippingAgency, { maxLength: 100, fieldName: "آژانس حمل بار" });
+      const rawAgency = sanitizeString(req.body.shippingAgency, { maxLength: 100, fieldName: "آژانس حمل بار" });
       const safeNationalCode = sanitizeString(req.body.nationalCode, { maxLength: 50, fieldName: "کد ملی" });
       const safeSmartCard = sanitizeString(req.body.smartCardNumber, { maxLength: 50, fieldName: "کارت هوشمند راننده" });
       const isEnabled = req.body.isEnabled ? 1 : 0;
 
+      const effectiveScId = callerRole === "SHIPPING_COMPANY"
+        ? req.user!.shippingCompanyId!
+        : (req.body.shippingCompanyId !== undefined
+            ? (req.body.shippingCompanyId ? validateId(req.body.shippingCompanyId, "شناسه شرکت باربری") : null)
+            : (existingRows[0]?.shippingCompanyId ?? null));
+      const effectiveAgency = callerRole === "SHIPPING_COMPANY"
+        ? (companyName || existingRows[0]?.shippingAgency || rawAgency || null)
+        : (rawAgency || null);
+
       await db.query(`
         UPDATE permanent_drivers SET 
           driverName = ?, driverPhone = ?, licensePlate = ?, vehicleType = ?, 
-          shippingAgency = ?, nationalCode = ?, smartCardNumber = ?, isEnabled = ? 
+          shippingAgency = ?, shippingCompanyId = ?, nationalCode = ?, smartCardNumber = ?, isEnabled = ? 
         WHERE id = ?
-      `, [safeName, safePhone, safePlate, safeVehicle, safeAgency || null, safeNationalCode || null, safeSmartCard || null, isEnabled, safeId]);
+      `, [safeName, safePhone, safePlate, safeVehicle, effectiveAgency, effectiveScId, safeNationalCode || null, safeSmartCard || null, isEnabled, safeId]);
 
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_PERMANENT_DRIVERS);
+      clearAllRouteCaches();
 
       res.json({ success: true });
     } catch (err: any) {
@@ -1299,11 +1455,23 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
   app.patch("/api/permanent-drivers/:id/toggle", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
       const db = getDbPool();
+      const callerRole = normalizeRole(req.user!.role);
       const safeId = validateId(req.params.id, "شناسه راننده");
+
+      const [existingRows] = await db.query("SELECT * FROM permanent_drivers WHERE id = ?", [safeId]) as any[];
+      const companyName = callerRole === "SHIPPING_COMPANY"
+        ? await resolveShippingCompanyName(db, req.user?.shippingCompanyId)
+        : null;
+      const ownCheck = checkPermanentDriverOwnership(existingRows?.[0], req.user, companyName);
+      if (!ownCheck.allowed) {
+        return sendApiError(res, ownCheck.status, ownCheck.message);
+      }
+
       await db.query("UPDATE permanent_drivers SET isEnabled = NOT isEnabled WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_PERMANENT_DRIVERS);
+      clearAllRouteCaches();
       
       res.json({ success: true });
     } catch (err: any) {
@@ -1315,11 +1483,23 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
   app.delete("/api/permanent-drivers/:id", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN", "FACTORY_TRANSPORT", "SHIPPING_COMPANY"), async (req, res) => {
     try {
       const db = getDbPool();
+      const callerRole = normalizeRole(req.user!.role);
       const safeId = validateId(req.params.id, "شناسه راننده");
+
+      const [existingRows] = await db.query("SELECT * FROM permanent_drivers WHERE id = ?", [safeId]) as any[];
+      const companyName = callerRole === "SHIPPING_COMPANY"
+        ? await resolveShippingCompanyName(db, req.user?.shippingCompanyId)
+        : null;
+      const ownCheck = checkPermanentDriverOwnership(existingRows?.[0], req.user, companyName);
+      if (!ownCheck.allowed) {
+        return sendApiError(res, ownCheck.status, ownCheck.message);
+      }
+
       await db.query("DELETE FROM permanent_drivers WHERE id = ?", [safeId]);
       
       const redis = getRedisClient();
-      if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_PERMANENT_DRIVERS);
+      clearAllRouteCaches();
       
       res.json({ success: true });
     } catch (err: any) {
@@ -1444,8 +1624,8 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
           }
         }
 
-        return formatted;
-      });
+        return sanitizeOrderForRole(formatted, req.user);
+      }).filter(Boolean);
 
       res.json(orders);
     } catch (err: any) {
@@ -1602,12 +1782,20 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
         const check = checkOrderOwnership(ordRows[0], req.user);
         if (!check.allowed) {
           await connection.rollback();
           connection.release();
           return sendApiError(res, check.status, check.message);
+        }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["PENDING_APPROVAL", "APPROVED_BY_SALES", "SENT_TO_FACTORY", "VEHICLE_ASSIGNED", "WAREHOUSE_LOADED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
         }
 
         await connection.query("UPDATE orders SET deliveryLocationUrl = ? WHERE id = ?", [safeLocationUrl || null, safeId]);
@@ -1617,6 +1805,7 @@ function compactItemsJson(itemsInput: any): string | null {
         `, [updatedAt, safeLocationUrl ? "بروزرسانی موقعیت مکانی و لینک نقشه تخلیه بار" : "حذف/ثبت مجدد لوکیشن نقشه تخلیه بار", safeId]);
 
         await connection.commit();
+        clearAllRouteCaches();
 
         res.json({ success: true });
       } catch (txErr) {
@@ -1643,12 +1832,21 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
         const check = checkOrderOwnership(ordRows[0], req.user);
         if (!check.allowed) {
           await connection.rollback();
           connection.release();
           return sendApiError(res, check.status, check.message);
+        }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["PENDING_APPROVAL", "APPROVED_BY_SALES"],
+          management: ["PENDING_APPROVAL", "APPROVED_BY_SALES", "SENT_TO_FACTORY", "VEHICLE_ASSIGNED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
         }
 
         await connection.query("UPDATE orders SET status = ?, rejectionReason = ? WHERE id = ?", [status, reason, safeId]);
@@ -1658,6 +1856,7 @@ function compactItemsJson(itemsInput: any): string | null {
         `, [safeId, status, updatedAt, "درخواست لغو و ابطال سفارش توسط نماینده"]);
 
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true });
       } catch (txErr) {
         await connection.rollback();
@@ -1682,21 +1881,30 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
         const check = checkOrderOwnership(ordRows[0], req.user);
         if (!check.allowed) {
           await connection.rollback();
           connection.release();
           return sendApiError(res, check.status, check.message);
         }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["PENDING_APPROVAL", "APPROVED_BY_SALES", "SENT_TO_FACTORY", "VEHICLE_ASSIGNED", "WAREHOUSE_LOADED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
+        }
 
         await connection.query("UPDATE orders SET paymentTrackingCode = ? WHERE id = ?", [safeTrackingCode, safeId]);
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [safeId, "PENDING_APPROVAL", updatedAt, `ثبت/ویرایش کد رهگیری پرداخت وجه به شماره: ${safeTrackingCode}`]);
+        `, [safeId, ordRows[0]?.status || "PENDING_APPROVAL", updatedAt, `ثبت/ویرایش کد رهگیری پرداخت وجه به شماره: ${safeTrackingCode}`]);
 
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true });
       } catch (txErr) {
         await connection.rollback();
@@ -1725,12 +1933,20 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
         const check = checkOrderOwnership(ordRows[0], req.user);
         if (!check.allowed) {
           await connection.rollback();
           connection.release();
           return sendApiError(res, check.status, check.message);
+        }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["PENDING_APPROVAL", "APPROVED_BY_SALES", "SENT_TO_FACTORY", "VEHICLE_ASSIGNED", "WAREHOUSE_LOADED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
         }
 
         await connection.query(
@@ -1989,6 +2205,14 @@ function compactItemsJson(itemsInput: any): string | null {
           connection.release();
           return sendApiError(res, check.status, check.message);
         }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["PENDING_APPROVAL"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
+        }
 
         await connection.query("UPDATE orders SET status = ? WHERE id = ?", [status, safeId]);
         await connection.query(`
@@ -1997,6 +2221,7 @@ function compactItemsJson(itemsInput: any): string | null {
         `, [safeId, status, updatedAt, "تایید نهایی سفارش توسط دفتر مدیریت فروش فروشگاه طبرستان و ارجاع به کارخانه"]);
 
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true });
       } catch (txErr) {
         await connection.rollback();
@@ -2029,6 +2254,14 @@ function compactItemsJson(itemsInput: any): string | null {
           connection.release();
           return sendApiError(res, check.status, check.message);
         }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["PENDING_APPROVAL", "APPROVED_BY_SALES", "SENT_TO_FACTORY", "VEHICLE_ASSIGNED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
+        }
 
         await connection.query("UPDATE orders SET status = ?, rejectionReason = ? WHERE id = ?", [status, safeReason, safeId]);
         await connection.query(`
@@ -2037,6 +2270,7 @@ function compactItemsJson(itemsInput: any): string | null {
         `, [safeId, status, updatedAt, `درخواست لغو شد به دلیل: ${safeReason}`]);
 
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true });
       } catch (txErr) {
         await connection.rollback();
@@ -2069,6 +2303,14 @@ function compactItemsJson(itemsInput: any): string | null {
           connection.release();
           return sendApiError(res, check.status, check.message);
         }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["PENDING_APPROVAL", "APPROVED_BY_SALES"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
+        }
 
         await connection.query("UPDATE orders SET status = ?, sentToFactoryAt = ? WHERE id = ?", [status, updatedAt, safeId]);
         await connection.query(`
@@ -2077,6 +2319,7 @@ function compactItemsJson(itemsInput: any): string | null {
         `, [safeId, status, updatedAt, safeComment || "سفارش تأیید شد، اولویت‌بندی نهایی گردید و جهت تأمین وسیله نقلیه به کارخانه ارسال شد."]);
 
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true });
       } catch (txErr) {
         await connection.rollback();
@@ -2122,6 +2365,7 @@ function compactItemsJson(itemsInput: any): string | null {
         }
 
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true, count: targetIds.length });
       } catch (txErr) {
         await connection.rollback();
@@ -2162,6 +2406,7 @@ function compactItemsJson(itemsInput: any): string | null {
         }
 
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true, count: approvedRows.length });
       } catch (txErr) {
         await connection.rollback();
@@ -2192,6 +2437,7 @@ function compactItemsJson(itemsInput: any): string | null {
           await connection.query("UPDATE orders SET priorityIndex = ? WHERE id = ?", [item.priorityIndex, item.id]);
         }
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true });
       } catch (txErr) {
         await connection.rollback();
@@ -2237,12 +2483,21 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
         const check = checkOrderOwnership(ordRows[0], req.user);
         if (!check.allowed) {
           await connection.rollback();
           connection.release();
           return sendApiError(res, check.status, check.message);
+        }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["SENT_TO_FACTORY", "VEHICLE_ASSIGNED"],
+          management: ["PENDING_APPROVAL", "APPROVED_BY_SALES", "SENT_TO_FACTORY", "VEHICLE_ASSIGNED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
         }
 
         const finalShippingCompanyId = effectiveShippingCompanyId || ordRows[0]?.shippingCompanyId || null;
@@ -2276,15 +2531,16 @@ function compactItemsJson(itemsInput: any): string | null {
           if (!existingDrivers || existingDrivers.length === 0) {
             const newDriverId = `drv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
             await connection.query(
-              "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 1)",
-              [newDriverId, safeDriverName, safeDriverPhone, safeLicensePlate, safeVehicleType || 'تریلی ۱۸ چرخ لبه‌دار', safeShippingAgency || null]
+              "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, shippingCompanyId, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 1)",
+              [newDriverId, safeDriverName, safeDriverPhone, safeLicensePlate, safeVehicleType || 'تریلی ۱۸ چرخ لبه‌دار', safeShippingAgency || null, finalShippingCompanyId]
             );
             const redis = getRedisClient();
-            if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
+            await invalidateScopedRedisCache(redis, CACHE_KEY_PERMANENT_DRIVERS);
           }
         }
 
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true });
       } catch (txErr) {
         await connection.rollback();
@@ -2317,6 +2573,14 @@ function compactItemsJson(itemsInput: any): string | null {
           connection.release();
           return sendApiError(res, check.status, check.message);
         }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["APPROVED_BY_SALES", "SENT_TO_FACTORY"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
+        }
 
         await connection.query(`
           UPDATE orders SET 
@@ -2331,6 +2595,7 @@ function compactItemsJson(itemsInput: any): string | null {
         `, [safeId, "SENT_TO_FACTORY", updatedAt, `ارسال درخواست تامین وسیله نقلیه حمل به شرکت حمل و نقل «${safeShippingAgency}»`]);
 
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true });
       } catch (txErr) {
         await connection.rollback();
@@ -2365,6 +2630,14 @@ function compactItemsJson(itemsInput: any): string | null {
           connection.release();
           return sendApiError(res, check.status, check.message);
         }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["SENT_TO_FACTORY", "VEHICLE_ASSIGNED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
+        }
 
         await connection.query(`
           UPDATE orders SET 
@@ -2386,6 +2659,7 @@ function compactItemsJson(itemsInput: any): string | null {
         `, [safeId, status, updatedAt, `⚠️ ${returnReasonText} (بازگشت به کارتابل مدیر فروش کارخانه)`]);
 
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true });
       } catch (txErr) {
         await connection.rollback();
@@ -2395,25 +2669,6 @@ function compactItemsJson(itemsInput: any): string | null {
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/orders/:id/return-to-sales:", err);
-      return handleServerError(res, err, req.originalUrl || req.url);
-    }
-  });
-
-  // SYSTEM SETTINGS API (Security Gate Module Toggle, etc.)
-  app.get("/api/system-settings", authenticate, (req, res) => {
-    res.json(getSystemSettings());
-  });
-
-  app.patch("/api/system-settings", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), (req, res) => {
-    try {
-      const current = getSystemSettings();
-      const updated = {
-        ...current,
-        ...req.body
-      };
-      saveSystemSettings(updated);
-      res.json({ success: true, settings: updated });
-    } catch (err: any) {
       return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
@@ -2436,12 +2691,21 @@ function compactItemsJson(itemsInput: any): string | null {
       try {
         await connection.beginTransaction();
 
-        const [ordRows] = await connection.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+        const [ordRows] = await connection.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
         const check = checkOrderOwnership(ordRows[0], req.user);
         if (!check.allowed) {
           await connection.rollback();
           connection.release();
           return sendApiError(res, check.status, check.message);
+        }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["VEHICLE_ASSIGNED", "WAREHOUSE_LOADED"],
+          management: ["PENDING_APPROVAL", "APPROVED_BY_SALES", "SENT_TO_FACTORY", "VEHICLE_ASSIGNED", "WAREHOUSE_LOADED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
         }
 
         await connection.query(`
@@ -2459,7 +2723,7 @@ function compactItemsJson(itemsInput: any): string | null {
         await connection.query(`
           INSERT INTO order_history (orderId, status, updatedAt, comment)
           VALUES (?, ?, ?, ?)
-        `, [safeId, "VEHICLE_ASSIGNED", updatedAt, `ویرایش مشخصات ناوگان حمل و راننده توسط باربری: ${safeVehicleType} به رانندگی ${safeDriverName} (پلاک: ${safeLicensePlate})${safeBillOfLading ? ` - شماره بارنامه: ${safeBillOfLading}` : ''}`]);
+        `, [safeId, ordRows[0]?.status || "VEHICLE_ASSIGNED", updatedAt, `ویرایش مشخصات ناوگان حمل و راننده توسط باربری: ${safeVehicleType} به رانندگی ${safeDriverName} (پلاک: ${safeLicensePlate})${safeBillOfLading ? ` - شماره بارنامه: ${safeBillOfLading}` : ''}`]);
 
         // Auto-register driver into permanent_drivers list if not already present
         if (safeDriverName && safeDriverPhone) {
@@ -2470,12 +2734,13 @@ function compactItemsJson(itemsInput: any): string | null {
 
           if (!existingDrivers || existingDrivers.length === 0) {
             const newDriverId = `drv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+            const orderScId = ordRows[0]?.shippingCompanyId || (normalizeRole(req.user!.role) === "SHIPPING_COMPANY" ? req.user?.shippingCompanyId : null) || null;
             await connection.query(
-              "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 1)",
-              [newDriverId, safeDriverName, safeDriverPhone, safeLicensePlate, safeVehicleType || 'تریلی ۱۸ چرخ لبه‌دار', safeShippingAgency || null]
+              "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, shippingCompanyId, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 1)",
+              [newDriverId, safeDriverName, safeDriverPhone, safeLicensePlate, safeVehicleType || 'تریلی ۱۸ چرخ لبه‌دار', safeShippingAgency || null, orderScId]
             );
             const redis = getRedisClient();
-            if (redis) await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
+            await invalidateScopedRedisCache(redis, CACHE_KEY_PERMANENT_DRIVERS);
           }
         }
 
@@ -2523,6 +2788,15 @@ function compactItemsJson(itemsInput: any): string | null {
           await connection.rollback();
           connection.release();
           return sendApiError(res, check.status, check.message);
+        }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["VEHICLE_ASSIGNED"],
+          management: ["VEHICLE_ASSIGNED", "WAREHOUSE_LOADED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
         }
 
         await connection.query(`
@@ -2600,6 +2874,14 @@ function compactItemsJson(itemsInput: any): string | null {
           await connection.rollback();
           connection.release();
           return sendApiError(res, check.status, check.message);
+        }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["VEHICLE_ASSIGNED", "WAREHOUSE_LOADED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
         }
 
         await connection.query(`
@@ -2688,6 +2970,14 @@ function compactItemsJson(itemsInput: any): string | null {
           connection.release();
           return sendApiError(res, check.status, check.message);
         }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["WAREHOUSE_LOADED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
+        }
 
         await connection.query(`
           UPDATE orders SET 
@@ -2760,6 +3050,14 @@ function compactItemsJson(itemsInput: any): string | null {
           connection.release();
           return sendApiError(res, check.status, check.message);
         }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["WAREHOUSE_LOADED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
+        }
 
         await connection.query(`
           UPDATE orders SET 
@@ -2823,6 +3121,14 @@ function compactItemsJson(itemsInput: any): string | null {
           connection.release();
           return sendApiError(res, check.status, check.message);
         }
+        const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
+          default: ["VEHICLE_ASSIGNED", "WAREHOUSE_LOADED"]
+        });
+        if (!stageCheck.allowed) {
+          await connection.rollback();
+          connection.release();
+          return sendApiError(res, stageCheck.status, stageCheck.message);
+        }
 
         await connection.query("UPDATE orders SET status = ? WHERE id = ?", [status, safeId]);
         await connection.query(`
@@ -2831,6 +3137,7 @@ function compactItemsJson(itemsInput: any): string | null {
         `, [safeId, status, updatedAt, 'محصول با موفقیت بارگیری شد و خودرو از درب حراست کارخانه ترخیص و به سمت مقصد حرکت کرد.']);
 
         await connection.commit();
+        clearAllRouteCaches();
         res.json({ success: true });
       } catch (txErr) {
         await connection.rollback();
@@ -3972,10 +4279,9 @@ function compactItemsJson(itemsInput: any): string | null {
       }
 
       const redis = getRedisClient();
-      if (redis) {
-        await redis.del(CACHE_KEY_AGENTS);
-        await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
-      }
+      await invalidateScopedRedisCache(redis, CACHE_KEY_AGENTS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_SHIPPING_COMPANIES);
+      clearAllRouteCaches();
 
       res.json({
         success: true,
@@ -4051,12 +4357,20 @@ function compactItemsJson(itemsInput: any): string | null {
         // ignore db error
       }
 
-      const activeList = getOnlineUsersList();
+      const callerRole = normalizeRole(req.user!.role);
+      if (callerRole === "SYSTEM_ADMIN" || callerRole === "SALES_MANAGER") {
+        const activeList = getOnlineUsersList();
+        return res.json({
+          success: true,
+          timestamp: nowIso,
+          onlineCount: activeList.length,
+          onlineUsers: activeList
+        });
+      }
+
       res.json({
         success: true,
-        timestamp: nowIso,
-        onlineCount: activeList.length,
-        onlineUsers: activeList
+        timestamp: nowIso
       });
     } catch (err: any) {
       return handleServerError(res, err, req.originalUrl || req.url);
@@ -4834,13 +5148,11 @@ function compactItemsJson(itemsInput: any): string | null {
 
       // Clear all SalesDashboard cache keys
       const redis = getRedisClient();
-      if (redis) {
-        await redis.del(CACHE_KEY_PRODUCTS);
-        await redis.del(CACHE_KEY_AGENTS);
-        await redis.del(CACHE_KEY_SHIPPING_COMPANIES);
-        await redis.del(CACHE_KEY_PERMANENT_DRIVERS);
-        await redis.del(CACHE_KEY_ORDERS);
-      }
+      await invalidateScopedRedisCache(redis, CACHE_KEY_PRODUCTS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_AGENTS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_SHIPPING_COMPANIES);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_PERMANENT_DRIVERS);
+      await invalidateScopedRedisCache(redis, CACHE_KEY_ORDERS);
       clearAllRouteCaches();
 
       res.json({ success: true, message: "داده‌های نمایشی و پایه سامانه با موفقیت بازنشانی شدند." });
@@ -4960,7 +5272,10 @@ function compactItemsJson(itemsInput: any): string | null {
   // 7. SYSTEM ACTIVITY LOGS & HARDWARE/SOFTWARE METRICS
   app.get("/api/system/monitor-data", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER"), async (req, res) => {
     try {
-      const cached = getCachedRouteData("monitor_data");
+      const callerRole = normalizeRole(req.user!.role);
+      const isSystemAdmin = callerRole === "SYSTEM_ADMIN";
+      const monitorCacheKey = `monitor_data:${callerRole}`;
+      const cached = getCachedRouteData(monitorCacheKey);
       if (cached) {
         return res.json(cached);
       }
@@ -5001,47 +5316,33 @@ function compactItemsJson(itemsInput: any): string | null {
       const loadAvg = os.loadavg() || [0.12, 0.25, 0.18];
 
       let errorLogSizeBytes = 0;
-      let rawErrorLogs = "هیچ خطایی در سیستم ثبت نشده است.";
-      const logPath = path.join(process.cwd(), "server", "db_errors.log");
-      if (fs.existsSync(logPath)) {
-        try {
-          const stat = fs.statSync(logPath);
-          errorLogSizeBytes = stat.size;
-          rawErrorLogs = fs.readFileSync(logPath, "utf8");
-        } catch {}
+      let rawErrorLogs: string | undefined;
+      if (isSystemAdmin) {
+        rawErrorLogs = "هیچ خطایی در سیستم ثبت نشده است.";
+        const logPath = path.join(process.cwd(), "server", "db_errors.log");
+        if (fs.existsSync(logPath)) {
+          try {
+            const stat = fs.statSync(logPath);
+            errorLogSizeBytes = stat.size;
+            rawErrorLogs = fs.readFileSync(logPath, "utf8");
+          } catch {}
+        }
       }
 
       const activeUsers = getOnlineUsersList();
       const logs = await logsPromise;
 
-      const metrics = {
+      const metrics: any = {
         success: true,
         timestamp: new Date().toISOString(),
         uptimeSeconds: Math.floor(process.uptime()),
-        nodeVersion: process.version,
-        platform: `${os.platform()} ${os.release()} (${os.arch()})`,
-        hardware: {
-          cpuModel: cpus?.[0]?.model || 'Intel(R) Xeon(R) CPU @ 2.80GHz',
-          cpuCores: cpus?.length || 4,
-          loadAvg,
-          totalRamGb: Math.round((totalMemBytes / (1024 * 1024 * 1024)) * 10) / 10,
-          freeRamGb: Math.round((freeMemBytes / (1024 * 1024 * 1024)) * 10) / 10,
-          usedRamPercent: Math.round(((totalMemBytes - freeMemBytes) / totalMemBytes) * 100),
-        },
         software: {
-          nodeRssMb: Math.round(memUsage.rss / (1024 * 1024)),
-          heapUsedMb: Math.round(memUsage.heapUsed / (1024 * 1024)),
-          heapTotalMb: Math.round(memUsage.heapTotal / (1024 * 1024)),
           activeSessionsEstimate: activeUsers.length || 1,
           onlineUsersCount: activeUsers.length,
-          httpStatus: 'ONLINE (Port 3000)',
-          responseLatencyMs: Math.floor(10 + Math.random() * 10),
+          httpStatus: 'ONLINE'
         },
         database: {
           status: 'CONNECTED',
-          engine: 'MariaDB / MySQL InnoDB',
-          latencyMs: Math.round((1.2 + Math.random() * 1.5) * 10) / 10,
-          errorLogSizeBytes,
           counts: {
             orders: orderCount,
             users: userCount,
@@ -5053,22 +5354,45 @@ function compactItemsJson(itemsInput: any): string | null {
           }
         },
         cache: {
-          status: 'ACTIVE',
-          type: 'Redis & In-Memory Storage',
-          hitRatePercent: 98.6
+          status: 'ACTIVE'
         }
       };
 
-      const monitorPayload = {
+      if (isSystemAdmin) {
+        metrics.nodeVersion = process.version;
+        metrics.platform = `${os.platform()} ${os.release()} (${os.arch()})`;
+        metrics.hardware = {
+          cpuModel: cpus?.[0]?.model || 'Intel(R) Xeon(R) CPU @ 2.80GHz',
+          cpuCores: cpus?.length || 4,
+          loadAvg,
+          totalRamGb: Math.round((totalMemBytes / (1024 * 1024 * 1024)) * 10) / 10,
+          freeRamGb: Math.round((freeMemBytes / (1024 * 1024 * 1024)) * 10) / 10,
+          usedRamPercent: Math.round(((totalMemBytes - freeMemBytes) / totalMemBytes) * 100),
+        };
+        metrics.software.nodeRssMb = Math.round(memUsage.rss / (1024 * 1024));
+        metrics.software.heapUsedMb = Math.round(memUsage.heapUsed / (1024 * 1024));
+        metrics.software.heapTotalMb = Math.round(memUsage.heapTotal / (1024 * 1024));
+        metrics.software.httpStatus = 'ONLINE (Port 3000)';
+        metrics.software.responseLatencyMs = Math.floor(10 + Math.random() * 10);
+        metrics.database.engine = 'MariaDB / MySQL InnoDB';
+        metrics.database.latencyMs = Math.round((1.2 + Math.random() * 1.5) * 10) / 10;
+        metrics.database.errorLogSizeBytes = errorLogSizeBytes;
+        metrics.cache.type = 'Redis & In-Memory Storage';
+        metrics.cache.hitRatePercent = 98.6;
+      }
+
+      const monitorPayload: any = {
         success: true,
         logs,
         metrics,
-        errorLogs: rawErrorLogs,
         systemSettings: getSystemSettings(),
         userCount
       };
+      if (isSystemAdmin) {
+        monitorPayload.errorLogs = rawErrorLogs;
+      }
 
-      setCachedRouteData("monitor_data", monitorPayload, 5); // 5s cache
+      setCachedRouteData(monitorCacheKey, monitorPayload, 5); // 5s role-scoped cache
       res.json(monitorPayload);
     } catch (err: any) {
       console.error("Error in GET /api/system/monitor-data:", err);
@@ -5112,12 +5436,12 @@ function compactItemsJson(itemsInput: any): string | null {
     }
   });
 
-  // SYSTEM SETTINGS ENDPOINTS
-  app.get("/api/system-settings", authenticate, (req, res) => {
+  // SYSTEM SETTINGS ENDPOINTS (Admin / Sales Manager only)
+  app.get("/api/system-settings", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), (req, res) => {
     res.json(getSystemSettings());
   });
 
-  app.post("/api/system-settings", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), (req, res) => {
+  const handleUpdateSystemSettings = (req: express.Request, res: express.Response) => {
     try {
       if (!req.body || typeof req.body !== 'object') {
         return sendApiError(res, 400, "داده‌های تنظیمات سیستم نامعتبر است.");
@@ -5133,14 +5457,16 @@ function compactItemsJson(itemsInput: any): string | null {
         safeSettings.warehouseDiscrepancyReferral = Boolean(req.body.warehouseDiscrepancyReferral);
       }
       if (req.body.editSuspensionStrictness !== undefined) {
-        safeSettings.editSuspensionStrictness = sanitizeString(req.body.editSuspensionStrictness, {
+        const val = sanitizeString(req.body.editSuspensionStrictness, {
           fieldName: "سیاست تعلیق سفارشات",
           maxLength: 50,
           required: false
-        }) || "STRICT_SUSPEND";
+        });
+        safeSettings.editSuspensionStrictness = val === "NOTIFY_ONLY" ? "NOTIFY_ONLY" : "STRICT_SUSPEND";
       }
 
       const updated = saveSystemSettings(safeSettings);
+      clearAllRouteCaches();
       recordActivity(
         req,
         "تغییر تنظیمات سیستم",
@@ -5149,17 +5475,20 @@ function compactItemsJson(itemsInput: any): string | null {
       );
       res.json({ success: true, settings: updated });
     } catch (err: any) {
-      console.error("Error in POST /api/system-settings:", err);
+      console.error("Error in updating /api/system-settings:", err);
       return handleServerError(res, err, req.originalUrl || req.url);
     }
-  });
+  };
 
-  app.post("/api/system/activity-logs", authenticate, (req, res) => {
+  app.post("/api/system-settings", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), handleUpdateSystemSettings);
+  app.patch("/api/system-settings", authenticate, authorize("SALES_MANAGER", "SYSTEM_ADMIN"), handleUpdateSystemSettings);
+
+  app.post("/api/system/activity-logs", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER"), (req, res) => {
     try {
       const action = sanitizeString(req.body?.action, { fieldName: "عنوان فعالیت", maxLength: 200, required: false }) || 'فعالیت عمومی';
       const details = sanitizeString(req.body?.details, { fieldName: "جزئیات فعالیت", maxLength: 2000, required: false }) || '';
       const module = sanitizeString(req.body?.module, { fieldName: "بخش مربوطه", maxLength: 50, required: false }) || 'SYSTEM';
-      const ipAddress = sanitizeString(req.body?.ipAddress, { fieldName: "آدرس آی‌پی", maxLength: 50, required: false }) || req.ip || '127.0.0.1';
+      const ipAddress = sanitizeString(req.body?.ipAddress, { fieldName: "آدرس آی‌پی", maxLength: 50, required: false }) || getClientIp(req) || '127.0.0.1';
       let status: "SUCCESS" | "WARNING" | "ERROR" = "SUCCESS";
       if (req.body?.status === "WARNING" || req.body?.status === "ERROR") {
         status = req.body.status;
@@ -5170,7 +5499,7 @@ function compactItemsJson(itemsInput: any): string | null {
       logUserActivity({
         userId: req.user!.id,
         userName: req.user!.fullName || req.user!.username || 'کاربر سیستم',
-        userRole: req.user!.role || 'GUEST',
+        userRole: req.user!.role || 'SYSTEM_ADMIN',
         action,
         details,
         module,
@@ -5185,6 +5514,8 @@ function compactItemsJson(itemsInput: any): string | null {
 
   app.get("/api/system/metrics", authenticate, authorize("SYSTEM_ADMIN", "SALES_MANAGER"), async (req, res) => {
     try {
+      const callerRole = normalizeRole(req.user!.role);
+      const isSystemAdmin = callerRole === "SYSTEM_ADMIN";
       const db = getDbPool();
       let orderCount = 0;
       let userCount = 0;
@@ -5218,39 +5549,25 @@ function compactItemsJson(itemsInput: any): string | null {
       const loadAvg = os.loadavg() || [0.12, 0.25, 0.18];
 
       let errorLogSizeBytes = 0;
-      const logPath = path.join(process.cwd(), "server", "db_errors.log");
-      if (fs.existsSync(logPath)) {
-        errorLogSizeBytes = fs.statSync(logPath).size;
+      if (isSystemAdmin) {
+        const logPath = path.join(process.cwd(), "server", "db_errors.log");
+        if (fs.existsSync(logPath)) {
+          errorLogSizeBytes = fs.statSync(logPath).size;
+        }
       }
 
-      res.json({
+      const activeUsers = getOnlineUsersList();
+      const responsePayload: any = {
         success: true,
         timestamp: new Date().toISOString(),
         uptimeSeconds: Math.floor(process.uptime()),
-        nodeVersion: process.version,
-        platform: `${os.platform()} ${os.release()} (${os.arch()})`,
-        hardware: {
-          cpuModel: cpus?.[0]?.model || 'Intel(R) Xeon(R) CPU @ 2.80GHz',
-          cpuCores: cpus?.length || 4,
-          loadAvg,
-          totalRamGb: Math.round((totalMemBytes / (1024 * 1024 * 1024)) * 10) / 10,
-          freeRamGb: Math.round((freeMemBytes / (1024 * 1024 * 1024)) * 10) / 10,
-          usedRamPercent: Math.round(((totalMemBytes - freeMemBytes) / totalMemBytes) * 100),
-        },
         software: {
-          nodeRssMb: Math.round(memUsage.rss / (1024 * 1024)),
-          heapUsedMb: Math.round(memUsage.heapUsed / (1024 * 1024)),
-          heapTotalMb: Math.round(memUsage.heapTotal / (1024 * 1024)),
-          activeSessionsEstimate: getOnlineUsersList().length || 1,
-          onlineUsersCount: getOnlineUsersList().length,
-          httpStatus: 'ONLINE (Port 3000)',
-          responseLatencyMs: Math.floor(12 + Math.random() * 15),
+          activeSessionsEstimate: activeUsers.length || 1,
+          onlineUsersCount: activeUsers.length,
+          httpStatus: 'ONLINE'
         },
         database: {
           status: 'CONNECTED',
-          engine: 'MariaDB / MySQL InnoDB',
-          latencyMs: Math.round((1.2 + Math.random() * 1.5) * 10) / 10,
-          errorLogSizeBytes,
           counts: {
             orders: orderCount,
             users: userCount,
@@ -5262,11 +5579,34 @@ function compactItemsJson(itemsInput: any): string | null {
           }
         },
         cache: {
-          status: 'ACTIVE',
-          type: 'Redis & In-Memory Storage',
-          hitRatePercent: 98.6
+          status: 'ACTIVE'
         }
-      });
+      };
+
+      if (isSystemAdmin) {
+        responsePayload.nodeVersion = process.version;
+        responsePayload.platform = `${os.platform()} ${os.release()} (${os.arch()})`;
+        responsePayload.hardware = {
+          cpuModel: cpus?.[0]?.model || 'Intel(R) Xeon(R) CPU @ 2.80GHz',
+          cpuCores: cpus?.length || 4,
+          loadAvg,
+          totalRamGb: Math.round((totalMemBytes / (1024 * 1024 * 1024)) * 10) / 10,
+          freeRamGb: Math.round((freeMemBytes / (1024 * 1024 * 1024)) * 10) / 10,
+          usedRamPercent: Math.round(((totalMemBytes - freeMemBytes) / totalMemBytes) * 100),
+        };
+        responsePayload.software.nodeRssMb = Math.round(memUsage.rss / (1024 * 1024));
+        responsePayload.software.heapUsedMb = Math.round(memUsage.heapUsed / (1024 * 1024));
+        responsePayload.software.heapTotalMb = Math.round(memUsage.heapTotal / (1024 * 1024));
+        responsePayload.software.httpStatus = 'ONLINE (Port 3000)';
+        responsePayload.software.responseLatencyMs = Math.floor(12 + Math.random() * 15);
+        responsePayload.database.engine = 'MariaDB / MySQL InnoDB';
+        responsePayload.database.latencyMs = Math.round((1.2 + Math.random() * 1.5) * 10) / 10;
+        responsePayload.database.errorLogSizeBytes = errorLogSizeBytes;
+        responsePayload.cache.type = 'Redis & In-Memory Storage';
+        responsePayload.cache.hitRatePercent = 98.6;
+      }
+
+      res.json(responsePayload);
     } catch (err: any) {
       console.error("Error in GET /api/system/metrics:", err);
       return handleServerError(res, err, req.originalUrl || req.url);

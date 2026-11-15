@@ -414,10 +414,10 @@ function seedJsonIfEmpty() {
   if (!data.permanent_drivers || data.permanent_drivers.length === 0) {
     console.log("🌱 [Mock Seed] Seeding default permanent drivers...");
     data.permanent_drivers = [
-      { id: 'drv-1', driverName: 'کریم قنبری', driverPhone: '09117772222', licensePlate: '۵۴ ع ۸۹۲ ایران ۷۲', vehicleType: 'تریلی ۱۸ چرخ لبه‌دار', shippingAgency: 'باربری ترانزیت شمال', nationalCode: '2081234567', smartCardNumber: '3849201', isEnabled: 1 },
-      { id: 'drv-2', driverName: 'غلامرضا صادقی', driverPhone: '09139998888', licensePlate: '۷۲ ب ۵۵۱ ایران ۵۳', vehicleType: 'کامیون جفت ۱۰ تن', shippingAgency: 'باربری زاینده‌رود', nationalCode: '1289876543', smartCardNumber: '4920183', isEnabled: 1 },
-      { id: 'drv-3', driverName: 'مرتضی حسینی', driverPhone: '09112223344', licensePlate: '۳۶ ج ۱۴۵ ایران ۶۲', vehicleType: 'خاور مسقف', shippingAgency: 'باربری کاسپین', nationalCode: '2093344556', smartCardNumber: '1092837', isEnabled: 1 },
-      { id: 'drv-4', driverName: 'جواد علوی', driverPhone: '09112523456', licensePlate: '۶۲ ع ۴۸۱ ایران ۷۲', vehicleType: 'تریلی ۱۸ چرخ لبه‌دار', shippingAgency: 'باربری ترانزیت طبرستان', nationalCode: '2089988771', smartCardNumber: '5544332', isEnabled: 1 }
+      { id: 'drv-1', driverName: 'کریم قنبری', driverPhone: '09117772222', licensePlate: '۵۴ ع ۸۹۲ ایران ۷۲', vehicleType: 'تریلی ۱۸ چرخ لبه‌دار', shippingAgency: 'باربری ترانزیت شمال', shippingCompanyId: null, nationalCode: '2081234567', smartCardNumber: '3849201', isEnabled: 1 },
+      { id: 'drv-2', driverName: 'غلامرضا صادقی', driverPhone: '09139998888', licensePlate: '۷۲ ب ۵۵۱ ایران ۵۳', vehicleType: 'کامیون جفت ۱۰ تن', shippingAgency: 'باربری زاینده‌رود طبرستان', shippingCompanyId: 'sc-2', nationalCode: '1289876543', smartCardNumber: '4920183', isEnabled: 1 },
+      { id: 'drv-3', driverName: 'مرتضی حسینی', driverPhone: '09112223344', licensePlate: '۳۶ ج ۱۴۵ ایران ۶۲', vehicleType: 'خاور مسقف', shippingAgency: 'اتوبار کاسپین طبرستان', shippingCompanyId: 'sc-3', nationalCode: '2093344556', smartCardNumber: '1092837', isEnabled: 1 },
+      { id: 'drv-4', driverName: 'جواد علوی', driverPhone: '09112523456', licensePlate: '۶۲ ع ۴۸۱ ایران ۷۲', vehicleType: 'تریلی ۱۸ چرخ لبه‌دار', shippingAgency: 'باربری ترانزیت طبرستان', shippingCompanyId: 'sc-1', nationalCode: '2089988771', smartCardNumber: '5544332', isEnabled: 1 }
     ];
     changed = true;
   }
@@ -861,36 +861,76 @@ function executeQuery(sql: string, values: any[] = []): any {
   }
 
   // 2. SELECT * FROM agents
-  if (/SELECT\s+\*\s+FROM\s+agents/i.test(cleanSql)) {
-    return [jsonData.agents.map((a: any) => ({ ...a, isEnabled: a.isEnabled === 1 || a.isEnabled === true ? 1 : 0 })), []];
-  }
-
-  // 3. SELECT * FROM shipping_companies/i
-  if (/SELECT\s+\*\s+FROM\s+shipping_companies/i.test(cleanSql)) {
-    return [jsonData.shipping_companies.map((s: any) => ({ ...s, isEnabled: s.isEnabled === 1 || s.isEnabled === true ? 1 : 0 })), []];
-  }
-
-  // 3b. SELECT * FROM permanent_drivers
-  if (/SELECT\s+\*\s+FROM\s+permanent_drivers/i.test(cleanSql)) {
-    const list = (jsonData.permanent_drivers || []).map((d: any) => ({ ...d, isEnabled: d.isEnabled === 1 || d.isEnabled === true ? 1 : 0 }));
+  if (/SELECT\s+.*?\s+FROM\s+agents/i.test(cleanSql)) {
+    let list = (jsonData.agents || []).map((a: any) => ({ ...a, isEnabled: a.isEnabled === 1 || a.isEnabled === true ? 1 : 0 }));
+    if (/WHERE\s+1\s*=\s*0/i.test(cleanSql)) {
+      list = [];
+    } else if (/WHERE\s+agentCode\s*=\s*\?/i.test(cleanSql)) {
+      const targetAgentCode = values[0] ? String(values[0]).trim() : "";
+      list = list.filter((a: any) => a.agentCode && String(a.agentCode).trim() === targetAgentCode);
+    } else if (/WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
+      const targetId = values[0] ? String(values[0]).trim() : "";
+      list = list.filter((a: any) => a.id === targetId);
+    }
     return [list, []];
   }
 
-  // 4. SELECT * FROM orders (supports WHERE agentCode = ?, WHERE shippingCompanyId = ?, WHERE 1 = 0, WHERE id = ?)
+  // 3. SELECT * FROM shipping_companies
+  if (/SELECT\s+.*?\s+FROM\s+shipping_companies/i.test(cleanSql)) {
+    let list = (jsonData.shipping_companies || []).map((s: any) => ({ ...s, isEnabled: s.isEnabled === 1 || s.isEnabled === true ? 1 : 0 }));
+    if (/WHERE\s+1\s*=\s*0/i.test(cleanSql)) {
+      list = [];
+    } else if (/WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
+      const targetId = values[0] ? String(values[0]).trim() : "";
+      list = list.filter((s: any) => s.id === targetId);
+    } else if (/WHERE\s+isEnabled\s*=\s*1/i.test(cleanSql)) {
+      list = list.filter((s: any) => s.isEnabled === 1);
+    }
+    return [list, []];
+  }
+
+  // 3b. SELECT * FROM permanent_drivers
+  if (/SELECT\s+.*?\s+FROM\s+permanent_drivers/i.test(cleanSql)) {
+    let list = (jsonData.permanent_drivers || []).map((d: any) => ({ ...d, isEnabled: d.isEnabled === 1 || d.isEnabled === true ? 1 : 0 }));
+    if (/WHERE\s+1\s*=\s*0/i.test(cleanSql)) {
+      list = [];
+    } else if (/WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
+      const targetId = values[0] ? String(values[0]).trim() : "";
+      list = list.filter((d: any) => d.id === targetId);
+    } else if (/WHERE\s+driverPhone\s*=\s*\?\s*OR\s*\(\s*driverName\s*=\s*\?\s*AND\s*licensePlate\s*=\s*\?\s*\)/i.test(cleanSql)) {
+      const [phone, dName, plate] = values;
+      list = list.filter((d: any) => d.driverPhone === phone || (d.driverName === dName && d.licensePlate === plate));
+    }
+    return [list, []];
+  }
+
+  // 4. SELECT * FROM orders (supports WHERE agentCode = ?, WHERE shippingCompanyId = ?, status IN (...), WHERE 1 = 0, WHERE id = ?)
   if (/SELECT\s+\*\s+FROM\s+orders/i.test(cleanSql)) {
     let list = [...jsonData.orders];
+    const statusInMatch = cleanSql.match(/status\s+IN\s*\(([^)]+)\)/i);
+    const allowedStatuses = statusInMatch
+      ? statusInMatch[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
+      : null;
 
     if (/WHERE\s+1\s*=\s*0/i.test(cleanSql)) {
       list = [];
     } else if (/WHERE\s+agentCode\s*=\s*\?/i.test(cleanSql)) {
       const targetAgentCode = values[0];
       list = list.filter((o: any) => o.agentCode === targetAgentCode);
+      if (allowedStatuses) {
+        list = list.filter((o: any) => allowedStatuses.includes(o.status));
+      }
     } else if (/WHERE\s+shippingCompanyId\s*=\s*\?/i.test(cleanSql)) {
       const targetScId = values[0];
       list = list.filter((o: any) => o.shippingCompanyId === targetScId);
+      if (allowedStatuses) {
+        list = list.filter((o: any) => allowedStatuses.includes(o.status));
+      }
     } else if (/WHERE\s+id\s*=\s*\?/i.test(cleanSql)) {
       const targetId = values[0];
       list = list.filter((o: any) => o.id === targetId);
+    } else if (allowedStatuses) {
+      list = list.filter((o: any) => allowedStatuses.includes(o.status));
     }
 
     list.sort((a, b) => {
@@ -1147,8 +1187,41 @@ function executeQuery(sql: string, values: any[] = []): any {
 
   // 17b. PERMANENT DRIVERS CRUD IN FALLBACK SQL
   if (/INSERT\s+INTO\s+permanent_drivers/i.test(cleanSql)) {
-    const [id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber] = values;
     if (!jsonData.permanent_drivers) jsonData.permanent_drivers = [];
+    let id: any, driverName: any, driverPhone: any, licensePlate: any, vehicleType: any, shippingAgency: any, shippingCompanyId: any = null, nationalCode: any = null, smartCardNumber: any = null, isEnabled: any = 1;
+    const colsMatch = cleanSql.match(/INSERT\s+INTO\s+permanent_drivers\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
+    if (colsMatch) {
+      const colNames = colsMatch[1].split(",").map((c) => c.trim().replace(/[`"']/g, ""));
+      const valTokens = colsMatch[2].split(",").map((t) => t.trim());
+      let vIdx = 0;
+      const mapped: Record<string, any> = {};
+      colNames.forEach((col, i) => {
+        const tok = valTokens[i];
+        if (tok === "?") {
+          mapped[col] = values[vIdx++];
+        } else if (tok === "NULL" || tok === "null") {
+          mapped[col] = null;
+        } else if (tok === "0" || tok === "1") {
+          mapped[col] = Number(tok);
+        } else if (tok) {
+          mapped[col] = tok.replace(/^['"]|['"]$/g, "");
+        }
+      });
+      id = mapped.id;
+      driverName = mapped.driverName;
+      driverPhone = mapped.driverPhone;
+      licensePlate = mapped.licensePlate;
+      vehicleType = mapped.vehicleType;
+      shippingAgency = mapped.shippingAgency ?? null;
+      shippingCompanyId = mapped.shippingCompanyId ?? null;
+      nationalCode = mapped.nationalCode ?? null;
+      smartCardNumber = mapped.smartCardNumber ?? null;
+      isEnabled = mapped.isEnabled !== undefined ? mapped.isEnabled : 1;
+    } else if (/shippingCompanyId/i.test(cleanSql) && values.length >= 9) {
+      [id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, shippingCompanyId, nationalCode, smartCardNumber] = values;
+    } else {
+      [id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber] = values;
+    }
     jsonData.permanent_drivers.push({
       id,
       driverName,
@@ -1156,9 +1229,10 @@ function executeQuery(sql: string, values: any[] = []): any {
       licensePlate,
       vehicleType,
       shippingAgency: shippingAgency || null,
+      shippingCompanyId: shippingCompanyId || null,
       nationalCode: nationalCode || null,
       smartCardNumber: smartCardNumber || null,
-      isEnabled: 1
+      isEnabled: Number(isEnabled ?? 1)
     });
     saveJsonData(jsonData);
     return [{ affectedRows: 1 }];
@@ -1175,7 +1249,12 @@ function executeQuery(sql: string, values: any[] = []): any {
   }
 
   if (/UPDATE\s+permanent_drivers\s+SET/i.test(cleanSql) && !/isEnabled\s+=\s+NOT/i.test(cleanSql)) {
-    const [driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled, id] = values;
+    let driverName: any, driverPhone: any, licensePlate: any, vehicleType: any, shippingAgency: any, shippingCompanyId: any, nationalCode: any, smartCardNumber: any, isEnabled: any, id: any;
+    if (/shippingCompanyId/i.test(cleanSql) && values.length >= 10) {
+      [driverName, driverPhone, licensePlate, vehicleType, shippingAgency, shippingCompanyId, nationalCode, smartCardNumber, isEnabled, id] = values;
+    } else {
+      [driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled, id] = values;
+    }
     const drv = (jsonData.permanent_drivers || []).find((d: any) => d.id === id);
     if (drv) {
       drv.driverName = driverName;
@@ -1183,6 +1262,7 @@ function executeQuery(sql: string, values: any[] = []): any {
       drv.licensePlate = licensePlate;
       drv.vehicleType = vehicleType;
       drv.shippingAgency = shippingAgency || null;
+      if (shippingCompanyId !== undefined) drv.shippingCompanyId = shippingCompanyId || null;
       drv.nationalCode = nationalCode || null;
       drv.smartCardNumber = smartCardNumber || null;
       drv.isEnabled = Number(isEnabled) === 1 || isEnabled === true;
@@ -1942,6 +2022,7 @@ export async function bootstrapDatabase() {
         licensePlate VARCHAR(50) NOT NULL,
         vehicleType VARCHAR(100) NOT NULL,
         shippingAgency VARCHAR(150) NULL,
+        shippingCompanyId VARCHAR(50) NULL,
         nationalCode VARCHAR(20) NULL,
         smartCardNumber VARCHAR(50) NULL,
         isEnabled TINYINT(1) DEFAULT 1
@@ -2049,6 +2130,8 @@ export async function bootstrapDatabase() {
     await ensureColumnExists(db, "shipping_companies", "isEnabled", "TINYINT(1) DEFAULT 1");
     await ensureColumnExists(db, "shipping_companies", "nationalId", "VARCHAR(50)");
     await ensureColumnExists(db, "shipping_companies", "economicCode", "VARCHAR(50)");
+
+    await ensureColumnExists(db, "permanent_drivers", "shippingCompanyId", "VARCHAR(50) NULL");
 
     await ensureColumnExists(db, "app_users", "username", "VARCHAR(100) NOT NULL UNIQUE");
     await ensureColumnExists(db, "app_users", "fullName", "VARCHAR(150) NOT NULL");
@@ -2242,15 +2325,15 @@ export async function seedDatabaseWithConnection(connection: any) {
   }
 
   const dummyDrivers = [
-    ['drv-1', 'کریم قنبری', '09117772222', '۵۴ ع ۸۹۲ ایران ۷۲', 'تریلی ۱۸ چرخ لبه‌دار', 'باربری ترانزیت شمال', '2081234567', '3849201', 1],
-    ['drv-2', 'غلامرضا صادقی', '09139998888', '۷۲ ب ۵۵۱ ایران ۵۳', 'کامیون جفت ۱۰ تن', 'باربری زاینده‌رود', '1289876543', '4920183', 1],
-    ['drv-3', 'مرتضی حسینی', '09112223344', '۳۶ ج ۱۴۵ ایران ۶۲', 'خاور مسقف', 'باربری کاسپین', '2093344556', '1092837', 1],
-    ['drv-4', 'جواد علوی', '09112523456', '۶۲ ع ۴۸۱ ایران ۷۲', 'تریلی ۱۸ چرخ لبه‌دار', 'باربری ترانزیت طبرستان', '2089988771', '5544332', 1]
+    ['drv-1', 'کریم قنبری', '09117772222', '۵۴ ع ۸۹۲ ایران ۷۲', 'تریلی ۱۸ چرخ لبه‌دار', 'باربری ترانزیت شمال', 'sc-1', '2081234567', '3849201', 1],
+    ['drv-2', 'غلامرضا صادقی', '09139998888', '۷۲ ب ۵۵۱ ایران ۵۳', 'کامیون جفت ۱۰ تن', 'باربری زاینده‌رود', 'sc-2', '1289876543', '4920183', 1],
+    ['drv-3', 'مرتضی حسینی', '09112223344', '۳۶ ج ۱۴۵ ایران ۶۲', 'خاور مسقف', 'باربری کاسپین', 'sc-3', '2093344556', '1092837', 1],
+    ['drv-4', 'جواد علوی', '09112523456', '۶۲ ع ۴۸۱ ایران ۷۲', 'تریلی ۱۸ چرخ لبه‌دار', 'باربری ترانزیت طبرستان', 'sc-1', '2089988771', '5544332', 1]
   ];
   for (const d of dummyDrivers) {
     try {
       await connection.query(
-        "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, shippingCompanyId, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         d
       );
     } catch {}

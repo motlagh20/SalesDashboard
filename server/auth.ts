@@ -677,20 +677,28 @@ export interface OrderQueryAuthorization {
   sql: string;
   params: any[];
   isRestricted: boolean;
-  filterType: 'ALL' | 'AGENT' | 'SHIPPING_COMPANY' | 'NONE';
+  filterType: 'ALL' | 'AGENT' | 'SHIPPING_COMPANY' | 'STAGE' | 'NONE';
   filterValue: string | null;
+  allowedStatuses?: string[];
 }
+
+export const ORDER_VISIBLE_STATUSES_BY_ROLE: Record<string, string[]> = {
+  FACTORY_TRANSPORT: ["SENT_TO_FACTORY", "VEHICLE_ASSIGNED", "WAREHOUSE_LOADED", "LOADED_AND_DISPATCHED"],
+  SHIPPING_COMPANY: ["SENT_TO_FACTORY", "VEHICLE_ASSIGNED", "WAREHOUSE_LOADED", "LOADED_AND_DISPATCHED"],
+  PRODUCT_WAREHOUSE: ["VEHICLE_ASSIGNED", "WAREHOUSE_LOADED", "LOADED_AND_DISPATCHED"],
+  SECURITY_GATE: ["WAREHOUSE_LOADED", "LOADED_AND_DISPATCHED"]
+};
 
 /**
  * Builds the database query and parameter bindings for orders based strictly
- * on the verified server-side identity in req.user.
- * 
- * Enforces:
- * 1. Representatives (or AGENT) ONLY receive orders matching their assigned agentCode.
- * 2. Shipping companies ONLY receive orders matching their assigned shippingCompanyId.
- * 3. Legitimate internal roles (SYSTEM_ADMIN, SALES_MANAGER, etc.) preserve existing access.
- * 4. Never trusts caller-supplied agent codes or company IDs from request body/query.
- * 5. Unassigned representatives or shipping companies receive zero orders (WHERE 1 = 0).
+ * on the verified server-side identity and role in req.user.
+ *
+ * Enforces Least Privilege:
+ * 1. SYSTEM_ADMIN & SALES_MANAGER: Full order oversight.
+ * 2. REPRESENTATIVE (or AGENT): ONLY orders matching their verified agentCode.
+ * 3. SHIPPING_COMPANY: ONLY orders matching their verified shippingCompanyId AND operational stages.
+ * 4. FACTORY_TRANSPORT / PRODUCT_WAREHOUSE / SECURITY_GATE: ONLY orders in stages relevant to their workflow.
+ * 5. Unassigned or unknown roles receive zero orders (WHERE 1 = 0).
  */
 export function buildOrderQueryForUser(user?: Express.Request['user']): OrderQueryAuthorization {
   if (!user) {
@@ -705,7 +713,18 @@ export function buildOrderQueryForUser(user?: Express.Request['user']): OrderQue
 
   const role = normalizeRole(user.role);
 
-  // 1. Representatives must only receive orders belonging to their authorized agentCode
+  // 1. Management roles preserve full order visibility
+  if (role === "SYSTEM_ADMIN" || role === "SALES_MANAGER") {
+    return {
+      sql: "SELECT * FROM orders ORDER BY priorityIndex ASC, createdAt DESC",
+      params: [],
+      isRestricted: false,
+      filterType: 'ALL',
+      filterValue: null
+    };
+  }
+
+  // 2. Representatives must only receive orders belonging to their authorized agentCode
   if (role === "REPRESENTATIVE") {
     const agentCode = user.agentCode && typeof user.agentCode === "string" ? user.agentCode.trim() : null;
     if (!agentCode) {
@@ -726,46 +745,420 @@ export function buildOrderQueryForUser(user?: Express.Request['user']): OrderQue
     };
   }
 
-  // 2. Shipping companies must only receive orders assigned to their authorized shippingCompanyId
+  // 3. Shipping companies must only receive orders assigned to their authorized shippingCompanyId and in factory/transit stages
   if (role === "SHIPPING_COMPANY") {
     const shippingCompanyId = user.shippingCompanyId && typeof user.shippingCompanyId === "string" ? user.shippingCompanyId.trim() : null;
+    const allowedStatuses = ORDER_VISIBLE_STATUSES_BY_ROLE.SHIPPING_COMPANY;
     if (!shippingCompanyId) {
       return {
         sql: "SELECT * FROM orders WHERE 1 = 0 ORDER BY priorityIndex ASC, createdAt DESC",
         params: [],
         isRestricted: true,
         filterType: 'SHIPPING_COMPANY',
-        filterValue: null
+        filterValue: null,
+        allowedStatuses
       };
     }
     return {
-      sql: "SELECT * FROM orders WHERE shippingCompanyId = ? ORDER BY priorityIndex ASC, createdAt DESC",
+      sql: "SELECT * FROM orders WHERE shippingCompanyId = ? AND status IN ('SENT_TO_FACTORY', 'VEHICLE_ASSIGNED', 'WAREHOUSE_LOADED', 'LOADED_AND_DISPATCHED') ORDER BY priorityIndex ASC, createdAt DESC",
       params: [shippingCompanyId],
       isRestricted: true,
       filterType: 'SHIPPING_COMPANY',
-      filterValue: shippingCompanyId
+      filterValue: shippingCompanyId,
+      allowedStatuses
     };
   }
 
-  // 3. Legitimate management and internal roles (SYSTEM_ADMIN, SALES_MANAGER, FACTORY_TRANSPORT, PRODUCT_WAREHOUSE, SECURITY_GATE, etc.)
+  // 4. Factory Transport: sees only orders dispatched to factory and downstream logistics stages
+  if (role === "FACTORY_TRANSPORT") {
+    const allowedStatuses = ORDER_VISIBLE_STATUSES_BY_ROLE.FACTORY_TRANSPORT;
+    return {
+      sql: "SELECT * FROM orders WHERE status IN ('SENT_TO_FACTORY', 'VEHICLE_ASSIGNED', 'WAREHOUSE_LOADED', 'LOADED_AND_DISPATCHED') ORDER BY priorityIndex ASC, createdAt DESC",
+      params: [],
+      isRestricted: true,
+      filterType: 'STAGE',
+      filterValue: 'FACTORY_TRANSPORT',
+      allowedStatuses
+    };
+  }
+
+  // 5. Product Warehouse: sees only orders with vehicle assigned, warehouse loaded, or dispatched
+  if (role === "PRODUCT_WAREHOUSE") {
+    const allowedStatuses = ORDER_VISIBLE_STATUSES_BY_ROLE.PRODUCT_WAREHOUSE;
+    return {
+      sql: "SELECT * FROM orders WHERE status IN ('VEHICLE_ASSIGNED', 'WAREHOUSE_LOADED', 'LOADED_AND_DISPATCHED') ORDER BY priorityIndex ASC, createdAt DESC",
+      params: [],
+      isRestricted: true,
+      filterType: 'STAGE',
+      filterValue: 'PRODUCT_WAREHOUSE',
+      allowedStatuses
+    };
+  }
+
+  // 6. Security Gate: sees only orders ready for gate inspection or cleared history
+  if (role === "SECURITY_GATE") {
+    const allowedStatuses = ORDER_VISIBLE_STATUSES_BY_ROLE.SECURITY_GATE;
+    return {
+      sql: "SELECT * FROM orders WHERE status IN ('WAREHOUSE_LOADED', 'LOADED_AND_DISPATCHED') ORDER BY priorityIndex ASC, createdAt DESC",
+      params: [],
+      isRestricted: true,
+      filterType: 'STAGE',
+      filterValue: 'SECURITY_GATE',
+      allowedStatuses
+    };
+  }
+
+  // Default deny for any unknown role
   return {
-    sql: "SELECT * FROM orders ORDER BY priorityIndex ASC, createdAt DESC",
+    sql: "SELECT * FROM orders WHERE 1 = 0 ORDER BY priorityIndex ASC, createdAt DESC",
     params: [],
-    isRestricted: false,
-    filterType: 'ALL',
+    isRestricted: true,
+    filterType: 'NONE',
     filterValue: null
   };
 }
 
 /**
+ * Builds role-scoped SQL query for agents table.
+ */
+export function buildAgentQueryForUser(user?: Express.Request['user']): { sql: string; params: any[]; allowed: boolean } {
+  if (!user) return { sql: "SELECT * FROM agents WHERE 1 = 0", params: [], allowed: false };
+  const role = normalizeRole(user.role);
+  if (role === "SYSTEM_ADMIN" || role === "SALES_MANAGER") {
+    return { sql: "SELECT * FROM agents", params: [], allowed: true };
+  }
+  if (role === "REPRESENTATIVE") {
+    const agentCode = user.agentCode && typeof user.agentCode === "string" ? user.agentCode.trim() : null;
+    if (!agentCode) return { sql: "SELECT * FROM agents WHERE 1 = 0", params: [], allowed: true };
+    return { sql: "SELECT * FROM agents WHERE agentCode = ?", params: [agentCode], allowed: true };
+  }
+  return { sql: "SELECT * FROM agents WHERE 1 = 0", params: [], allowed: false };
+}
+
+/**
+ * Builds role-scoped SQL query for shipping_companies table.
+ */
+export function buildShippingCompanyQueryForUser(user?: Express.Request['user']): { sql: string; params: any[]; allowed: boolean } {
+  if (!user) return { sql: "SELECT * FROM shipping_companies WHERE 1 = 0", params: [], allowed: false };
+  const role = normalizeRole(user.role);
+  if (role === "SYSTEM_ADMIN" || role === "SALES_MANAGER") {
+    return { sql: "SELECT * FROM shipping_companies", params: [], allowed: true };
+  }
+  if (role === "FACTORY_TRANSPORT") {
+    return { sql: "SELECT * FROM shipping_companies WHERE isEnabled = 1", params: [], allowed: true };
+  }
+  if (role === "SHIPPING_COMPANY") {
+    const scId = user.shippingCompanyId && typeof user.shippingCompanyId === "string" ? user.shippingCompanyId.trim() : null;
+    if (!scId) return { sql: "SELECT * FROM shipping_companies WHERE 1 = 0", params: [], allowed: true };
+    return { sql: "SELECT * FROM shipping_companies WHERE id = ?", params: [scId], allowed: true };
+  }
+  return { sql: "SELECT * FROM shipping_companies WHERE 1 = 0", params: [], allowed: false };
+}
+
+/**
+ * Strips unit pricing (`p` / `pricePerUnit`) from compact or expanded itemsJson
+ * so non-commercial operational roles do not receive financial pricing details.
+ */
+export function stripPricesFromItemsJson(itemsJson: any): string | null {
+  if (!itemsJson || typeof itemsJson !== "string") return itemsJson ?? null;
+  const trimmed = itemsJson.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!Array.isArray(parsed)) return itemsJson;
+    const stripped = parsed.map((item: any) => {
+      if (!item || typeof item !== "object") return item;
+      const copy: any = { ...item };
+      delete copy.p;
+      delete copy.pricePerUnit;
+      return copy;
+    });
+    return JSON.stringify(stripped);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Applies role-based field projection/redaction to a formatted order object.
+ */
+export function sanitizeOrderForRole(order: any, user?: Express.Request['user']): any {
+  if (!order || typeof order !== "object") return order;
+  const role = user ? normalizeRole(user.role) : "";
+
+  if (role === "SYSTEM_ADMIN" || role === "SALES_MANAGER") {
+    return order;
+  }
+
+  if (role === "REPRESENTATIVE") {
+    const copy = { ...order };
+    delete copy.warehouseDetails;
+    delete copy.securityGateDetails;
+    return copy;
+  }
+
+  if (role === "FACTORY_TRANSPORT" || role === "SHIPPING_COMPANY") {
+    const copy = { ...order };
+    delete copy.paymentTrackingCode;
+    delete copy.paymentReceiptUrl;
+    delete copy.paymentReceiptName;
+    delete copy.pendingEditData;
+    delete copy.rejectionReason;
+    delete copy.warehouseDetails;
+    delete copy.securityGateDetails;
+    if (copy.itemsJson) {
+      copy.itemsJson = stripPricesFromItemsJson(copy.itemsJson);
+    }
+    return copy;
+  }
+
+  if (role === "PRODUCT_WAREHOUSE") {
+    const copy = { ...order };
+    delete copy.paymentTrackingCode;
+    delete copy.paymentReceiptUrl;
+    delete copy.paymentReceiptName;
+    delete copy.pendingEditData;
+    delete copy.rejectionReason;
+    delete copy.deliveryLocationUrl;
+    if (copy.itemsJson) {
+      copy.itemsJson = stripPricesFromItemsJson(copy.itemsJson);
+    }
+    return copy;
+  }
+
+  if (role === "SECURITY_GATE") {
+    const copy = { ...order };
+    delete copy.paymentTrackingCode;
+    delete copy.paymentReceiptUrl;
+    delete copy.paymentReceiptName;
+    delete copy.pendingEditData;
+    delete copy.rejectionReason;
+    delete copy.deliveryLocationUrl;
+    delete copy.notes;
+    delete copy.buyerName;
+    delete copy.phoneNumber;
+    if (copy.itemsJson) {
+      copy.itemsJson = stripPricesFromItemsJson(copy.itemsJson);
+    }
+    return copy;
+  }
+
+  return null;
+}
+
+/**
+ * Applies role-based field projection to a product record.
+ */
+export function sanitizeProductForRole(product: any, user?: Express.Request['user']): any {
+  if (!product || typeof product !== "object") return product;
+  const role = user ? normalizeRole(user.role) : "";
+
+  if (role === "SYSTEM_ADMIN" || role === "SALES_MANAGER" || role === "REPRESENTATIVE") {
+    return {
+      ...product,
+      isEnabled: !!product.isEnabled
+    };
+  }
+
+  // Operational & shipping roles only need logistics/hydration metadata, never commercial pricing
+  if (
+    role === "FACTORY_TRANSPORT" ||
+    role === "SHIPPING_COMPANY" ||
+    role === "PRODUCT_WAREHOUSE" ||
+    role === "SECURITY_GATE"
+  ) {
+    return {
+      id: product.id,
+      name: product.name,
+      category: product.category,
+      unit: product.unit,
+      weight: product.weight ?? null,
+      dimensions: product.dimensions ?? null,
+      coverageInfo: product.coverageInfo ?? null,
+      primaryUnit: product.primaryUnit ?? null,
+      secondaryUnit: product.secondaryUnit ?? null,
+      conversionRatio: product.conversionRatio ?? null,
+      isEnabled: !!product.isEnabled
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Applies role-based projection to a shipping company record.
+ */
+export function sanitizeShippingCompanyForRole(sc: any, user?: Express.Request['user']): any {
+  if (!sc || typeof sc !== "object") return null;
+  const role = user ? normalizeRole(user.role) : "";
+
+  if (role === "SYSTEM_ADMIN" || role === "SALES_MANAGER") {
+    return {
+      ...sc,
+      isEnabled: !!sc.isEnabled
+    };
+  }
+
+  if (role === "SHIPPING_COMPANY") {
+    const userScId = user?.shippingCompanyId ? String(user.shippingCompanyId).trim().toLowerCase() : null;
+    if (!userScId || String(sc.id || "").trim().toLowerCase() !== userScId) {
+      return null;
+    }
+    return {
+      ...sc,
+      isEnabled: !!sc.isEnabled
+    };
+  }
+
+  if (role === "FACTORY_TRANSPORT") {
+    if (!sc.isEnabled) return null;
+    return {
+      id: sc.id,
+      name: sc.name,
+      code: sc.code,
+      phoneNumber: sc.phoneNumber,
+      isEnabled: true
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Checks whether a permanent driver record belongs to a shipping company caller.
+ */
+export function isDriverOwnedByShippingCompany(
+  driver: { shippingCompanyId?: string | null; shippingAgency?: string | null },
+  userScId?: string | null,
+  companyName?: string | null
+): boolean {
+  const cleanUserScId = userScId ? String(userScId).trim().toLowerCase() : null;
+  if (!cleanUserScId) return false;
+
+  const drvScId = driver.shippingCompanyId ? String(driver.shippingCompanyId).trim().toLowerCase() : null;
+  if (drvScId) {
+    return drvScId === cleanUserScId;
+  }
+
+  if (companyName && driver.shippingAgency) {
+    return String(driver.shippingAgency).trim().toLowerCase() === String(companyName).trim().toLowerCase();
+  }
+  return false;
+}
+
+/**
+ * Applies role-based filtering and PII redaction to a permanent driver record.
+ */
+export function sanitizePermanentDriverForRole(
+  driver: any,
+  user?: Express.Request['user'],
+  companyName?: string | null
+): any {
+  if (!driver || typeof driver !== "object") return null;
+  const role = user ? normalizeRole(user.role) : "";
+
+  if (role === "SYSTEM_ADMIN" || role === "SALES_MANAGER") {
+    return {
+      ...driver,
+      isEnabled: !!driver.isEnabled
+    };
+  }
+
+  if (role === "SHIPPING_COMPANY") {
+    if (!isDriverOwnedByShippingCompany(driver, user?.shippingCompanyId, companyName)) {
+      return null;
+    }
+    return {
+      ...driver,
+      isEnabled: !!driver.isEnabled
+    };
+  }
+
+  if (role === "FACTORY_TRANSPORT") {
+    // Factory transport needs driver dispatch fields, NOT driver nationalCode or smartCardNumber PII
+    return {
+      id: driver.id,
+      driverName: driver.driverName,
+      driverPhone: driver.driverPhone,
+      licensePlate: driver.licensePlate,
+      vehicleType: driver.vehicleType,
+      shippingAgency: driver.shippingAgency ?? null,
+      shippingCompanyId: driver.shippingCompanyId ?? null,
+      isEnabled: !!driver.isEnabled
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Verifies ownership of a permanent driver for mutation endpoints.
+ */
+export function checkPermanentDriverOwnership(
+  driver: { id?: string; shippingCompanyId?: string | null; shippingAgency?: string | null } | undefined | null,
+  user: Express.Request['user'],
+  companyName?: string | null
+): { allowed: boolean; status: number; message: string } {
+  if (!user) {
+    return { allowed: false, status: 401, message: "احراز هویت الزامی است." };
+  }
+  if (!driver) {
+    return { allowed: false, status: 404, message: "راننده مورد نظر یافت نشد." };
+  }
+  const role = normalizeRole(user.role);
+  if (role === "SYSTEM_ADMIN" || role === "SALES_MANAGER" || role === "FACTORY_TRANSPORT") {
+    return { allowed: true, status: 200, message: "مجاز" };
+  }
+  if (role === "SHIPPING_COMPANY") {
+    if (!isDriverOwnedByShippingCompany(driver, user.shippingCompanyId, companyName)) {
+      return {
+        allowed: false,
+        status: 403,
+        message: "دسترسی غیرمجاز. شما مجوز تغییر اطلاعات این راننده را ندارید."
+      };
+    }
+    return { allowed: true, status: 200, message: "مجاز" };
+  }
+  return { allowed: false, status: 403, message: "دسترسی غیرمجاز. شما مجوز انجام این عملیات را ندارید." };
+}
+
+/**
+ * Validates whether an order's current workflow status permits the requested mutation for the caller's role.
+ */
+export function checkOrderStageForMutation(
+  orderStatus: string | null | undefined,
+  user: Express.Request['user'],
+  allowedStatusesByRole: { default: string[]; management?: string[] }
+): { allowed: boolean; status: number; message: string } {
+  if (!user) {
+    return { allowed: false, status: 401, message: "احراز هویت الزامی است." };
+  }
+  const role = normalizeRole(user.role);
+  const currentStatus = String(orderStatus || "").trim().toUpperCase();
+  const isManagement = role === "SYSTEM_ADMIN" || role === "SALES_MANAGER";
+  const allowedList = isManagement && allowedStatusesByRole.management
+    ? allowedStatusesByRole.management
+    : allowedStatusesByRole.default;
+
+  if (!allowedList.includes(currentStatus)) {
+    return {
+      allowed: false,
+      status: 403,
+      message: "دسترسی غیرمجاز. این سفارش در مرحله کاری مجاز برای این عملیات قرار ندارد."
+    };
+  }
+  return { allowed: true, status: 200, message: "مجاز" };
+}
+
+/**
  * Validates whether the authenticated user has permission to access or modify a specific order.
  * - SYSTEM_ADMIN and SALES_MANAGER have full permissions.
- * - Plant/operational roles (FACTORY_TRANSPORT, PRODUCT_WAREHOUSE, SECURITY_GATE) have operational permissions.
+ * - Plant/operational roles (FACTORY_TRANSPORT, PRODUCT_WAREHOUSE, SECURITY_GATE) pass ownership and are constrained by workflow stage guards.
  * - REPRESENTATIVE is strictly restricted to orders matching their authorized agentCode.
  * - SHIPPING_COMPANY is strictly restricted to orders assigned to their authorized shippingCompanyId.
  */
 export function checkOrderOwnership(
-  order: { agentCode?: string | null; shippingCompanyId?: string | null } | undefined | null,
+  order: { agentCode?: string | null; shippingCompanyId?: string | null; status?: string | null } | undefined | null,
   user: Express.Request['user']
 ): { allowed: boolean; status: number; message: string } {
   if (!user) {
@@ -791,7 +1184,7 @@ export function checkOrderOwnership(
       return {
         allowed: false,
         status: 403,
-        message: "دسترسی غیرمجاز. این سفارش متعلق به نمایندگی شما نمی‌باشد."
+        message: "دسترسی غیرمجاز. مجوز دسترسی یا عملیات روی این سفارش برای حساب شما تایید نشد."
       };
     }
     return { allowed: true, status: 200, message: "مجاز" };
@@ -805,13 +1198,16 @@ export function checkOrderOwnership(
       return {
         allowed: false,
         status: 403,
-        message: "دسترسی غیرمجاز. این سفارش به شرکت باربری شما تخصیص نیافته است."
+        message: "دسترسی غیرمجاز. مجوز دسترسی یا عملیات روی این سفارش برای حساب شما تایید نشد."
       };
     }
     return { allowed: true, status: 200, message: "مجاز" };
   }
 
   // Operational plant roles (FACTORY_TRANSPORT, PRODUCT_WAREHOUSE, SECURITY_GATE)
-  return { allowed: true, status: 200, message: "مجاز" };
-}
+  if (role === "FACTORY_TRANSPORT" || role === "PRODUCT_WAREHOUSE" || role === "SECURITY_GATE") {
+    return { allowed: true, status: 200, message: "مجاز" };
+  }
 
+  return { allowed: false, status: 403, message: "دسترسی غیرمجاز. شما مجوز انجام این عملیات را ندارید." };
+}
