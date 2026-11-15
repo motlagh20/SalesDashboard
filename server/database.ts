@@ -1952,11 +1952,13 @@ async function ensureIndexExists(db: mysql.Pool, tableName: string, indexName: s
  * This is perfect for initial bootstrapping on Ubuntu.
  */
 export async function bootstrapDatabase() {
+  let connectivityVerified = false;
   try {
     const db = pool || ensurePoolInitialized();
     
     // Quick test query to verify MariaDB is up and reachable
     await db.query("SELECT 1");
+    connectivityVerified = true;
 
     console.log("🔄 [Bootstrap] Checking MariaDB tables...");
 
@@ -2007,6 +2009,7 @@ export async function bootstrapDatabase() {
         code VARCHAR(50) NOT NULL UNIQUE,
         phoneNumber VARCHAR(20) NOT NULL,
         managerName VARCHAR(150),
+        address TEXT,
         isEnabled TINYINT(1) DEFAULT 1,
         nationalId VARCHAR(50),
         economicCode VARCHAR(50)
@@ -2085,7 +2088,10 @@ export async function bootstrapDatabase() {
         email VARCHAR(150) NULL,
         emailVerified TINYINT(1) NOT NULL DEFAULT 0,
         emailVerifiedAt VARCHAR(50) NULL,
-        tokenVersion INT NOT NULL DEFAULT 0
+        tokenVersion INT NOT NULL DEFAULT 0,
+        password VARCHAR(255) DEFAULT '${DEFAULT_PASSWORD_BCRYPT_HASH}',
+        mustChangePassword TINYINT(1) DEFAULT 0,
+        lastSeenAt VARCHAR(50) NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
@@ -2219,9 +2225,6 @@ export async function bootstrapDatabase() {
     await ensureIndexExists(db, "app_users", "idx_users_phone", "phoneNumber");
     await ensureIndexExists(db, "app_users", "idx_users_email", "email");
 
-    isDbHealthy = true;
-    isFallbackMode = false;
-    dbMaintenanceError = null;
     console.log("✅ [Bootstrap] MariaDB tables checked and synchronized successfully!");
 
     // Seed tables if empty (Development & Test only! Strictly disabled in production)
@@ -2244,6 +2247,11 @@ export async function bootstrapDatabase() {
     // Auto-migrate any unhashed passwords in MariaDB
     await migrateDatabasePasswords(db);
 
+    // Mark DB healthy ONLY after DDL, migrations, seeding, and password migration all succeed
+    isDbHealthy = true;
+    isFallbackMode = false;
+    dbMaintenanceError = null;
+
     // Test Redis connectivity if configured
     const redisClient = getRedisClient();
     if (redisClient) {
@@ -2259,6 +2267,16 @@ export async function bootstrapDatabase() {
     }
   } catch (error: any) {
     writeServerErrorLog("Bootstrap MariaDB", error);
+
+    // If MariaDB was reachable (SELECT 1 succeeded) and bootstrap/seeding failed with a schema or SQL error,
+    // NEVER mask it with MockPool or mark the database healthy — propagate cleanly so startup fails safely.
+    if (connectivityVerified && !isConnectionError(error)) {
+      markDatabaseUnhealthy(error);
+      isFallbackMode = false;
+      mockPoolInstance = null;
+      console.error("❌ [Bootstrap] MariaDB schema/seed error after connection succeeded:", error?.message || error);
+      throw error;
+    }
 
     // Requirement 1 & 4: In production, NEVER silently switch to JSON storage. Return controlled maintenance state.
     if (isProductionEnvironment()) {
@@ -2285,6 +2303,15 @@ export async function bootstrapDatabase() {
 }
 
 export async function seedDatabaseWithConnection(connection: any) {
+  const executeSeedStep = async (tableName: string, fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch (err: any) {
+      console.error(`❌ [Seed] Failed seeding table '${tableName}':`, err?.message || err);
+      throw err;
+    }
+  };
+
   const dummyProducts = [
     ['prod-1', 'سفال سقف طبرستان (طرح کلاسیک)', 'roofing', 145000, 'عدد', 'مقاومت بسیار بالا در برابر تغییرات جوی و یخبندان، عایق حرارتی و رطوبتی فوق‌العاده با لعاب طبیعی.', '۳.۱ کیلوگرم', '۳۰ × ۴۲ سانتی‌متر', '۱۴ عدد در هر مترمربع', 1],
     ['prod-2', 'آجر سفال ۱۰ سانتی طبرستان (تیغه)', 'bricks', 3400, 'قالب', 'جهت دیوارهای داخلی و فضاهای کم‌عرض، پخت با کوره تمام اتوماتیک هافمن و ابعاد کاملاً گونیا.', '۲.۲ کیلوگرم', '۱۰ × ۲۰ × ۲۰ سانتی‌متر', '۲۵ قالب در هر مترمربع تیغه', 1],
@@ -2292,37 +2319,43 @@ export async function seedDatabaseWithConnection(connection: any) {
     ['prod-4', 'آجر نما نسوز سموتی طبرستان', 'facade', 12500, 'قالب', 'مقاومت حرارتی بیش از ۱۲۰۰ درجه سانتی‌گراد، رنگ ثابت و مقاوم در برابر باران‌های اسیدی و شوره‌زدگی.', '۰.۸ کیلوگرم', '۵.۵ × ۲.۵ × ۲۶ سانتی‌متر', '۴۰ قالب در هر مترمربع با بندکشی', 1],
     ['prod-5', 'تیغه سفال سقفی ۲۵ طبرستان (بلوک سقفی)', 'bricks', 9500, 'قالب', 'تولید شده با رس مرغوب شسته شده، مقاومت فشاری بالا و ایده آل برای سقف‌های تیرچه بلوک صنعتی.', '۷.۵ کیلوگرم', '۲۵ × ۲۰ × ۴۰ سانتی‌متر', '۱۰ قالب در هر مترمربع سقف', 1]
   ];
-  for (const p of dummyProducts) {
-    await connection.query(
-      "INSERT INTO products (id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      p
-    );
-  }
+  await executeSeedStep("products", async () => {
+    for (const p of dummyProducts) {
+      await connection.query(
+        "INSERT INTO products (id, name, category, pricePerUnit, unit, description, weight, dimensions, coverageInfo, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
+        p
+      );
+    }
+  });
 
   const dummyAgents = [
-    ['ag-1', 'نمایندگی تهران - احمدی', 'AG-9081', 'تهران', '09120000001', 'تهران، خیابان شریعتی، بالاتر از پل رومی، پلاک ۴۲', '02122001122', 1],
-    ['ag-2', 'نمایندگی اصفهان - رجایی', 'AG-6055', 'اصفهان', '09130000002', 'اصفهان، خیابان چهارباغ بالا، مجتمع اداری کوثر، طبقه دوم', '03136203344', 1],
-    ['ag-3', 'نمایندگی رشت - پوربخش', 'AG-2019', 'گیلان', '09110000003', 'رشت، بلوار قلی‌پور، نبش کوچه شقایق، ساختمان طبرستان', '01332115566', 1],
-    ['ag-4', 'نمایندگی شیراز - نمازی', 'AG-7023', 'فارس', '09170000004', 'شیراز، بلوار امیرکبیر، روبروی باغ جنت، طبقه همکف', '07138207788', 1]
+    ['ag-1', 'آقای حمیدرضا احمدی', 'نمایندگی تهران (احمدی)', 'AG-9081', '09121111111', 'تهران، ابتدای جاده قدیم کرج، مجتمع تجاری پایتخت، پلاک ۱۲', 'کل استان تهران؛ کل استان البرز', JSON.stringify([{ province: 'تهران', allCities: true }, { province: 'البرز', allCities: true }]), 1, 1],
+    ['ag-2', 'آقای علیرضا رجایی', 'نمایندگی اصفهان (رجایی)', 'AG-6055', '09132222222', 'اصفهان، بلوار فرودگاه، نرسیده به شهرک صنعتی جی، پلاک ۴۶', 'کل استان اصفهان؛ کل استان یزد', JSON.stringify([{ province: 'اصفهان', allCities: true }, { province: 'یزد', allCities: true }]), 0, 1],
+    ['ag-3', 'آقای سهراب پوربخش', 'نمایندگی رشت (پوربخش)', 'AG-2019', '09113333333', 'گیلان، رشت، کیلومتر ۵ جاده انزلی، جنب انبار فومن‌شیمی', 'کل استان گیلان؛ کل استان مازندران', JSON.stringify([{ province: 'گیلان', allCities: true }, { province: 'مازندران', allCities: true }]), 0, 1],
+    ['ag-4', 'آقای کریم نمازی', 'نمایندگی شیراز (نمازی)', 'AG-7023', '09174444444', 'فارس، شیراز، بلوار امیرکبیر، روبروی باغ جنت، مجتمع سفال', 'کل استان فارس؛ کل استان بوشهر', JSON.stringify([{ province: 'فارس', allCities: true }, { province: 'بوشهر', allCities: true }]), 0, 1]
   ];
-  for (const a of dummyAgents) {
-    await connection.query(
-      "INSERT INTO agents (id, name, code, province, phoneNumber, address, landline, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      a
-    );
-  }
+  await executeSeedStep("agents", async () => {
+    for (const a of dummyAgents) {
+      await connection.query(
+        "INSERT INTO agents (id, fullName, alias, agentCode, phoneNumber, address, area, territories, isExportAgent, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
+        a
+      );
+    }
+  });
 
   const dummyShipping = [
     ['sc-1', 'باربری ترانزیت شمال طبرستان', 'SC-101', '01133334444', 'آقای رستمی', 'ساری، جاده نکا، کیلومتر ۵، جنب کارخانه طبرستان', 1],
     ['sc-2', 'باربری زاینده‌رود طبرستان', 'SC-102', '01133335555', 'آقای صادقی', 'اصفهان، شهرک صنعتی جی، خیابان چهارم، پایانه باربری زاینده‌رود', 1],
     ['sc-3', 'اتوبار کاسپین طبرستان', 'SC-103', '01133336666', 'آقای احمدی', 'رشت، جاده انزلی، جنب پایانه حمل و نقل کاسپین', 1]
   ];
-  for (const s of dummyShipping) {
-    await connection.query(
-      "INSERT INTO shipping_companies (id, name, code, phoneNumber, managerName, address, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      s
-    );
-  }
+  await executeSeedStep("shipping_companies", async () => {
+    for (const s of dummyShipping) {
+      await connection.query(
+        "INSERT INTO shipping_companies (id, name, code, phoneNumber, managerName, address, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
+        s
+      );
+    }
+  });
 
   const dummyDrivers = [
     ['drv-1', 'کریم قنبری', '09117772222', '۵۴ ع ۸۹۲ ایران ۷۲', 'تریلی ۱۸ چرخ لبه‌دار', 'باربری ترانزیت شمال', 'sc-1', '2081234567', '3849201', 1],
@@ -2330,14 +2363,14 @@ export async function seedDatabaseWithConnection(connection: any) {
     ['drv-3', 'مرتضی حسینی', '09112223344', '۳۶ ج ۱۴۵ ایران ۶۲', 'خاور مسقف', 'باربری کاسپین', 'sc-3', '2093344556', '1092837', 1],
     ['drv-4', 'جواد علوی', '09112523456', '۶۲ ع ۴۸۱ ایران ۷۲', 'تریلی ۱۸ چرخ لبه‌دار', 'باربری ترانزیت طبرستان', 'sc-1', '2089988771', '5544332', 1]
   ];
-  for (const d of dummyDrivers) {
-    try {
+  await executeSeedStep("permanent_drivers", async () => {
+    for (const d of dummyDrivers) {
       await connection.query(
-        "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, shippingCompanyId, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO permanent_drivers (id, driverName, driverPhone, licensePlate, vehicleType, shippingAgency, shippingCompanyId, nationalCode, smartCardNumber, isEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
         d
       );
-    } catch {}
-  }
+    }
+  });
 
   const dummyUsers = [
     ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
@@ -2349,16 +2382,18 @@ export async function seedDatabaseWithConnection(connection: any) {
     ['usr-6', 'factory', 'مسئول اول فروش کارخانه', '09110000005', 'FACTORY_TRANSPORT', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
     ['usr-62', 'factory2', 'مسئول دوم فروش کارخانه', '09110000007', 'FACTORY_TRANSPORT', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
     ['usr-7', 'shipping_transit', 'باربری ترانزیت طبرستان', '09110000006', 'SHIPPING_COMPANY', null, 'sc-1', 1, DEFAULT_PASSWORD_BCRYPT_HASH],
-    ['usr-72', 'shipping_zayandeh', 'باربری زاینده‌رود طبرستان', '09130000007', 'SHIPPING_COMPANY', null, 'sc-2', 1, DEFAULT_PASSWORD_BCRYPT_HASH]
+    ['usr-72', 'shipping_zayandeh', 'باربری زاینده‌رود طبرستان', '09130000007', 'SHIPPING_COMPANY', null, 'sc-2', 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+    ['usr-8', 'warehouse', 'مسئول انبار محصول (بارگیری و صدور حواله)', '09110000008', 'PRODUCT_WAREHOUSE', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH],
+    ['usr-9', 'security_gate', 'افسر انتظامات و حراست گیت خروج', '09110000009', 'SECURITY_GATE', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
   ];
-  for (const u of dummyUsers) {
-    try {
+  await executeSeedStep("app_users", async () => {
+    for (const u of dummyUsers) {
       await connection.query(
-        "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
         u
       );
-    } catch {}
-  }
+    }
+  });
 }
 
 export async function seedDatabaseIfEmpty(db: mysql.Pool) {
@@ -2367,29 +2402,81 @@ export async function seedDatabaseIfEmpty(db: mysql.Pool) {
     return;
   }
   try {
-    const [prodRows] = await db.query("SELECT COUNT(*) as count FROM products") as any[];
-    const prodCount = (prodRows && prodRows[0]?.count !== undefined) ? prodRows[0].count : 0;
-    if (prodCount === 0) {
-      console.log("🌱 [Seed] Seeding default database entities...");
-      await seedDatabaseWithConnection(db);
+    const getCount = async (tableName: string): Promise<number> => {
+      const [rows] = (await db.query(`SELECT COUNT(*) as count FROM ${tableName}`)) as any[];
+      return rows && rows[0]?.count !== undefined ? Number(rows[0].count) : 0;
+    };
+
+    const [prodCount, agentCount, scCount, userCount] = await Promise.all([
+      getCount("products"),
+      getCount("agents"),
+      getCount("shipping_companies"),
+      getCount("app_users")
+    ]);
+
+    if (prodCount === 0 || agentCount === 0 || scCount === 0 || userCount === 0) {
+      console.log("🌱 [Seed] Seeding default database entities inside transaction...");
+      if (typeof (db as any).getConnection === "function") {
+        const connection = await (db as any).getConnection();
+        try {
+          if (typeof connection.beginTransaction === "function") {
+            await connection.beginTransaction();
+          }
+          await seedDatabaseWithConnection(connection);
+          if (typeof connection.commit === "function") {
+            await connection.commit();
+          }
+        } catch (txErr) {
+          if (typeof connection.rollback === "function") {
+            try {
+              await connection.rollback();
+            } catch {}
+          }
+          throw txErr;
+        } finally {
+          if (typeof connection.release === "function") {
+            connection.release();
+          }
+        }
+      } else {
+        await seedDatabaseWithConnection(db);
+      }
     } else {
-      // Ensure SYSTEM_ADMIN (admin) user exists in SQL database if missing
-      const [adminRows] = await db.query("SELECT COUNT(*) as count FROM app_users WHERE username = 'admin' OR role = 'SYSTEM_ADMIN' OR phoneNumber = '09120000000'") as any[];
-      const adminCount = (adminRows && adminRows[0]?.count !== undefined) ? adminRows[0].count : 0;
-      if (adminCount === 0) {
-        console.log("🛡️ [Seed] Auto-inserting missing SYSTEM_ADMIN (admin) user in SQL database...");
-        await db.query(
-          "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
-        );
+      // Ensure essential system/operational accounts exist idempotently even if app_users already had rows
+      const requiredAccounts: Array<{ whereSql: string; row: any[] }> = [
+        {
+          whereSql: "username = 'admin' OR role = 'SYSTEM_ADMIN' OR phoneNumber = '09120000000'",
+          row: ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
+        },
+        {
+          whereSql: "username = 'warehouse' OR role = 'PRODUCT_WAREHOUSE' OR phoneNumber = '09110000008'",
+          row: ['usr-8', 'warehouse', 'مسئول انبار محصول (بارگیری و صدور حواله)', '09110000008', 'PRODUCT_WAREHOUSE', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
+        },
+        {
+          whereSql: "username = 'security_gate' OR role = 'SECURITY_GATE' OR phoneNumber = '09110000009'",
+          row: ['usr-9', 'security_gate', 'افسر انتظامات و حراست گیت خروج', '09110000009', 'SECURITY_GATE', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
+        }
+      ];
+
+      for (const acc of requiredAccounts) {
+        const [rows] = (await db.query(`SELECT COUNT(*) as count FROM app_users WHERE ${acc.whereSql}`)) as any[];
+        const count = rows && rows[0]?.count !== undefined ? Number(rows[0].count) : 0;
+        if (count === 0) {
+          console.log(`🛡️ [Seed] Auto-inserting missing required user '${acc.row[1]}' (${acc.row[4]}) in SQL database...`);
+          await db.query(
+            "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
+            acc.row
+          );
+        }
       }
     }
 
     console.log("🌱 [Seed] Database tables successfully synchronized!");
-   } catch (err: any) {
-     console.error("❌ [Seed] Error during seeding database:", err.message);
-   }
- }
+  } catch (err: any) {
+    console.error("❌ [Seed] Error during seeding database:", err?.message || err);
+    throw err;
+  }
+}
 
 // --- Activity Logging & Telemetry Helpers ---
 const inMemoryActivityLogs: any[] = [];

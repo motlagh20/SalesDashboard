@@ -1,0 +1,5 @@
+{
+  "summary": "SEC-009 portable transfer ZIP archive containing strictly the 7 required source and test files (server/auth.ts, server.ts, server/database.ts, package.json, tests/order_data_isolation.test.ts, tests/order_mutation_bola_security.test.ts, tests/rbac_least_privilege_sec009.test.ts) relative to base commit 0faa22aef7281c31b8c06fb910ff79dd7bd45972.",
+  "updatedAt": "2026-11-15T14:05:45.000000000Z",
+  "userFacing": true
+}
