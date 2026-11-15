@@ -165,7 +165,7 @@ async function invalidateScopedRedisCache(redis: any, baseKey: string): Promise<
             await redis.del(k);
           }
         }
-      } while (cursor !== "0");
+      } while (String(cursor) !== "0");
     } else if (typeof redis.keys === "function") {
       const matched = await redis.keys(pattern);
       if (Array.isArray(matched)) {
@@ -188,6 +188,89 @@ async function resolveShippingCompanyName(db: any, scId?: string | null): Promis
     }
   } catch {}
   return null;
+}
+
+function formatAndSanitizeOrder(o: any, statusHistory: any[], user?: Express.Request['user']): any {
+  const formatted: any = {
+    id: o.id,
+    orderNumber: o.orderNumber,
+    customerName: o.customerName,
+    agentCode: o.agentCode,
+    productId: o.productId,
+    productName: o.productName,
+    quantity: o.quantity,
+    unit: o.unit,
+    destinationCity: o.destinationCity,
+    exactAddress: o.exactAddress,
+    phoneNumber: o.phoneNumber,
+    buyerName: o.buyerName,
+    notes: o.notes,
+    createdAt: o.createdAt,
+    sentToFactoryAt: o.sentToFactoryAt,
+    status: o.status,
+    priorityIndex: o.priorityIndex,
+    rejectionReason: o.rejectionReason,
+    itemsJson: o.itemsJson,
+    paymentTrackingCode: o.paymentTrackingCode,
+    paymentReceiptUrl: o.paymentReceiptUrl || null,
+    paymentReceiptName: o.paymentReceiptName || null,
+    shippingCompanyId: o.shippingCompanyId,
+    isExportOrder: !!o.isExportOrder,
+    destinationCountry: o.destinationCountry,
+    deliveryLocationUrl: o.deliveryLocationUrl || null,
+    vehicleType: o.vehicleType || null,
+    hasPendingEdit: !!o.hasPendingEdit,
+    pendingEditData: o.pendingEditData || null,
+    recentlyEditedNotice: o.recentlyEditedNotice || null,
+    packagingType: o.packagingType || (o.isExportOrder ? 'PALLET' : 'BULK'),
+    statusHistory: Array.isArray(statusHistory) ? statusHistory : []
+  };
+
+  if (o.warehouseDiscrepancy) {
+    try {
+      formatted.warehouseDiscrepancy = typeof o.warehouseDiscrepancy === 'string' ? JSON.parse(o.warehouseDiscrepancy) : o.warehouseDiscrepancy;
+    } catch {
+      formatted.warehouseDiscrepancy = o.warehouseDiscrepancy;
+    }
+  }
+
+  if (o.securityDetained) {
+    try {
+      formatted.securityDetained = typeof o.securityDetained === 'string' ? JSON.parse(o.securityDetained) : o.securityDetained;
+    } catch {
+      formatted.securityDetained = o.securityDetained;
+    }
+  }
+
+  if (o.driverName || o.driverPhone || o.licensePlate || o.shippingAgency || o.billOfLadingNumber) {
+    formatted.vehicleDetails = {
+      vehicleType: o.vehicleType,
+      driverName: o.driverName,
+      driverPhone: o.driverPhone,
+      licensePlate: o.licensePlate,
+      shippingAgency: o.shippingAgency,
+      estimatedArrival: o.estimatedArrival,
+      billOfLadingNumber: o.billOfLadingNumber
+    };
+  }
+
+  if (o.warehouseDetails) {
+    try {
+      formatted.warehouseDetails = typeof o.warehouseDetails === 'string' ? JSON.parse(o.warehouseDetails) : o.warehouseDetails;
+    } catch {
+      formatted.warehouseDetails = o.warehouseDetails;
+    }
+  }
+
+  if (o.securityGateDetails) {
+    try {
+      formatted.securityGateDetails = typeof o.securityGateDetails === 'string' ? JSON.parse(o.securityGateDetails) : o.securityGateDetails;
+    } catch {
+      formatted.securityGateDetails = o.securityGateDetails;
+    }
+  }
+
+  return sanitizeOrderForRole(formatted, user);
 }
 
 // Load environment variables
@@ -548,88 +631,9 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
         });
       }
 
-      const orders = (orderRows || []).map((o: any) => {
-        const formatted: any = {
-          id: o.id,
-          orderNumber: o.orderNumber,
-          customerName: o.customerName,
-          agentCode: o.agentCode,
-          productId: o.productId,
-          productName: o.productName,
-          quantity: o.quantity,
-          unit: o.unit,
-          destinationCity: o.destinationCity,
-          exactAddress: o.exactAddress,
-          phoneNumber: o.phoneNumber,
-          buyerName: o.buyerName,
-          notes: o.notes,
-          createdAt: o.createdAt,
-          sentToFactoryAt: o.sentToFactoryAt,
-          status: o.status,
-          priorityIndex: o.priorityIndex,
-          rejectionReason: o.rejectionReason,
-          itemsJson: o.itemsJson,
-          paymentTrackingCode: o.paymentTrackingCode,
-          paymentReceiptUrl: o.paymentReceiptUrl || null,
-          paymentReceiptName: o.paymentReceiptName || null,
-          shippingCompanyId: o.shippingCompanyId,
-          isExportOrder: !!o.isExportOrder,
-          destinationCountry: o.destinationCountry,
-          deliveryLocationUrl: o.deliveryLocationUrl || null,
-          vehicleType: o.vehicleType || null,
-          hasPendingEdit: !!o.hasPendingEdit,
-          pendingEditData: o.pendingEditData || null,
-          recentlyEditedNotice: o.recentlyEditedNotice || null,
-          packagingType: o.packagingType || (o.isExportOrder ? 'PALLET' : 'BULK'),
-          statusHistory: historyMap[o.id] || []
-        };
-
-        if (o.warehouseDiscrepancy) {
-          try {
-            formatted.warehouseDiscrepancy = typeof o.warehouseDiscrepancy === 'string' ? JSON.parse(o.warehouseDiscrepancy) : o.warehouseDiscrepancy;
-          } catch {
-            formatted.warehouseDiscrepancy = o.warehouseDiscrepancy;
-          }
-        }
-
-        if (o.securityDetained) {
-          try {
-            formatted.securityDetained = typeof o.securityDetained === 'string' ? JSON.parse(o.securityDetained) : o.securityDetained;
-          } catch {
-            formatted.securityDetained = o.securityDetained;
-          }
-        }
-
-        if (o.driverName || o.driverPhone || o.licensePlate || o.shippingAgency || o.billOfLadingNumber) {
-          formatted.vehicleDetails = {
-            vehicleType: o.vehicleType,
-            driverName: o.driverName,
-            driverPhone: o.driverPhone,
-            licensePlate: o.licensePlate,
-            shippingAgency: o.shippingAgency,
-            estimatedArrival: o.estimatedArrival,
-            billOfLadingNumber: o.billOfLadingNumber
-          };
-        }
-
-        if (o.warehouseDetails) {
-          try {
-            formatted.warehouseDetails = typeof o.warehouseDetails === 'string' ? JSON.parse(o.warehouseDetails) : o.warehouseDetails;
-          } catch {
-            formatted.warehouseDetails = o.warehouseDetails;
-          }
-        }
-
-        if (o.securityGateDetails) {
-          try {
-            formatted.securityGateDetails = typeof o.securityGateDetails === 'string' ? JSON.parse(o.securityGateDetails) : o.securityGateDetails;
-          } catch {
-            formatted.securityGateDetails = o.securityGateDetails;
-          }
-        }
-
-        return sanitizeOrderForRole(formatted, req.user);
-      }).filter(Boolean);
+      const orders = (orderRows || [])
+        .map((o: any) => formatAndSanitizeOrder(o, historyMap[o.id] || [], req.user))
+        .filter(Boolean);
 
       const includeSystemSettings = callerRole === "SYSTEM_ADMIN" || callerRole === "SALES_MANAGER";
       const payload: any = {
@@ -1544,92 +1548,44 @@ export async function createExpressApp(options: { skipDatabaseBootstrap?: boolea
         });
       }
 
-      const orders = orderRows.map((o: any) => {
-        const formatted: any = {
-          id: o.id,
-          orderNumber: o.orderNumber,
-          customerName: o.customerName,
-          agentCode: o.agentCode,
-          productId: o.productId,
-          productName: o.productName,
-          quantity: o.quantity,
-          unit: o.unit,
-          destinationCity: o.destinationCity,
-          exactAddress: o.exactAddress,
-          phoneNumber: o.phoneNumber,
-          buyerName: o.buyerName,
-          notes: o.notes,
-          createdAt: o.createdAt,
-          sentToFactoryAt: o.sentToFactoryAt,
-          status: o.status,
-          priorityIndex: o.priorityIndex,
-          rejectionReason: o.rejectionReason,
-          itemsJson: o.itemsJson,
-          paymentTrackingCode: o.paymentTrackingCode,
-          paymentReceiptUrl: o.paymentReceiptUrl || null,
-          paymentReceiptName: o.paymentReceiptName || null,
-          shippingCompanyId: o.shippingCompanyId,
-          isExportOrder: !!o.isExportOrder,
-          destinationCountry: o.destinationCountry,
-          deliveryLocationUrl: o.deliveryLocationUrl || null,
-          vehicleType: o.vehicleType || null,
-          hasPendingEdit: !!o.hasPendingEdit,
-          pendingEditData: o.pendingEditData || null,
-          recentlyEditedNotice: o.recentlyEditedNotice || null,
-          packagingType: o.packagingType || (o.isExportOrder ? 'PALLET' : 'BULK'),
-          statusHistory: historyMap[o.id] || []
-        };
-
-        if (o.warehouseDiscrepancy) {
-          try {
-            formatted.warehouseDiscrepancy = typeof o.warehouseDiscrepancy === 'string' ? JSON.parse(o.warehouseDiscrepancy) : o.warehouseDiscrepancy;
-          } catch {
-            formatted.warehouseDiscrepancy = o.warehouseDiscrepancy;
-          }
-        }
-
-        if (o.securityDetained) {
-          try {
-            formatted.securityDetained = typeof o.securityDetained === 'string' ? JSON.parse(o.securityDetained) : o.securityDetained;
-          } catch {
-            formatted.securityDetained = o.securityDetained;
-          }
-        }
-
-        if (o.driverName || o.driverPhone || o.licensePlate || o.shippingAgency || o.billOfLadingNumber) {
-          formatted.vehicleDetails = {
-            vehicleType: o.vehicleType,
-            driverName: o.driverName,
-            driverPhone: o.driverPhone,
-            licensePlate: o.licensePlate,
-            shippingAgency: o.shippingAgency,
-            estimatedArrival: o.estimatedArrival,
-            billOfLadingNumber: o.billOfLadingNumber
-          };
-        }
-
-        if (o.warehouseDetails) {
-          try {
-            formatted.warehouseDetails = typeof o.warehouseDetails === 'string' ? JSON.parse(o.warehouseDetails) : o.warehouseDetails;
-          } catch {
-            formatted.warehouseDetails = o.warehouseDetails;
-          }
-        }
-
-        if (o.securityGateDetails) {
-          try {
-            formatted.securityGateDetails = typeof o.securityGateDetails === 'string' ? JSON.parse(o.securityGateDetails) : o.securityGateDetails;
-          } catch {
-            formatted.securityGateDetails = o.securityGateDetails;
-          }
-        }
-
-        return sanitizeOrderForRole(formatted, req.user);
-      }).filter(Boolean);
+      const orders = orderRows
+        .map((o: any) => formatAndSanitizeOrder(o, historyMap[o.id] || [], req.user))
+        .filter(Boolean);
 
       res.json(orders);
     } catch (err: any) {
       console.error("Error in GET /api/orders:", err);
+      return handleServerError(res, err, req.originalUrl || req.url);
+    }
+  });
+
+  app.get("/api/orders/:id", authenticate, async (req, res) => {
+    try {
+      const db = getDbPool();
+      const safeId = validateId(req.params.id, "شناسه سفارش");
+      const [ordRows] = await db.query("SELECT * FROM orders WHERE id = ?", [safeId]) as any[];
+      const check = checkOrderOwnership(ordRows?.[0], req.user);
+      if (!check.allowed) {
+        return sendApiError(res, check.status, check.message);
+      }
+
+      const [hRows] = await db.query(
+        "SELECT * FROM order_history WHERE orderId IN (?) ORDER BY updatedAt ASC",
+        [[safeId]]
+      ) as any[];
+      const historyList = (hRows || []).map((h: any) => ({
+        status: h.status,
+        updatedAt: h.updatedAt,
+        comment: h.comment
+      }));
+
+      const sanitized = formatAndSanitizeOrder(ordRows[0], historyList, req.user);
+      if (!sanitized) {
+        return sendApiError(res, 403, "دسترسی غیرمجاز. شما مجوز مشاهده این سفارش را ندارید.");
+      }
+      res.json(sanitized);
+    } catch (err: any) {
+      console.error("Error in GET /api/orders/:id:", err);
       return handleServerError(res, err, req.originalUrl || req.url);
     }
   });
@@ -2062,9 +2018,10 @@ function compactItemsJson(itemsInput: any): string | null {
         await connection.beginTransaction();
 
         const [rows] = await connection.query("SELECT * FROM orders WHERE id = ?", [safeId]) as any[];
-        if (rows.length === 0) {
+        const check = checkOrderOwnership(rows[0], req.user);
+        if (!check.allowed) {
           await connection.rollback();
-          return sendApiError(res, 404, "سفارش یافت نشد");
+          return sendApiError(res, check.status, check.message);
         }
 
         const order = rows[0];
@@ -2130,7 +2087,7 @@ function compactItemsJson(itemsInput: any): string | null {
     try {
       const db = getDbPool();
       const safeId = validateId(req.params.id, "شناسه سفارش");
-      const [ordRows] = await db.query("SELECT id, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
+      const [ordRows] = await db.query("SELECT id, status, agentCode, shippingCompanyId FROM orders WHERE id = ?", [safeId]) as any[];
       const check = checkOrderOwnership(ordRows[0], req.user);
       if (!check.allowed) {
         return sendApiError(res, check.status, check.message);
@@ -2574,7 +2531,8 @@ function compactItemsJson(itemsInput: any): string | null {
           return sendApiError(res, check.status, check.message);
         }
         const stageCheck = checkOrderStageForMutation(ordRows[0]?.status, req.user, {
-          default: ["APPROVED_BY_SALES", "SENT_TO_FACTORY"]
+          default: ["SENT_TO_FACTORY"],
+          management: ["APPROVED_BY_SALES", "SENT_TO_FACTORY"]
         });
         if (!stageCheck.allowed) {
           await connection.rollback();

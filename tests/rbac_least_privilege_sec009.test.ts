@@ -11,6 +11,7 @@ import {
   sanitizeShippingCompanyForRole,
   sanitizePermanentDriverForRole,
   checkPermanentDriverOwnership,
+  checkOrderOwnership,
   checkOrderStageForMutation
 } from "../server/auth";
 
@@ -194,10 +195,18 @@ describe("SEC-009: Comprehensive RBAC, Least Privilege, Scoping & Anti-Leakage S
       assert.equal(sc2Ownership.status, 403);
     });
 
-    it("enforces fail-closed default for unknown order query roles and workflow stage guards", () => {
+    it("enforces fail-closed default for unknown order query roles, checkOrderOwnership stage guards, and workflow stage guards", () => {
       const unknownOrderQ = buildOrderQueryForUser({ id: "x", username: "u", role: "UNKNOWN_ROLE" });
       assert.equal(unknownOrderQ.filterType, "NONE");
       assert.ok(unknownOrderQ.sql.includes("WHERE 1 = 0"));
+
+      // Operational roles must fail checkOrderOwnership when order status is outside their workflow stage
+      assert.equal(checkOrderOwnership({ status: "PENDING_APPROVAL" }, { id: "6", username: "fac", role: "FACTORY_TRANSPORT" }).allowed, false);
+      assert.equal(checkOrderOwnership({ status: "SENT_TO_FACTORY" }, { id: "6", username: "fac", role: "FACTORY_TRANSPORT" }).allowed, true);
+      assert.equal(checkOrderOwnership({ status: "SENT_TO_FACTORY" }, { id: "8", username: "wh", role: "PRODUCT_WAREHOUSE" }).allowed, false);
+      assert.equal(checkOrderOwnership({ status: "VEHICLE_ASSIGNED" }, { id: "8", username: "wh", role: "PRODUCT_WAREHOUSE" }).allowed, true);
+      assert.equal(checkOrderOwnership({ status: "VEHICLE_ASSIGNED" }, { id: "9", username: "sec", role: "SECURITY_GATE" }).allowed, false);
+      assert.equal(checkOrderOwnership({ status: "WAREHOUSE_LOADED" }, { id: "9", username: "sec", role: "SECURITY_GATE" }).allowed, true);
 
       const stageDeny = checkOrderStageForMutation(
         "PENDING_APPROVAL",
@@ -454,7 +463,7 @@ describe("SEC-009: Comprehensive RBAC, Least Privilege, Scoping & Anti-Leakage S
       });
       assert.equal(whLoad.status, 200);
 
-      // Security Gate now sees the loaded order, WITH buyerName / phoneNumber / notes / payment redacted
+      // Security Gate now sees the loaded order, WITH buyerName / phoneNumber / notes / payment / warehouseNotes redacted
       const secPostRes = await apiRequest("/api/orders", { token: securityToken });
       assert.equal(secPostRes.status, 200);
       const secOrder = secPostRes.data.find((o: any) => o.id === vehicleOrderId);
@@ -464,26 +473,103 @@ describe("SEC-009: Comprehensive RBAC, Least Privilege, Scoping & Anti-Leakage S
       assert.equal(secOrder.notes, undefined);
       assert.equal(secOrder.paymentTrackingCode, undefined);
       assert.equal(secOrder.paymentReceiptUrl, undefined);
+      assert.equal(secOrder.warehouseDetails?.warehouseNotes, undefined);
+
+      // Update payment tracking on vehicleOrderId via Manager and verify statusHistory never leaks tracking code to operational roles
+      const ptRes = await apiRequest(`/api/orders/${vehicleOrderId}/payment-tracking`, {
+        method: "PATCH",
+        token: managerToken,
+        body: { paymentTrackingCode: "TRK-ULTRA-SECRET-7788" }
+      });
+      assert.equal(ptRes.status, 200);
+
+      for (const tok of [factoryToken, sc1Token, warehouseToken, securityToken]) {
+        const listRes = await apiRequest("/api/orders", { token: tok });
+        assert.equal(listRes.status, 200);
+        assert.ok(!JSON.stringify(listRes.data).includes("TRK-ULTRA-SECRET-7788"), "statusHistory must not leak paymentTrackingCode");
+
+        const bootRes = await apiRequest("/api/sync/bootstrap", { token: tok });
+        assert.equal(bootRes.status, 200);
+        assert.ok(!JSON.stringify(bootRes.data).includes("TRK-ULTRA-SECRET-7788"), "bootstrap statusHistory must not leak paymentTrackingCode");
+      }
     });
 
-    it("enforces workflow stage preconditions on order mutation endpoints", async () => {
-      // Warehouse cannot load a PENDING_APPROVAL order
-      const badWhLoad = await apiRequest(`/api/orders/${pendingOrderId}/warehouse-load`, {
+    it("enforces direct GET /api/orders/:id access control, stage scoping, and redaction across all roles", async () => {
+      // FACTORY_TRANSPORT: allowed on factoryOrderId (SENT_TO_FACTORY) with redaction, denied 403 on pendingOrderId (PENDING_APPROVAL)
+      const facOk = await apiRequest(`/api/orders/${factoryOrderId}`, { token: factoryToken });
+      assert.equal(facOk.status, 200);
+      assert.equal(facOk.data.paymentTrackingCode, undefined);
+      assert.ok(!JSON.stringify(facOk.data).includes("920000"));
+      const facDeny = await apiRequest(`/api/orders/${pendingOrderId}?role=SYSTEM_ADMIN`, { token: factoryToken });
+      assert.equal(facDeny.status, 403);
+
+      // PRODUCT_WAREHOUSE: allowed on vehicleOrderId with redaction, denied 403 on pendingOrderId & factoryOrderId
+      const whOk = await apiRequest(`/api/orders/${vehicleOrderId}`, { token: warehouseToken });
+      assert.equal(whOk.status, 200);
+      assert.equal(whOk.data.paymentTrackingCode, undefined);
+      assert.equal(whOk.data.securityGateDetails, undefined);
+      assert.equal((await apiRequest(`/api/orders/${pendingOrderId}`, { token: warehouseToken })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${factoryOrderId}`, { token: warehouseToken })).status, 403);
+
+      // SECURITY_GATE: allowed on vehicleOrderId (after warehouse-load) with redaction, denied 403 on pendingOrderId & factoryOrderId
+      const secOk = await apiRequest(`/api/orders/${vehicleOrderId}`, { token: securityToken });
+      assert.equal(secOk.status, 200);
+      assert.equal(secOk.data.buyerName, undefined);
+      assert.equal(secOk.data.phoneNumber, undefined);
+      assert.equal(secOk.data.notes, undefined);
+      assert.equal(secOk.data.paymentTrackingCode, undefined);
+      assert.equal((await apiRequest(`/api/orders/${pendingOrderId}`, { token: securityToken })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${factoryOrderId}`, { token: securityToken })).status, 403);
+
+      // SHIPPING_COMPANY: SC2 denied 403 on SC1's order; SC1 denied 403 on pendingOrderId
+      assert.equal((await apiRequest(`/api/orders/${vehicleOrderId}?shippingCompanyId=sc-1`, { token: sc2Token })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${pendingOrderId}`, { token: sc1Token })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${vehicleOrderId}`, { token: sc1Token })).status, 200);
+
+      // REPRESENTATIVE: Rep 1 can fetch own order; Sales Manager can fetch any order
+      assert.equal((await apiRequest(`/api/orders/${pendingOrderId}`, { token: rep1Token })).status, 200);
+      assert.equal((await apiRequest(`/api/orders/${pendingOrderId}`, { token: managerToken })).status, 200);
+    });
+
+    it("enforces workflow stage preconditions and role boundaries on order mutation endpoints", async () => {
+      // FACTORY_TRANSPORT: cannot approve commercial orders, cannot warehouse-load, cannot security-clear, and cannot assign/request-transport on PENDING_APPROVAL
+      assert.equal((await apiRequest(`/api/orders/${pendingOrderId}/approve`, { method: "PATCH", token: factoryToken, body: {} })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${vehicleOrderId}/warehouse-load`, { method: "PATCH", token: factoryToken, body: { loadedPalletsCount: 5 } })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${vehicleOrderId}/security-clearance`, { method: "PATCH", token: factoryToken, body: { gatePassNumber: "GP-FAC" } })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${pendingOrderId}/assign-vehicle`, {
+        method: "PATCH",
+        token: factoryToken,
+        body: { vehicleType: "تریلی", driverName: "راننده", driverPhone: "09110001122", licensePlate: "11ب222ایران72" }
+      })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${pendingOrderId}/request-transport`, {
+        method: "PATCH",
+        token: factoryToken,
+        body: { shippingCompanyId: "sc-1", shippingAgency: "باربری" }
+      })).status, 403);
+
+      // PRODUCT_WAREHOUSE: cannot load PENDING_APPROVAL or SENT_TO_FACTORY, cannot report discrepancy on SENT_TO_FACTORY, cannot assign-vehicle or security-clear
+      assert.equal((await apiRequest(`/api/orders/${pendingOrderId}/warehouse-load`, { method: "PATCH", token: warehouseToken, body: { loadedPalletsCount: 5 } })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${factoryOrderId}/warehouse-load`, { method: "PATCH", token: warehouseToken, body: { loadedPalletsCount: 5 } })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${factoryOrderId}/warehouse-discrepancy`, { method: "PATCH", token: warehouseToken, body: { reason: "تست" } })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${factoryOrderId}/assign-vehicle`, {
         method: "PATCH",
         token: warehouseToken,
-        body: { loadedPalletsCount: 5 }
-      });
-      assert.equal(badWhLoad.status, 403);
+        body: { vehicleType: "تریلی", driverName: "راننده", driverPhone: "09110001122", licensePlate: "11ب222ایران72" }
+      })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${vehicleOrderId}/security-clearance`, { method: "PATCH", token: warehouseToken, body: { gatePassNumber: "GP-WH" } })).status, 403);
 
-      // Security gate cannot clear a SENT_TO_FACTORY order
-      const badSecClear = await apiRequest(`/api/orders/${factoryOrderId}/security-clearance`, {
+      // SECURITY_GATE: cannot clear or detain PENDING_APPROVAL / SENT_TO_FACTORY, cannot warehouse-load or assign-vehicle
+      assert.equal((await apiRequest(`/api/orders/${pendingOrderId}/security-clearance`, { method: "PATCH", token: securityToken, body: { gatePassNumber: "GP-BAD" } })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${factoryOrderId}/security-clearance`, { method: "PATCH", token: securityToken, body: { gatePassNumber: "GP-BAD" } })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${factoryOrderId}/security-detain`, { method: "PATCH", token: securityToken, body: { reason: "توقیف غیرمجاز" } })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${factoryOrderId}/warehouse-load`, { method: "PATCH", token: securityToken, body: { loadedPalletsCount: 5 } })).status, 403);
+      assert.equal((await apiRequest(`/api/orders/${factoryOrderId}/assign-vehicle`, {
         method: "PATCH",
         token: securityToken,
-        body: { gatePassNumber: "GP-BAD" }
-      });
-      assert.equal(badSecClear.status, 403);
+        body: { vehicleType: "تریلی", driverName: "راننده", driverPhone: "09110001122", licensePlate: "11ب222ایران72" }
+      })).status, 403);
 
-      // Shipping company cannot assign vehicle on an order not assigned to it or not in stage
+      // SHIPPING_COMPANY: cannot assign vehicle on an order not assigned to it or not in stage
       const badScAssign = await apiRequest(`/api/orders/${pendingOrderId}/assign-vehicle`, {
         method: "PATCH",
         token: sc1Token,

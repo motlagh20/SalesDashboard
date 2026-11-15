@@ -173,12 +173,19 @@ describe("Cross-Representative & Cross-Shipping-Company Order Data Isolation Tes
       const ownCheck = checkOrderOwnership(ownOrder, rep1User);
       assert.equal(ownCheck.allowed, true);
 
-      // Shipping Company 1 cannot access Shipping Company 2's order
+      // Shipping Company 1 cannot access Shipping Company 2's order or out-of-stage order
       const sc1User = { id: "usr-7", username: "sc1", role: "SHIPPING_COMPANY", shippingCompanyId: "sc-1" };
-      const sc2Order = { agentCode: "AG-9081", shippingCompanyId: "sc-2" };
+      const sc2Order = { agentCode: "AG-9081", shippingCompanyId: "sc-2", status: "SENT_TO_FACTORY" };
       const scCheck = checkOrderOwnership(sc2Order, sc1User);
       assert.equal(scCheck.allowed, false);
       assert.equal(scCheck.status, 403);
+      assert.equal(checkOrderOwnership({ agentCode: "AG-9081", shippingCompanyId: "sc-1", status: "PENDING_APPROVAL" }, sc1User).allowed, false);
+      assert.equal(checkOrderOwnership({ agentCode: "AG-9081", shippingCompanyId: "sc-1", status: "SENT_TO_FACTORY" }, sc1User).allowed, true);
+
+      // Operational roles reject orders outside their workflow stage
+      assert.equal(checkOrderOwnership({ status: "PENDING_APPROVAL" }, { id: "usr-6", username: "factory", role: "FACTORY_TRANSPORT" }).allowed, false);
+      assert.equal(checkOrderOwnership({ status: "SENT_TO_FACTORY" }, { id: "usr-8", username: "wh", role: "PRODUCT_WAREHOUSE" }).allowed, false);
+      assert.equal(checkOrderOwnership({ status: "VEHICLE_ASSIGNED" }, { id: "usr-9", username: "sec", role: "SECURITY_GATE" }).allowed, false);
 
       // Admin can access all orders
       const adminUser = { id: "usr-0", username: "admin", role: "SYSTEM_ADMIN" };

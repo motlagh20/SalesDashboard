@@ -96,14 +96,20 @@ describe("Order Mutation Broken Object-Level Authorization (BOLA/IDOR) Security 
       assert.equal(checkOrderOwnership(unassignedOrder, rep).status, 403);
     });
 
-    it("strictly isolates SHIPPING_COMPANY by shippingCompanyId (case-insensitive and trimmed)", () => {
+    it("strictly isolates SHIPPING_COMPANY by shippingCompanyId and operational stages", () => {
       const scUser = { id: "usr-sc", username: "sc1", role: "SHIPPING_COMPANY", shippingCompanyId: "sc-1" };
-      const ownOrder = { agentCode: "AG-100", shippingCompanyId: "SC-1 " };
-      const foreignOrder = { agentCode: "AG-100", shippingCompanyId: "sc-2" };
-      const unassignedOrder = { agentCode: "AG-100", shippingCompanyId: null };
+      const ownOrder = { agentCode: "AG-100", shippingCompanyId: "SC-1 ", status: "SENT_TO_FACTORY" };
+      const outOfStageOrder = { agentCode: "AG-100", shippingCompanyId: "sc-1", status: "PENDING_APPROVAL" };
+      const foreignOrder = { agentCode: "AG-100", shippingCompanyId: "sc-2", status: "SENT_TO_FACTORY" };
+      const unassignedOrder = { agentCode: "AG-100", shippingCompanyId: null, status: "SENT_TO_FACTORY" };
 
-      // Own order -> allowed
+      // Own order in operational stage -> allowed
       assert.equal(checkOrderOwnership(ownOrder, scUser).allowed, true);
+
+      // Own order outside operational stage -> forbidden 403
+      const stageCheck = checkOrderOwnership(outOfStageOrder, scUser);
+      assert.equal(stageCheck.allowed, false);
+      assert.equal(stageCheck.status, 403);
 
       // Foreign order -> forbidden 403
       const foreignCheck = checkOrderOwnership(foreignOrder, scUser);
@@ -116,13 +122,26 @@ describe("Order Mutation Broken Object-Level Authorization (BOLA/IDOR) Security 
       assert.equal(checkOrderOwnership(unassignedOrder, scUser).status, 403);
     });
 
-    it("allows plant operational roles (FACTORY_TRANSPORT, PRODUCT_WAREHOUSE, SECURITY_GATE) for operational tasks", () => {
-      const order = { agentCode: "AG-100", shippingCompanyId: "sc-1" };
-      for (const role of ["FACTORY_TRANSPORT", "PRODUCT_WAREHOUSE", "SECURITY_GATE"]) {
-        const opUser = { id: `usr-${role}`, username: `op_${role}`, role };
-        const check = checkOrderOwnership(order, opUser);
-        assert.equal(check.allowed, true);
-        assert.equal(check.status, 200);
+    it("enforces workflow-stage scoping for plant operational roles (FACTORY_TRANSPORT, PRODUCT_WAREHOUSE, SECURITY_GATE) in checkOrderOwnership", () => {
+      const allowedCases: Array<{ role: string; allowedStatus: string; deniedStatus: string }> = [
+        { role: "FACTORY_TRANSPORT", allowedStatus: "SENT_TO_FACTORY", deniedStatus: "PENDING_APPROVAL" },
+        { role: "PRODUCT_WAREHOUSE", allowedStatus: "VEHICLE_ASSIGNED", deniedStatus: "SENT_TO_FACTORY" },
+        { role: "SECURITY_GATE", allowedStatus: "WAREHOUSE_LOADED", deniedStatus: "VEHICLE_ASSIGNED" }
+      ];
+
+      for (const tc of allowedCases) {
+        const opUser = { id: `usr-${tc.role}`, username: `op_${tc.role}`, role: tc.role };
+        const okCheck = checkOrderOwnership({ agentCode: "AG-100", shippingCompanyId: "sc-1", status: tc.allowedStatus }, opUser);
+        assert.equal(okCheck.allowed, true, `${tc.role} should be allowed at ${tc.allowedStatus}`);
+        assert.equal(okCheck.status, 200);
+
+        const denyCheck = checkOrderOwnership({ agentCode: "AG-100", shippingCompanyId: "sc-1", status: tc.deniedStatus }, opUser);
+        assert.equal(denyCheck.allowed, false, `${tc.role} MUST be denied at ${tc.deniedStatus}`);
+        assert.equal(denyCheck.status, 403);
+
+        const missingStatusCheck = checkOrderOwnership({ agentCode: "AG-100", shippingCompanyId: "sc-1" }, opUser);
+        assert.equal(missingStatusCheck.allowed, false, `${tc.role} MUST fail-closed when status is missing`);
+        assert.equal(missingStatusCheck.status, 403);
       }
     });
   });

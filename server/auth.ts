@@ -856,27 +856,76 @@ export function buildShippingCompanyQueryForUser(user?: Express.Request['user'])
 }
 
 /**
- * Strips unit pricing (`p` / `pricePerUnit`) from compact or expanded itemsJson
+ * Strips unit pricing (`p` / `pricePerUnit` / `price` / `unitPrice` / `totalPrice`)
+ * from compact or expanded itemsJson (string, array, or object)
  * so non-commercial operational roles do not receive financial pricing details.
  */
-export function stripPricesFromItemsJson(itemsJson: any): string | null {
-  if (!itemsJson || typeof itemsJson !== "string") return itemsJson ?? null;
+export function stripPricesFromItemsJson(itemsJson: any): any {
+  if (itemsJson === null || itemsJson === undefined || itemsJson === "") return null;
+
+  const stripItem = (item: any) => {
+    if (!item || typeof item !== "object") return item;
+    const copy: any = { ...item };
+    delete copy.p;
+    delete copy.pricePerUnit;
+    delete copy.price;
+    delete copy.unitPrice;
+    delete copy.totalPrice;
+    return copy;
+  };
+
+  if (Array.isArray(itemsJson)) {
+    return JSON.stringify(itemsJson.map(stripItem));
+  }
+  if (typeof itemsJson === "object") {
+    return JSON.stringify(stripItem(itemsJson));
+  }
+  if (typeof itemsJson !== "string") return null;
+
   const trimmed = itemsJson.trim();
   if (!trimmed) return null;
   try {
     const parsed = JSON.parse(trimmed);
-    if (!Array.isArray(parsed)) return itemsJson;
-    const stripped = parsed.map((item: any) => {
-      if (!item || typeof item !== "object") return item;
-      const copy: any = { ...item };
-      delete copy.p;
-      delete copy.pricePerUnit;
-      return copy;
-    });
-    return JSON.stringify(stripped);
+    if (Array.isArray(parsed)) {
+      return JSON.stringify(parsed.map(stripItem));
+    }
+    if (parsed && typeof parsed === "object") {
+      return JSON.stringify(stripItem(parsed));
+    }
+    return itemsJson;
   } catch {
     return null;
   }
+}
+
+/**
+ * Redacts sensitive commercial/payment/PII comments from statusHistory for operational roles.
+ */
+export function sanitizeStatusHistoryForRole(history: any, role: string): any[] {
+  if (!Array.isArray(history)) return [];
+  if (role === "SYSTEM_ADMIN" || role === "SALES_MANAGER" || role === "REPRESENTATIVE") {
+    return history;
+  }
+  return history.map((entry: any) => {
+    if (!entry || typeof entry !== "object") return entry;
+    const comment = typeof entry.comment === "string" ? entry.comment : "";
+    let cleanComment = comment;
+    if (
+      comment.includes("کد رهگیری پرداخت") ||
+      comment.includes("فیش واریزی") ||
+      comment.includes("مستندات پرداخت")
+    ) {
+      cleanComment = "بروزرسانی مستندات مالی سفارش";
+    }
+    if (role === "SECURITY_GATE" && (comment.includes("خریدار") || comment.includes("تماس"))) {
+      cleanComment = "بروزرسانی مشخصات تجاری سفارش";
+    }
+    return {
+      status: entry.status,
+      updatedAt: entry.updatedAt,
+      comment: cleanComment
+    };
+  });
 }
 
 /**
@@ -906,8 +955,11 @@ export function sanitizeOrderForRole(order: any, user?: Express.Request['user'])
     delete copy.rejectionReason;
     delete copy.warehouseDetails;
     delete copy.securityGateDetails;
-    if (copy.itemsJson) {
+    if (copy.itemsJson !== undefined && copy.itemsJson !== null) {
       copy.itemsJson = stripPricesFromItemsJson(copy.itemsJson);
+    }
+    if (Array.isArray(copy.statusHistory)) {
+      copy.statusHistory = sanitizeStatusHistoryForRole(copy.statusHistory, role);
     }
     return copy;
   }
@@ -920,8 +972,12 @@ export function sanitizeOrderForRole(order: any, user?: Express.Request['user'])
     delete copy.pendingEditData;
     delete copy.rejectionReason;
     delete copy.deliveryLocationUrl;
-    if (copy.itemsJson) {
+    delete copy.securityGateDetails;
+    if (copy.itemsJson !== undefined && copy.itemsJson !== null) {
       copy.itemsJson = stripPricesFromItemsJson(copy.itemsJson);
+    }
+    if (Array.isArray(copy.statusHistory)) {
+      copy.statusHistory = sanitizeStatusHistoryForRole(copy.statusHistory, role);
     }
     return copy;
   }
@@ -937,8 +993,25 @@ export function sanitizeOrderForRole(order: any, user?: Express.Request['user'])
     delete copy.notes;
     delete copy.buyerName;
     delete copy.phoneNumber;
-    if (copy.itemsJson) {
+    if (copy.warehouseDetails && typeof copy.warehouseDetails === "object") {
+      const wh = copy.warehouseDetails;
+      copy.warehouseDetails = {
+        exitPermitNumber: wh.exitPermitNumber ?? null,
+        loadedPalletsCount: wh.loadedPalletsCount ?? 0,
+        actualQuantity: wh.actualQuantity ?? 0,
+        packagingType: wh.packagingType ?? null,
+        weighbridgeNet: wh.weighbridgeNet ?? 0,
+        warehouseKeeperName: wh.warehouseKeeperName ?? null,
+        loadedAt: wh.loadedAt ?? null,
+        productionBatch: wh.productionBatch ?? null,
+        packageQualityConfirmed: Boolean(wh.packageQualityConfirmed)
+      };
+    }
+    if (copy.itemsJson !== undefined && copy.itemsJson !== null) {
       copy.itemsJson = stripPricesFromItemsJson(copy.itemsJson);
+    }
+    if (Array.isArray(copy.statusHistory)) {
+      copy.statusHistory = sanitizeStatusHistoryForRole(copy.statusHistory, role);
     }
     return copy;
   }
@@ -1152,10 +1225,11 @@ export function checkOrderStageForMutation(
 
 /**
  * Validates whether the authenticated user has permission to access or modify a specific order.
- * - SYSTEM_ADMIN and SALES_MANAGER have full permissions.
- * - Plant/operational roles (FACTORY_TRANSPORT, PRODUCT_WAREHOUSE, SECURITY_GATE) pass ownership and are constrained by workflow stage guards.
- * - REPRESENTATIVE is strictly restricted to orders matching their authorized agentCode.
- * - SHIPPING_COMPANY is strictly restricted to orders assigned to their authorized shippingCompanyId.
+ * Enforces BOTH object ownership AND workflow stage restrictions per role:
+ * - SYSTEM_ADMIN and SALES_MANAGER: full oversight across all orders and stages.
+ * - REPRESENTATIVE: strictly restricted to orders matching their authorized agentCode.
+ * - SHIPPING_COMPANY: strictly restricted to orders matching their authorized shippingCompanyId AND operational shipping stages.
+ * - FACTORY_TRANSPORT / PRODUCT_WAREHOUSE / SECURITY_GATE: strictly restricted to orders in workflow stages allowed for their role.
  */
 export function checkOrderOwnership(
   order: { agentCode?: string | null; shippingCompanyId?: string | null; status?: string | null } | undefined | null,
@@ -1190,7 +1264,9 @@ export function checkOrderOwnership(
     return { allowed: true, status: 200, message: "مجاز" };
   }
 
-  // Shipping companies are strictly restricted to orders matching their authorized shippingCompanyId
+  const orderStatus = order.status ? String(order.status).trim().toUpperCase() : "";
+
+  // Shipping companies are strictly restricted to orders matching their authorized shippingCompanyId AND operational stages
   if (role === "SHIPPING_COMPANY") {
     const userScId = user.shippingCompanyId ? String(user.shippingCompanyId).trim().toLowerCase() : null;
     const orderScId = order.shippingCompanyId ? String(order.shippingCompanyId).trim().toLowerCase() : null;
@@ -1201,11 +1277,27 @@ export function checkOrderOwnership(
         message: "دسترسی غیرمجاز. مجوز دسترسی یا عملیات روی این سفارش برای حساب شما تایید نشد."
       };
     }
+    const allowedStages = ORDER_VISIBLE_STATUSES_BY_ROLE.SHIPPING_COMPANY;
+    if (!orderStatus || !allowedStages.includes(orderStatus)) {
+      return {
+        allowed: false,
+        status: 403,
+        message: "دسترسی غیرمجاز. این سفارش در مرحله کاری مجاز برای شرکت حمل‌ونقل قرار ندارد."
+      };
+    }
     return { allowed: true, status: 200, message: "مجاز" };
   }
 
-  // Operational plant roles (FACTORY_TRANSPORT, PRODUCT_WAREHOUSE, SECURITY_GATE)
+  // Operational plant roles (FACTORY_TRANSPORT, PRODUCT_WAREHOUSE, SECURITY_GATE) are strictly stage-scoped
   if (role === "FACTORY_TRANSPORT" || role === "PRODUCT_WAREHOUSE" || role === "SECURITY_GATE") {
+    const allowedStages = ORDER_VISIBLE_STATUSES_BY_ROLE[role];
+    if (!orderStatus || !allowedStages.includes(orderStatus)) {
+      return {
+        allowed: false,
+        status: 403,
+        message: "دسترسی غیرمجاز. این سفارش در مرحله کاری مجاز برای نقش شما قرار ندارد."
+      };
+    }
     return { allowed: true, status: 200, message: "مجاز" };
   }
 
