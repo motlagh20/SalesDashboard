@@ -1,0 +1,48 @@
+SEC-009 TRANSFER PACKAGE MANIFEST
+Repository: https://github.com/motlagh20/SalesDashboard
+Target Branch: google-ai-studio-updated
+Base Commit: 0faa22aef7281c31b8c06fb910ff79dd7bd45972
+Generated At (UTC): 2026-11-15T13:58:25Z
+Archive File: sec009_transfer_package.zip
+Archive Size (bytes): 97923
+Archive SHA-256: a430a7b99c518a7b93598aaabbe270707b2cbe1c2432b2a1a50cc3a7f63fff1a
+
+FILES (7):
+1. server/auth.ts
+   Size (bytes): 46331
+   Compressed Size (bytes): 11281
+   SHA-256: 31e1abfc712e2b92a3da13abd77b77ecec1e79e2d39f1baea1fb50987b5d073e
+
+2. server.ts
+   Size (bytes): 265969
+   Compressed Size (bytes): 42885
+   SHA-256: a4f7992344bfe141582c1212f0d139c76be6ba0ae796301bd4af483a6284e96f
+
+3. server/database.ts
+   Size (bytes): 112484
+   Compressed Size (bytes): 24158
+   SHA-256: 40b4ec68eabb26bc9a8d21cddc4b8a27b08272d129f04fde80aeafa01fd7f33f
+
+4. package.json
+   Size (bytes): 2590
+   Compressed Size (bytes): 931
+   SHA-256: 63c958cd3dffe716a08548bbe0f6abaf33a03d111b5d7beb16eebed04606f52f
+
+5. tests/order_data_isolation.test.ts
+   Size (bytes): 28478
+   Compressed Size (bytes): 5699
+   SHA-256: fa7403e155c6eaef64520cdc7dcdf0a3fa5d67c3ade8e2b36f23833f93c4983a
+
+6. tests/order_mutation_bola_security.test.ts
+   Size (bytes): 27750
+   Compressed Size (bytes): 5091
+   SHA-256: 35a4f93600286c95d426439cb1ecc1806b7f1aafca40dfff823a0877ef57fba2
+
+7. tests/rbac_least_privilege_sec009.test.ts
+   Size (bytes): 33591
+   Compressed Size (bytes): 6984
+   SHA-256: 1f101a9b2a283be39286261a9059f9829f130e215e7a9da06879be86fa4610c6
+
+EXCLUDED FROM ARCHIVE:
+- .env / secrets / encryption keys / connection strings
+- server/salesdashboard.json / runtime data / logs

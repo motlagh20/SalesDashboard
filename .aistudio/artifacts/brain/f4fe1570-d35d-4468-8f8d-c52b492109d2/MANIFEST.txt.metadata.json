@@ -1,0 +1,5 @@
+{
+  "summary":  "SEC-009 transfer package MANIFEST listing exact file paths, byte sizes, and SHA-256 checksums for all 7 packaged files and the ZIP archive relative to base commit 0faa22aef7281c31b8c06fb910ff79dd7bd45972.",
+  "updatedAt":  "2026-11-15T13:58:47.668021695Z",
+  "userFacing":  true
+}
