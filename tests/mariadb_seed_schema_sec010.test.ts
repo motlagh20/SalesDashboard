@@ -12,6 +12,8 @@ import {
 } from "../server/database";
 
 const ALLOWED_ISOLATED_TEST_DB = "salesdashboard_sec010_test";
+const ALLOWED_TEST_MARIADB_HOSTS = new Set(["127.0.0.1", "localhost"]);
+const ALLOWED_TEST_DB_PRIVILEGES = new Set(["SELECT", "INSERT", "UPDATE", "CREATE", "ALTER", "INDEX"]);
 const FORBIDDEN_PRIVILEGED_USERS = new Set(["root", "mysql.sys", "mysql.session", "mariadb.sys", ""]);
 const WRITE_SQL_PATTERN = /^\s*(?:CREATE|ALTER|INSERT|UPDATE|DELETE|REPLACE|DROP|TRUNCATE|RENAME|GRANT|REVOKE)\b/i;
 
@@ -34,12 +36,18 @@ export function assertSafeRealMariaDbConfig(cfg: RealMariaDbConfig): {
   password: string;
   database: typeof ALLOWED_ISOLATED_TEST_DB;
 } {
-  const host = (cfg.host || "").trim();
-  const database = (cfg.database || "").trim();
-  const user = (cfg.user || "").trim();
+  const rawHost = typeof cfg.host === "string" ? cfg.host.trim() : "";
+  const normalizedHost = rawHost.toLowerCase();
+  const database = typeof cfg.database === "string" ? cfg.database.trim() : "";
+  const user = typeof cfg.user === "string" ? cfg.user.trim() : "";
 
-  if (!host) {
+  if (!rawHost) {
     throw new Error("Unsafe MariaDB test config: SEC010_TEST_MARIADB_HOST is required.");
+  }
+  if (!ALLOWED_TEST_MARIADB_HOSTS.has(normalizedHost)) {
+    throw new Error(
+      `Unsafe MariaDB test host '${rawHost}': only explicit allowlisted loopback hosts (127.0.0.1, localhost) are permitted (regardless of NODE_ENV/APP_ENV).`
+    );
   }
   if (database !== ALLOWED_ISOLATED_TEST_DB) {
     throw new Error(
@@ -53,12 +61,23 @@ export function assertSafeRealMariaDbConfig(cfg: RealMariaDbConfig): {
   }
 
   return {
-    host,
+    host: normalizedHost,
     port: Number(cfg.port) || 3306,
     user,
     password: cfg.password || "",
     database: ALLOWED_ISOLATED_TEST_DB
   };
+}
+
+/**
+ * Validates config BEFORE creating any MariaDB pool so rejected host/db/user never opens a socket or executes SQL.
+ */
+export function createValidatedIsolatedMariaDbPool<TPool>(
+  rawCfg: RealMariaDbConfig,
+  createPoolFn: (safeCfg: ReturnType<typeof assertSafeRealMariaDbConfig>) => TPool
+): TPool {
+  const safeCfg = assertSafeRealMariaDbConfig(rawCfg);
+  return createPoolFn(safeCfg);
 }
 
 function extractGrantUserPrefix(accountStr: string): string {
@@ -68,46 +87,108 @@ function extractGrantUserPrefix(accountStr: string): string {
   return userPart.replace(/^['"`]|['"`]$/g, "").trim().toLowerCase();
 }
 
-function validateGrantStatements(grantLines: string[]): void {
-  if (grantLines.length === 0) {
+function normalizeScopeIdentifier(rawScope: string): string {
+  const parts = rawScope.split(".");
+  if (parts.length !== 2) return "";
+  const dbPart = parts[0].trim().replace(/^`|`$/g, "");
+  const tblPart = parts[1].trim().replace(/^`|`$/g, "");
+  return `${dbPart}.${tblPart}`;
+}
+
+export function validateGrantStatements(grantLines: string[]): void {
+  if (!Array.isArray(grantLines) || grantLines.length === 0) {
     throw new Error("Unsafe MariaDB test user: SHOW GRANTS FOR CURRENT_USER() returned no grants.");
   }
 
   let hasIsolatedDbGrant = false;
   for (const rawGrant of grantLines) {
+    if (typeof rawGrant !== "string") {
+      throw new Error("Unparseable SHOW GRANTS entry (non-string value): failing closed.");
+    }
     const grant = rawGrant.trim();
-    if (!grant) continue;
+    if (!grant) {
+      throw new Error("Unparseable empty SHOW GRANTS line: failing closed.");
+    }
 
     if (/\bWITH\s+GRANT\s+OPTION\b/i.test(grant)) {
       throw new Error(`Unsafe MariaDB test user grant (WITH GRANT OPTION forbidden): ${grant}`);
     }
 
-    // Disallow any non-USAGE global privilege (*.*)
-    if (/\bON\s+\*\.\*/i.test(grant)) {
-      if (!/^GRANT\s+USAGE\s+ON\s+\*\.\*/i.test(grant)) {
-        throw new Error(`Unsafe MariaDB test user has global privileges (*.*): ${grant}`);
+    const grantMatch = grant.match(
+      /^GRANT\s+(.+?)\s+ON\s+((?:`[^`]+`|[A-Za-z0-9_*%-]+)\.(?:`[^`]+`|[A-Za-z0-9_*%-]+))\s+TO\s+(?:`[^`]+`|'[^']+'|[A-Za-z0-9_.-]+)@(?:`[^`]+`|'[^']+'|[A-Za-z0-9_.:%/-]+)(?:\s+IDENTIFIED\s+BY\s+PASSWORD\s+'[^']*')?(?:\s+WITH\s+(.+?))?\s*;?$/i
+    );
+    if (!grantMatch) {
+      throw new Error(`Unparseable or unsupported SHOW GRANTS output (fail-closed): ${grant}`);
+    }
+
+    const rawPrivileges = grantMatch[1];
+    const rawScope = grantMatch[2];
+    const withClause = grantMatch[3];
+
+    if (withClause) {
+      const limitTokens = withClause
+        .trim()
+        .replace(/\b(?:MAX_QUERIES_PER_HOUR|MAX_UPDATES_PER_HOUR|MAX_CONNECTIONS_PER_HOUR|MAX_USER_CONNECTIONS)\s+\d+\b/gi, "")
+        .trim();
+      if (limitTokens.length > 0) {
+        throw new Error(`Unsupported or privileged WITH clause in SHOW GRANTS (fail-closed): ${grant}`);
+      }
+    }
+
+    const privileges = rawPrivileges
+      .split(",")
+      .map((p) => p.trim().replace(/\s+/g, " ").toUpperCase())
+      .filter(Boolean);
+
+    if (privileges.length === 0) {
+      throw new Error(`Unparseable empty privilege list in SHOW GRANTS (fail-closed): ${grant}`);
+    }
+
+    // Disallow column-scoped or parameterized privilege syntax like SELECT (id)
+    for (const priv of privileges) {
+      if (!/^[A-Z][A-Z0-9 ]*$/.test(priv)) {
+        throw new Error(`Unparseable privilege syntax '${priv}' in SHOW GRANTS (fail-closed): ${grant}`);
+      }
+    }
+
+    const scope = normalizeScopeIdentifier(rawScope);
+    if (!scope) {
+      throw new Error(`Unparseable grant scope '${rawScope}' in SHOW GRANTS (fail-closed): ${grant}`);
+    }
+
+    if (scope === "*.*") {
+      if (privileges.length !== 1 || privileges[0] !== "USAGE") {
+        throw new Error(`Unsafe MariaDB test user has global privileges (*.*) beyond USAGE: ${grant}`);
       }
       continue;
     }
 
-    // Extract target database scope: ON `db`.* or ON db.* or ON `db`.`table`
-    const onMatch = grant.match(/\bON\s+(`?)([A-Za-z0-9_.*%-]+)\1\s*\./i);
-    if (!onMatch) {
-      throw new Error(`Unrecognized or overly broad MariaDB grant scope: ${grant}`);
-    }
-
-    const grantedDb = onMatch[2];
+    const [grantedDb, grantedTable] = scope.split(".");
     if (grantedDb !== ALLOWED_ISOLATED_TEST_DB) {
       throw new Error(
         `Unsafe MariaDB test user has access to non-test database '${grantedDb}' (only '${ALLOWED_ISOLATED_TEST_DB}' allowed): ${grant}`
       );
     }
+    if (grantedTable !== "*") {
+      throw new Error(
+        `Unexpected table-level or ambiguous grant scope '${scope}' in SHOW GRANTS (fail-closed): ${grant}`
+      );
+    }
+
+    for (const priv of privileges) {
+      if (!ALLOWED_TEST_DB_PRIVILEGES.has(priv)) {
+        throw new Error(
+          `Unsafe MariaDB test user privilege '${priv}' on '${ALLOWED_ISOLATED_TEST_DB}.*' is forbidden (allowed minimum: SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX): ${grant}`
+        );
+      }
+    }
+
     hasIsolatedDbGrant = true;
   }
 
   if (!hasIsolatedDbGrant) {
     throw new Error(
-      `Unsafe MariaDB test user: no explicit privilege scoped strictly to '${ALLOWED_ISOLATED_TEST_DB}.*' found.`
+      `Unsafe MariaDB test user: no explicit minimal privilege scoped strictly to '${ALLOWED_ISOLATED_TEST_DB}.*' found.`
     );
   }
 }
@@ -863,7 +944,10 @@ describe("SEC-010 & SEC-010-R1: Database Seed, Recovery & MariaDB Safety Guards"
       const spyWrongDb = createSpySafeConnection({
         dbName: "salesdashboard",
         currentUser: "'sec010_tester'@'localhost'",
-        grants: ["GRANT USAGE ON *.* TO `sec010_tester`@`localhost`", "GRANT ALL PRIVILEGES ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`localhost`"],
+        grants: [
+          "GRANT USAGE ON *.* TO `sec010_tester`@`localhost`",
+          "GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`localhost`"
+        ],
         existingTables: []
       });
       await assert.rejects(() => assertSafeRealMariaDbConnection(spyWrongDb.connection), /SELECT DATABASE\(\) returned 'salesdashboard'/i);
@@ -873,7 +957,10 @@ describe("SEC-010 & SEC-010-R1: Database Seed, Recovery & MariaDB Safety Guards"
       const spyNonEmptyDb = createSpySafeConnection({
         dbName: "salesdashboard_sec010_test",
         currentUser: "'sec010_tester'@'localhost'",
-        grants: ["GRANT USAGE ON *.* TO `sec010_tester`@`localhost`", "GRANT ALL PRIVILEGES ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`localhost`"],
+        grants: [
+          "GRANT USAGE ON *.* TO `sec010_tester`@`localhost`",
+          "GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`localhost`"
+        ],
         existingTables: ["products", "app_users"]
       });
       await assert.rejects(() => assertSafeRealMariaDbConnection(spyNonEmptyDb.connection), /database is not empty/i);
@@ -896,7 +983,7 @@ describe("SEC-010 & SEC-010-R1: Database Seed, Recovery & MariaDB Safety Guards"
         grants: [
           "GRANT USAGE ON *.* TO `sec010_tester`@`localhost`",
           "GRANT SELECT, INSERT ON `salesdashboard`.* TO `sec010_tester`@`localhost`",
-          "GRANT ALL PRIVILEGES ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`localhost`"
+          "GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`localhost`"
         ],
         existingTables: []
       });
@@ -927,35 +1014,265 @@ describe("SEC-010 & SEC-010-R1: Database Seed, Recovery & MariaDB Safety Guards"
     }
   });
 
+  it("9. SEC-010-R2 Host Allowlist: accepts 127.0.0.1 and localhost independent of NODE_ENV/APP_ENV", () => {
+    for (const env of ["development", "test", "production"]) {
+      process.env.NODE_ENV = env;
+      process.env.APP_ENV = env;
+
+      let poolCalls = 0;
+      const safe127 = createValidatedIsolatedMariaDbPool(
+        { host: "127.0.0.1", port: 3306, user: "sec010_tester", password: "pw", database: "salesdashboard_sec010_test" },
+        (cfg) => {
+          poolCalls++;
+          return cfg;
+        }
+      );
+      assert.equal(safe127.host, "127.0.0.1");
+      assert.equal(poolCalls, 1);
+
+      const safeLocalhost = createValidatedIsolatedMariaDbPool(
+        { host: "LOCALHOST", port: 3306, user: "sec010_tester", password: "pw", database: "salesdashboard_sec010_test" },
+        (cfg) => {
+          poolCalls++;
+          return cfg;
+        }
+      );
+      assert.equal(safeLocalhost.host, "localhost");
+      assert.equal(poolCalls, 2);
+    }
+  });
+
+  it("10. SEC-010-R2 Host Rejection: rejects unauthorized hosts BEFORE creating a pool or running SQL", () => {
+    const unauthorizedHosts = ["192.168.1.50", "0.0.0.0", "127.0.0.2", "mariadb.remote.example", "127.0.0.1:3306", "localhost/extra", "::1"];
+    for (const badHost of unauthorizedHosts) {
+      let poolCreated = false;
+      assert.throws(
+        () =>
+          createValidatedIsolatedMariaDbPool(
+            { host: badHost, port: 3306, user: "sec010_tester", password: "pw", database: "salesdashboard_sec010_test" },
+            () => {
+              poolCreated = true;
+              return {};
+            }
+          ),
+        /only explicit allowlisted loopback hosts/i
+      );
+      assert.equal(poolCreated, false, `Pool must NOT be created for unauthorized host '${badHost}'`);
+    }
+  });
+
+  it("11. SEC-010-R2 Production Host Rejection: rejects production MariaDB server hostnames/IPs BEFORE creating a pool or running SQL", () => {
+    const prodLikeHosts = ["10.10.0.25", "prod-db.salesdashboard.local", "db.tabarestan.ir", "172.16.5.10"];
+    for (const prodHost of prodLikeHosts) {
+      let poolCreated = false;
+      let queriesRun = 0;
+      assert.throws(
+        () =>
+          createValidatedIsolatedMariaDbPool(
+            { host: prodHost, port: 3306, user: "sec010_tester", password: "pw", database: "salesdashboard_sec010_test" },
+            () => {
+              poolCreated = true;
+              return { query: () => { queriesRun++; } };
+            }
+          ),
+        /only explicit allowlisted loopback hosts/i
+      );
+      assert.equal(poolCreated, false, `Must never open a connection to production-like host '${prodHost}'`);
+      assert.equal(queriesRun, 0);
+    }
+  });
+
+  it("12. SEC-010-R2 Least Privilege: rejects ALL PRIVILEGES even on salesdashboard_sec010_test with zero writes", async () => {
+    const spyAllPrivs = createSpySafeConnection({
+      dbName: "salesdashboard_sec010_test",
+      currentUser: "'sec010_tester'@'127.0.0.1'",
+      grants: [
+        "GRANT USAGE ON *.* TO `sec010_tester`@`127.0.0.1`",
+        "GRANT ALL PRIVILEGES ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`127.0.0.1`"
+      ],
+      existingTables: []
+    });
+    await assert.rejects(() => assertSafeRealMariaDbConnection(spyAllPrivs.connection), /ALL PRIVILEGES.*forbidden/i);
+    assert.equal(spyAllPrivs.writeQueries.length, 0);
+
+    const spyAllShort = createSpySafeConnection({
+      dbName: "salesdashboard_sec010_test",
+      currentUser: "'sec010_tester'@'127.0.0.1'",
+      grants: [
+        "GRANT USAGE ON *.* TO `sec010_tester`@`127.0.0.1`",
+        "GRANT ALL ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`127.0.0.1`"
+      ],
+      existingTables: []
+    });
+    await assert.rejects(() => assertSafeRealMariaDbConnection(spyAllShort.connection), /'ALL'.*forbidden/i);
+    assert.equal(spyAllShort.writeQueries.length, 0);
+  });
+
+  it("13. SEC-010-R2 Least Privilege: accepts minimal SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX grants on salesdashboard_sec010_test with zero writes", async () => {
+    const spyMinimal = createSpySafeConnection({
+      dbName: "salesdashboard_sec010_test",
+      currentUser: "'sec010_tester'@'127.0.0.1'",
+      grants: [
+        "GRANT USAGE ON *.* TO `sec010_tester`@`127.0.0.1` IDENTIFIED BY PASSWORD '*2470C0C06DEE42FD1618BB99005ADCA2EC9D1E19'",
+        "GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`127.0.0.1`"
+      ],
+      existingTables: []
+    });
+    await assertSafeRealMariaDbConnection(spyMinimal.connection);
+    assert.equal(spyMinimal.writeQueries.length, 0);
+  });
+
+  it("14. SEC-010-R2 Least Privilege: rejects DROP, DELETE, SUPER, FILE, PROCESS privileges with zero writes", async () => {
+    for (const forbiddenPriv of ["DROP", "DELETE", "REFERENCES", "TRIGGER", "CREATE VIEW", "EVENT"]) {
+      const spyForbidden = createSpySafeConnection({
+        dbName: "salesdashboard_sec010_test",
+        currentUser: "'sec010_tester'@'127.0.0.1'",
+        grants: [
+          "GRANT USAGE ON *.* TO `sec010_tester`@`127.0.0.1`",
+          `GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, ${forbiddenPriv} ON \`salesdashboard_sec010_test\`.* TO \`sec010_tester\`@\`127.0.0.1\``
+        ],
+        existingTables: []
+      });
+      await assert.rejects(() => assertSafeRealMariaDbConnection(spyForbidden.connection), /is forbidden/i);
+      assert.equal(spyForbidden.writeQueries.length, 0);
+    }
+
+    for (const adminPriv of ["SUPER", "FILE", "PROCESS"]) {
+      const spyAdmin = createSpySafeConnection({
+        dbName: "salesdashboard_sec010_test",
+        currentUser: "'sec010_tester'@'127.0.0.1'",
+        grants: [
+          `GRANT ${adminPriv} ON *.* TO \`sec010_tester\`@\`127.0.0.1\``,
+          "GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`127.0.0.1`"
+        ],
+        existingTables: []
+      });
+      await assert.rejects(() => assertSafeRealMariaDbConnection(spyAdmin.connection), /global privileges \(\*\.\*\) beyond USAGE/i);
+      assert.equal(spyAdmin.writeQueries.length, 0);
+    }
+  });
+
+  it("15. SEC-010-R2 Least Privilege: rejects any global privilege beyond USAGE on *.* with zero writes", async () => {
+    for (const globalGrant of [
+      "GRANT SELECT ON *.* TO `sec010_tester`@`127.0.0.1`",
+      "GRANT USAGE, SELECT ON *.* TO `sec010_tester`@`127.0.0.1`",
+      "GRANT CREATE USER ON *.* TO `sec010_tester`@`127.0.0.1`"
+    ]) {
+      const spy = createSpySafeConnection({
+        dbName: "salesdashboard_sec010_test",
+        currentUser: "'sec010_tester'@'127.0.0.1'",
+        grants: [
+          globalGrant,
+          "GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`127.0.0.1`"
+        ],
+        existingTables: []
+      });
+      await assert.rejects(() => assertSafeRealMariaDbConnection(spy.connection), /global privileges \(\*\.\*\) beyond USAGE/i);
+      assert.equal(spy.writeQueries.length, 0);
+    }
+  });
+
+  it("16. SEC-010-R2 Least Privilege: rejects WITH GRANT OPTION on both *.* and test DB with zero writes", async () => {
+    const spyWithGrantDb = createSpySafeConnection({
+      dbName: "salesdashboard_sec010_test",
+      currentUser: "'sec010_tester'@'127.0.0.1'",
+      grants: [
+        "GRANT USAGE ON *.* TO `sec010_tester`@`127.0.0.1`",
+        "GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`127.0.0.1` WITH GRANT OPTION"
+      ],
+      existingTables: []
+    });
+    await assert.rejects(() => assertSafeRealMariaDbConnection(spyWithGrantDb.connection), /WITH GRANT OPTION forbidden/i);
+    assert.equal(spyWithGrantDb.writeQueries.length, 0);
+
+    const spyWithGrantGlobal = createSpySafeConnection({
+      dbName: "salesdashboard_sec010_test",
+      currentUser: "'sec010_tester'@'127.0.0.1'",
+      grants: [
+        "GRANT USAGE ON *.* TO `sec010_tester`@`127.0.0.1` WITH GRANT OPTION",
+        "GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`127.0.0.1`"
+      ],
+      existingTables: []
+    });
+    await assert.rejects(() => assertSafeRealMariaDbConnection(spyWithGrantGlobal.connection), /WITH GRANT OPTION forbidden/i);
+    assert.equal(spyWithGrantGlobal.writeQueries.length, 0);
+  });
+
+  it("17. SEC-010-R2 Least Privilege: rejects grants to any other database (salesdashboard, mysql, other_db) with zero writes", async () => {
+    for (const otherDb of ["salesdashboard", "mysql", "other_db", "salesdashboard%"]) {
+      const spyOtherDb = createSpySafeConnection({
+        dbName: "salesdashboard_sec010_test",
+        currentUser: "'sec010_tester'@'127.0.0.1'",
+        grants: [
+          "GRANT USAGE ON *.* TO `sec010_tester`@`127.0.0.1`",
+          "GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`127.0.0.1`",
+          `GRANT SELECT ON \`${otherDb}\`.* TO \`sec010_tester\`@\`127.0.0.1\``
+        ],
+        existingTables: []
+      });
+      await assert.rejects(() => assertSafeRealMariaDbConnection(spyOtherDb.connection), /non-test database/i);
+      assert.equal(spyOtherDb.writeQueries.length, 0);
+    }
+  });
+
+  it("18. SEC-010-R2 Fail Closed: unparseable, ambiguous, role, proxy, or table-level SHOW GRANTS output fails closed with zero writes", async () => {
+    const weirdGrants = [
+      "UNEXPECTED GARBAGE GRANT STRING",
+      "GRANT `sec010_admin_role` TO `sec010_tester`@`127.0.0.1`",
+      "GRANT PROXY ON ''@'%' TO `sec010_tester`@`127.0.0.1`",
+      "GRANT SELECT (id, username) ON `salesdashboard_sec010_test`.`app_users` TO `sec010_tester`@`127.0.0.1`",
+      "GRANT SELECT ON `salesdashboard_sec010_test`.`products` TO `sec010_tester`@`127.0.0.1`",
+      "GRANT SELECT ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`127.0.0.1` WITH SOME_ADMIN_FLAG",
+      ""
+    ];
+
+    for (const badGrant of weirdGrants) {
+      const spyWeird = createSpySafeConnection({
+        dbName: "salesdashboard_sec010_test",
+        currentUser: "'sec010_tester'@'127.0.0.1'",
+        grants: [
+          "GRANT USAGE ON *.* TO `sec010_tester`@`127.0.0.1`",
+          "GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX ON `salesdashboard_sec010_test`.* TO `sec010_tester`@`127.0.0.1`",
+          badGrant
+        ],
+        existingTables: []
+      });
+      await assert.rejects(() => assertSafeRealMariaDbConnection(spyWeird.connection), /fail-closed|empty SHOW GRANTS|Unexpected/i);
+      assert.equal(spyWeird.writeQueries.length, 0);
+    }
+  });
+
   const realHost = process.env.SEC010_TEST_MARIADB_HOST;
   const hasRealMariaDbHost = Boolean(realHost && realHost.trim().length > 0);
 
   it(
-    "9. Isolated real MariaDB verification (executes ONLY against empty dedicated 'salesdashboard_sec010_test' with limited non-root user; no DROP/DELETE)",
+    "19. Isolated real MariaDB verification (executes ONLY against empty dedicated 'salesdashboard_sec010_test' on allowlisted loopback host with minimal-privilege non-root user; no DROP/DELETE)",
     {
       skip: hasRealMariaDbHost
         ? false
         : "Real MariaDB server is not installed/configured in this environment (SEC010_TEST_MARIADB_HOST unset)"
     },
     async () => {
-      // Strictly validate config BEFORE creating any pool (independent of NODE_ENV / APP_ENV)
-      const safeCfg = assertSafeRealMariaDbConfig({
-        host: process.env.SEC010_TEST_MARIADB_HOST,
-        port: Number(process.env.SEC010_TEST_MARIADB_PORT) || 3306,
-        user: process.env.SEC010_TEST_MARIADB_USER,
-        password: process.env.SEC010_TEST_MARIADB_PASSWORD,
-        database: process.env.SEC010_TEST_MARIADB_DB
-      });
-
-      const testPool = mysql.createPool({
-        host: safeCfg.host,
-        port: safeCfg.port,
-        user: safeCfg.user,
-        password: safeCfg.password,
-        database: safeCfg.database,
-        waitForConnections: true,
-        connectionLimit: 5
-      });
+      // Strictly validate host, database, and user BEFORE creating any pool (independent of NODE_ENV / APP_ENV)
+      const testPool = createValidatedIsolatedMariaDbPool(
+        {
+          host: process.env.SEC010_TEST_MARIADB_HOST,
+          port: Number(process.env.SEC010_TEST_MARIADB_PORT) || 3306,
+          user: process.env.SEC010_TEST_MARIADB_USER,
+          password: process.env.SEC010_TEST_MARIADB_PASSWORD,
+          database: process.env.SEC010_TEST_MARIADB_DB
+        },
+        (safeCfg) =>
+          mysql.createPool({
+            host: safeCfg.host,
+            port: safeCfg.port,
+            user: safeCfg.user,
+            password: safeCfg.password,
+            database: safeCfg.database,
+            waitForConnections: true,
+            connectionLimit: 5
+          })
+      );
 
       try {
         // Verify selected DB, limited user privileges, and empty DB on live connection BEFORE any write
