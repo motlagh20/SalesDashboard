@@ -1,0 +1,5 @@
+{
+  "summary": "SEC-010 portable transfer ZIP archive containing strictly the 3 modified/created files (server/database.ts, tests/mariadb_seed_schema_sec010.test.ts, package.json) for MariaDB seed remediation & schema compatibility.",
+  "updatedAt": "2026-11-15T19:04:40.000000000Z",
+  "userFacing": true
+}

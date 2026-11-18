@@ -1,0 +1,5 @@
+{
+  "summary": "SEC-010-R1 portable transfer ZIP package (server/database.ts, tests/mariadb_seed_schema_sec010.test.ts, package.json, and MANIFEST.txt).",
+  "updatedAt": "2026-11-18T03:55:42.000000000Z",
+  "userFacing": true
+}

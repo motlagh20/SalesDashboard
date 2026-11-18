@@ -1,0 +1,28 @@
+SEC-010 TRANSFER PACKAGE MANIFEST
+Repository: https://github.com/motlagh20/SalesDashboard
+Target Branch: google-ai-studio-updated
+Generated At (UTC): 2026-11-15T19:04:40Z
+Archive File: sec010_transfer_package.zip
+Archive Size (bytes): 32209
+Archive SHA-256: 215ea65eb47584c40aa56779e957249554663b28af37c0e2c4ff6c56433a7038
+
+FILES (3):
+1. server/database.ts
+   Size (bytes): 117276
+   Compressed Size (bytes): 25060
+   SHA-256: 5d513a0a55e5acd79c5e780efefbf51b4efa9bc7b455094cad89ed8f59f60881
+
+2. tests/mariadb_seed_schema_sec010.test.ts
+   Size (bytes): 21974
+   Compressed Size (bytes): 5812
+   SHA-256: 62e011695b6e7b34fe5e24a4f38a456a7e8c6e07fe30bcd8fde56a6af85f4c5f
+
+3. package.json
+   Size (bytes): 2631
+   Compressed Size (bytes): 947
+   SHA-256: 37cab9a306b536c3dfb7d266e1c30d42c1e60f82d1d7ef567ccdbf751fee8ae0
+
+EXCLUDED FROM ARCHIVE:
+- .env / secrets / encryption keys / connection strings
+- server/salesdashboard.json / runtime data / logs
+- report / metadata files

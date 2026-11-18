@@ -1,0 +1,5 @@
+{
+  "summary":  "SEC-010 transfer package manifest listing exact file sizes and SHA-256 checksums for sec010_transfer_package.zip (server/database.ts, tests/mariadb_seed_schema_sec010.test.ts, package.json).",
+  "updatedAt":  "2026-11-15T19:04:47.085954148Z",
+  "userFacing":  true
+}

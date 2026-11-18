@@ -2401,74 +2401,131 @@ export async function seedDatabaseIfEmpty(db: mysql.Pool) {
     console.warn("🚨 [Security Guard] seedDatabaseIfEmpty called in production: execution aborted.");
     return;
   }
+
+  const runInTransaction = async (fn: (connection: any) => Promise<void>) => {
+    if (typeof (db as any).getConnection === "function") {
+      const connection = await (db as any).getConnection();
+      try {
+        if (typeof connection.beginTransaction === "function") {
+          await connection.beginTransaction();
+        }
+        await fn(connection);
+        if (typeof connection.commit === "function") {
+          await connection.commit();
+        }
+      } catch (txErr) {
+        if (typeof connection.rollback === "function") {
+          try {
+            await connection.rollback();
+          } catch {}
+        }
+        throw txErr;
+      } finally {
+        if (typeof connection.release === "function") {
+          connection.release();
+        }
+      }
+    } else {
+      await fn(db);
+    }
+  };
+
   try {
     const getCount = async (tableName: string): Promise<number> => {
       const [rows] = (await db.query(`SELECT COUNT(*) as count FROM ${tableName}`)) as any[];
       return rows && rows[0]?.count !== undefined ? Number(rows[0].count) : 0;
     };
 
-    const [prodCount, agentCount, scCount, userCount] = await Promise.all([
+    const [prodCount, agentCount, scCount, driverCount, userCount] = await Promise.all([
       getCount("products"),
       getCount("agents"),
       getCount("shipping_companies"),
+      getCount("permanent_drivers"),
       getCount("app_users")
     ]);
 
-    if (prodCount === 0 || agentCount === 0 || scCount === 0 || userCount === 0) {
+    if (prodCount === 0 || agentCount === 0 || scCount === 0 || driverCount === 0 || userCount === 0) {
       console.log("🌱 [Seed] Seeding default database entities inside transaction...");
-      if (typeof (db as any).getConnection === "function") {
-        const connection = await (db as any).getConnection();
-        try {
-          if (typeof connection.beginTransaction === "function") {
-            await connection.beginTransaction();
-          }
-          await seedDatabaseWithConnection(connection);
-          if (typeof connection.commit === "function") {
-            await connection.commit();
-          }
-        } catch (txErr) {
-          if (typeof connection.rollback === "function") {
-            try {
-              await connection.rollback();
-            } catch {}
-          }
-          throw txErr;
-        } finally {
-          if (typeof connection.release === "function") {
-            connection.release();
-          }
-        }
-      } else {
-        await seedDatabaseWithConnection(db);
-      }
+      await runInTransaction(async (connection) => {
+        await seedDatabaseWithConnection(connection);
+      });
     } else {
-      // Ensure essential system/operational accounts exist idempotently even if app_users already had rows
-      const requiredAccounts: Array<{ whereSql: string; row: any[] }> = [
+      // Ensure essential system/operational accounts exist idempotently inside a single transaction on a single connection
+      const requiredAccounts: Array<{
+        id: string;
+        username: string;
+        role: string;
+        row: [string, string, string, string, string, null, null, number, string];
+      }> = [
         {
-          whereSql: "username = 'admin' OR role = 'SYSTEM_ADMIN' OR phoneNumber = '09120000000'",
-          row: ['usr-0', 'admin', 'ادمین ارشد نرم‌افزار', '09120000000', 'SYSTEM_ADMIN', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
+          id: "usr-0",
+          username: "admin",
+          role: "SYSTEM_ADMIN",
+          row: ["usr-0", "admin", "ادمین ارشد نرم‌افزار", "09120000000", "SYSTEM_ADMIN", null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
         },
         {
-          whereSql: "username = 'warehouse' OR role = 'PRODUCT_WAREHOUSE' OR phoneNumber = '09110000008'",
-          row: ['usr-8', 'warehouse', 'مسئول انبار محصول (بارگیری و صدور حواله)', '09110000008', 'PRODUCT_WAREHOUSE', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
+          id: "usr-8",
+          username: "warehouse",
+          role: "PRODUCT_WAREHOUSE",
+          row: ["usr-8", "warehouse", "مسئول انبار محصول (بارگیری و صدور حواله)", "09110000008", "PRODUCT_WAREHOUSE", null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
         },
         {
-          whereSql: "username = 'security_gate' OR role = 'SECURITY_GATE' OR phoneNumber = '09110000009'",
-          row: ['usr-9', 'security_gate', 'افسر انتظامات و حراست گیت خروج', '09110000009', 'SECURITY_GATE', null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
+          id: "usr-9",
+          username: "security_gate",
+          role: "SECURITY_GATE",
+          row: ["usr-9", "security_gate", "افسر انتظامات و حراست گیت خروج", "09110000009", "SECURITY_GATE", null, null, 1, DEFAULT_PASSWORD_BCRYPT_HASH]
         }
       ];
 
-      for (const acc of requiredAccounts) {
-        const [rows] = (await db.query(`SELECT COUNT(*) as count FROM app_users WHERE ${acc.whereSql}`)) as any[];
-        const count = rows && rows[0]?.count !== undefined ? Number(rows[0].count) : 0;
-        if (count === 0) {
-          console.log(`🛡️ [Seed] Auto-inserting missing required user '${acc.row[1]}' (${acc.row[4]}) in SQL database...`);
-          await db.query(
-            "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
-            acc.row
-          );
+      await runInTransaction(async (connection) => {
+        for (const acc of requiredAccounts) {
+          const [existingRows] = (await connection.query(
+            "SELECT id, username, role, phoneNumber FROM app_users WHERE id = ? OR username = ?",
+            [acc.id, acc.username]
+          )) as any[];
+
+          if (Array.isArray(existingRows) && existingRows.length > 1) {
+            throw new Error(
+              `Incompatible user recovery conflict for '${acc.id}' (${acc.username}/${acc.role}): multiple conflicting records match id or username.`
+            );
+          }
+
+          if (Array.isArray(existingRows) && existingRows.length === 1) {
+            const existing = existingRows[0];
+            if (existing.id === acc.id && existing.username === acc.username && existing.role === acc.role) {
+              continue; // Compatible account already exists; preserve existing data untouched
+            }
+            throw new Error(
+              `Incompatible user recovery conflict for '${acc.id}' (${acc.username}/${acc.role}): found conflicting record (id='${existing.id}', username='${existing.username}', role='${existing.role}').`
+            );
+          }
+
+          console.log(`🛡️ [Seed] Auto-inserting missing required user '${acc.username}' (${acc.role}) in SQL database...`);
+          try {
+            await connection.query(
+              "INSERT INTO app_users (id, username, fullName, phoneNumber, role, agentCode, shippingCompanyId, isEnabled, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
+              acc.row
+            );
+          } catch (insertErr: any) {
+            if (insertErr?.code !== "ER_DUP_ENTRY") {
+              throw insertErr;
+            }
+          }
+
+          // Strictly verify expected user exists with matching id, username, and role after insert or unique-key collision
+          const [verifiedRows] = (await connection.query(
+            "SELECT id, username, role FROM app_users WHERE id = ? OR username = ?",
+            [acc.id, acc.username]
+          )) as any[];
+
+          const verified = Array.isArray(verifiedRows) && verifiedRows.length === 1 ? verifiedRows[0] : null;
+          if (!verified || verified.id !== acc.id || verified.username !== acc.username || verified.role !== acc.role) {
+            throw new Error(
+              `Required user verification failed for '${acc.id}' (${acc.username}/${acc.role}) after insert or unique key collision (found: ${JSON.stringify(verifiedRows || [])}).`
+            );
+          }
         }
-      }
+      });
     }
 
     console.log("🌱 [Seed] Database tables successfully synchronized!");
